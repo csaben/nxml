@@ -1,0 +1,169 @@
+# PPO training config for nxrl — reproduces legacy run_062 ("reward shaping v2").
+#
+# Source-of-truth: rl-experiments/world-model/checkpoints/rl/run_062/config.yaml.
+# Differences from the package preset at nxml_games/pokemon_za/presets/escape_stuck.yaml:
+#   - target_ui template_path → data/detectors/pokemon-move-selection.PNG (was bottom-right-ui.PNG)
+#   - png_similarity_penalty.paths → migrated copies in data/detectors/miss-captures/
+#   - seed npz_path's → migrated copies in data/roundtrip/latents/
+#
+# To run:
+#   uv run nxrl-train configs/ppo/escape_seeds.yaml
+
+policy:
+  name: ppo_policy_v1
+  config:
+    base_policy_name: bc_transformer_v1
+    base_policy_config:
+      sequence_length: 300
+      hidden_size: 512
+      num_layers: 4
+      num_heads: 8
+      dropout: 0.3
+    action_std_init: 0.3
+
+algorithm:
+  name: ppo
+  config:
+    lr: 7.5e-5
+    gamma: 0.995
+    gae_lambda: 0.97
+    clip_epsilon: 0.1
+    vf_coef: 0.5
+    ent_coef: 0.01
+    bc_reg_coef: 1.0
+    max_grad_norm: 0.5
+    ppo_epochs: 2
+    minibatch_size: 64
+    rollouts_per_update: 10
+    total_updates: 1000
+    flow_steps: 5
+    cfg_scale: 1.0
+    # +8.0 bias on Y/X/B/A in the raw 22-dim button head (logits 18-21,
+    # action vector 22-25). Keeps attack presses non-zero throughout PPO.
+    button_logit_bias_indices: [18, 19, 20, 21]
+    button_logit_bias_value: 8.0
+    project_name: nxrl-ppo-escape-seeds
+
+world_model:
+  ckpt_path: checkpoints/wm/migrated/run_021_best.pt
+
+bc_init:
+  ckpt_path: checkpoints/bc/migrated/bc_transformer_v1_seq300_run001.pt
+
+rollout:
+  frames: 150          # 5s @ 30fps
+  goal_offset: 30
+
+# 12 battle-start seeds. Latent .npz files live in data/roundtrip/latents/.
+seeds:
+  - {npz_path: data/roundtrip/latents/20260406_151519_11-15am_part1.npz, start_frame: 0}
+  - {npz_path: data/roundtrip/latents/20260406_145009_10-50am_part0.npz, start_frame: 0}
+  - {npz_path: data/roundtrip/latents/20260406_151519_11-15am_part0.npz, start_frame: 0}
+  - {npz_path: data/roundtrip/latents/20260222_232608_6-26pm_part0.npz,  start_frame: 45}
+  - {npz_path: data/roundtrip/latents/20260406_151519_11-15am_part0.npz, start_frame: 39}
+  - {npz_path: data/roundtrip/latents/20260221_051425_12-14am_part0.npz, start_frame: 636}
+  - {npz_path: data/roundtrip/latents/20260406_151519_11-15am_part2.npz, start_frame: 945}
+  - {npz_path: data/roundtrip/latents/20260406_143027_10-30am_part1.npz, start_frame: 21}
+  - {npz_path: data/roundtrip/latents/20260406_144545_10-45am_part1.npz, start_frame: 21}
+  - {npz_path: data/roundtrip/latents/20260406_144545_10-45am_part1.npz, start_frame: 691}
+  - {npz_path: data/roundtrip/latents/20260406_145009_10-50am_part0.npz, start_frame: 691}
+  - {npz_path: data/roundtrip/latents/20260221_051841_12-18am_part1.npz, start_frame: 1184}
+
+# 13-component pokemon_za reward (4 active components match run_062's enabled set):
+# target_ui_detection, unique_acquisition, locked_attack, png_similarity_penalty,
+# sliding_stagnation. Other components left at None (escape, stuck_turn,
+# progress_vector, etc. were dropped going from run_062 vs earlier configs).
+reward:
+  callable: nxml_games.pokemon_za:make_reward_fn
+  kwargs:
+    vae_path: stabilityai/sd-vae-ft-mse
+    config:
+      reward_type: seed-based
+      start_frame_idx: 0
+      goal_frame_idx: -1
+
+      target_ui_detection:
+        template_path: data/detectors/pokemon-move-selection.PNG
+        score_threshold: 0.15
+        sat_threshold: 68.0
+        min_consecutive_hits: 5
+        reward_per_step: 0.2
+        streak_ramp_scale: 0.05
+
+      unique_acquisition:
+        bonus_per_target: 3.0
+        chain_multiplier: 1.0
+        min_latent_move: 0.20
+        min_unlocked_frames: 15
+
+      locked_attack:
+        button_indices: [22, 23, 24, 25]  # Y, X, B, A
+        reward_per_step: 0.2
+        require_min_streak: 1
+
+      # run_062 used cos_threshold=0.95 + reward_per_step=-0.3 with a 30-frame
+      # window and min_consecutive_hits=1. Penalizes ANY frame whose latent is
+      # within 0.05 cosine of the latent 1s ago (i.e. truly stuck).
+      sliding_stagnation:
+        window: 30
+        cos_threshold: 0.95
+        min_consecutive_hits: 1
+        reward_per_step: -0.3
+        grace_period: 30
+
+      png_similarity_penalty:
+        cosine_threshold: 0.85
+        min_consecutive_hits: 10
+        penalty_per_step: -0.5
+        paths:
+          - data/detectors/miss-captures/20260410_153320_miss_score0p007_sat98.png
+          - data/detectors/miss-captures/20260410_153322_miss_score-0p040_sat102.png
+          - data/detectors/miss-captures/20260410_153325_miss_score0p026_sat104.png
+          - data/detectors/miss-captures/20260410_153333_miss_score0p065_sat118.png
+          - data/detectors/miss-captures/20260410_153216_miss_score-0p080_sat52.png
+          - data/detectors/miss-captures/20260410_153218_miss_score0p127_sat109.png
+          - data/detectors/miss-captures/20260410_153221_miss_score0p194_sat139.png
+          - data/detectors/miss-captures/20260410_152927_miss_score0p059_sat79.png
+          - data/detectors/miss-captures/20260410_153034_miss_score0p110_sat77.png
+          - data/detectors/miss-captures/20260410_153035_miss_score0p048_sat79.png
+          - data/detectors/miss-captures/20260410_153036_miss_score0p007_sat71.png
+          - data/detectors/miss-captures/20260410_153037_miss_score0p043_sat74.png
+          - data/detectors/miss-captures/20260410_152822_miss_score0p033_sat54.png
+          - data/detectors/miss-captures/20260410_152304_miss_score-0p003_sat68.png
+          - data/detectors/miss-captures/20260410_143407_miss_score-0p051_sat96.png
+          - data/detectors/miss-captures/20260410_143538_miss_score-0p059_sat95.png
+          - data/detectors/miss-captures/20260410_143545_miss_score0p158_sat148.png
+          - data/detectors/miss-captures/20260410_143552_miss_score0p020_sat146.png
+          - data/detectors/miss-captures/20260410_143600_miss_score-0p014_sat145.png
+          - data/detectors/miss-captures/20260410_142651_miss_score0p155_sat94.png
+          - data/detectors/miss-captures/20260410_142321_miss_score0p101_sat112.png
+          - data/detectors/miss-captures/20260410_134432_miss_score0p148_sat105.png
+          - data/detectors/miss-captures/20260410_134446_miss_score-0p031_sat133.png
+          - data/detectors/miss-captures/20260410_134451_miss_score0p113_sat109.png
+          - data/detectors/miss-captures/20260410_134508_miss_score-0p097_sat65.png
+          - data/detectors/miss-captures/20260410_140417_miss_score-0p018_sat97.png
+          - data/detectors/miss-captures/20260410_140507_miss_score0p060_sat133.png
+          - data/detectors/miss-captures/20260410_140514_miss_score-0p030_sat127.png
+          - data/detectors/miss-captures/20260410_140542_miss_score-0p033_sat108.png
+          - data/detectors/miss-captures/20260410_140612_miss_score-0p076_sat97.png
+          - data/detectors/miss-captures/20260410_135319_miss_score-0p052_sat132.png
+          - data/detectors/miss-captures/20260410_135324_miss_score0p064_sat80.png
+          - data/detectors/miss-captures/20260410_135328_miss_score0p041_sat84.png
+          - data/detectors/miss-captures/20260410_135335_miss_score0p000_sat123.png
+          - data/detectors/miss-captures/20260410_135341_miss_score0p000_sat186.png
+          - data/detectors/miss-captures/20260410_135348_miss_score-0p038_sat113.png
+          - data/detectors/miss-captures/20260410_135353_miss_score0p071_sat111.png
+          - data/detectors/miss-captures/20260410_135358_miss_score0p119_sat90.png
+          - data/detectors/miss-captures/20260410_135403_miss_score0p104_sat128.png
+          - data/detectors/miss-captures/20260410_135410_miss_score-0p035_sat151.png
+          - data/detectors/miss-captures/20260410_135419_miss_score-0p074_sat191.png
+          - data/detectors/miss-captures/20260410_135429_miss_score-0p007_sat154.png
+          - data/detectors/miss-captures/20260410_135437_miss_score0p000_sat173.png
+          - data/detectors/miss-captures/20260410_135448_miss_score0p143_sat160.png
+          - data/detectors/miss-captures/20260410_135454_miss_score0p000_sat234.png
+          - data/detectors/miss-captures/20260410_135512_miss_score0p115_sat145.png
+
+run:
+  checkpoint_frequency: 50
+  snapshot_frequency: 50
+  # resume_from: checkpoints/ppo/run_xxx/latest.pt

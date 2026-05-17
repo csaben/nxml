@@ -1,0 +1,53 @@
+# CUDA_VISIBLE_DEVICES=0,1 uv run nxwm train configs/wm/wm_dit_v1_tiny.yaml --world-size 2
+architecture:
+  name: dit_v1
+  config:
+    embed_dim: 64
+    depth: 2
+    num_heads: 4
+    seq_len: 10
+    # patch_size: 2
+    # latent_channels: 4
+    # latent_height: 16
+    # latent_width: 32
+    # action_dims: 26
+
+training:
+  lr: 3.0e-5
+  cfg_dropout_prob: 0.1
+  noise_aug_prob: 0.0
+  unroll_steps: 4
+  unroll_min: 1
+  unroll_ramp_epochs: 1
+  tbptt_window: 2
+  precision: bf16
+  compile_model: false
+  grad_clip: 1.0
+  project_name: nxwm-smoke
+  # weight_decay: 0.01
+  # noise_aug_scale: 0.25
+  # lpips_weight: 0.0          # >0 also requires VAE + lpips_fn at construction
+  # lpips_subset_size: 4
+  # run_dir: checkpoints
+  # resume_from: null          # path to a self-describing .pt to resume from
+
+  # Eval-rollout GIFs logged to wandb under eval/rollout (and saved to {run_dir}/rollouts/).
+  # Set every_n_epochs > 0 to enable. Tiny values here keep the smoke run fast.
+  eval_gif_every_n_epochs: 1
+  eval_gif_mode: repeat_last   # repeat_last | from_mmap
+  eval_gif_frames: 16
+  eval_gif_flow_steps: 4
+  eval_gif_cfg_scale: 1.0
+  eval_gif_episode_idx: 0
+  eval_gif_start_frame: 0
+
+data:
+  data_paths:
+    - tests/fixtures/tiny_episode.npz
+  sequence_length: 10
+  goal_offset: 30
+  batch_size_per_gpu: 2
+  num_workers: 0
+  epochs: 2
+  # val_files:                 # basenames pulled out of data_paths as val set
+  #   - some_episode.npz

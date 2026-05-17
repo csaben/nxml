@@ -1,0 +1,52 @@
+[project]
+name = "nxrl"
+version = "0.1.0"
+description = "Behavior cloning + reinforcement learning training/inference for Nintendo Switch policies"
+requires-python = ">=3.14"
+authors = [{ name = "Clark Saben" }]
+license = { text = "MIT" }
+readme = "README.md"
+dependencies = [
+    "nxml-core",
+    "nx-packets",
+    "torch>=2.10",
+    "numpy>=1.26",
+    "pyyaml>=6",
+    "click>=8.1",
+    "tqdm>=4.66",
+    "huggingface-hub>=0.24",
+]
+
+[project.optional-dependencies]
+training = [
+    "wandb>=0.18",
+    "python-dotenv>=1",
+    # Required by wandb.Video when passing raw ndarray frames (browser-
+    # friendly H.264 encoding — cv2's mp4v container won't play inline in
+    # wandb's UI). Pulls in imageio-ffmpeg transitively.
+    "moviepy>=2",
+]
+
+[project.urls]
+Repository = "https://github.com/csaben/nxml"
+Issues = "https://github.com/csaben/nxml/issues"
+
+[project.scripts]
+nxrl = "nxrl.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nxrl"]
+
+[tool.uv.sources]
+nxml-core = { workspace = true }
+nx-packets = { workspace = true }
+torch = [{ index = "pytorch-cu128" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

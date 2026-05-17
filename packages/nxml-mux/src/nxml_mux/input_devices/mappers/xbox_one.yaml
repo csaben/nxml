@@ -1,0 +1,56 @@
+# Xbox One / Xbox 360 / common XInput-compatible pads on Linux evdev.
+#
+# Switch face buttons differ from Xbox: the bottom button on a Switch pad is
+# `B`, not `A`. We follow Switch labels here — pressing the south button on
+# an Xbox pad emits the action vector's `B` index (so `nxbt-orchestrator`
+# sends what a Switch user would call "B").
+id: xbox_one
+device_match:
+  name_regex: "(Xbox|X-Box|XInput).*"
+buttons:
+  BTN_SOUTH: B
+  BTN_EAST: A
+  BTN_WEST: Y
+  BTN_NORTH: X
+  BTN_TL: L
+  BTN_TR: R
+  BTN_SELECT: MINUS
+  BTN_START: PLUS
+  BTN_MODE: HOME
+  BTN_THUMBL: L_STICK_PRESSED
+  BTN_THUMBR: R_STICK_PRESSED
+axes:
+  ABS_X:
+    kind: stick
+    target: L_STICK_X
+    deadzone: 0.1
+    invert: false
+  ABS_Y:
+    kind: stick
+    target: L_STICK_Y
+    deadzone: 0.1
+    invert: true        # evdev Y grows downward; switch convention is up-positive
+  ABS_RX:
+    kind: stick
+    target: R_STICK_X
+    deadzone: 0.1
+    invert: false
+  ABS_RY:
+    kind: stick
+    target: R_STICK_Y
+    deadzone: 0.1
+    invert: true
+  ABS_Z:
+    kind: trigger
+    target: ZL
+    threshold: 0.25
+  ABS_RZ:
+    kind: trigger
+    target: ZR
+    threshold: 0.25
+  ABS_HAT0X:
+    kind: hat_pair
+    targets: [DPAD_LEFT, DPAD_RIGHT]
+  ABS_HAT0Y:
+    kind: hat_pair
+    targets: [DPAD_UP, DPAD_DOWN]

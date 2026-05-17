@@ -1,0 +1,39 @@
+# BC training config — mirror of legacy
+# rl-experiments/behavior-cloning-v2/config/seq_300/v3ft_escapes.yaml so loss
+# curves are directly comparable.
+#
+# Edit data.data_paths / data.val_files to point at your encoded latents
+# (output of `nxwm encode`).
+
+policy:
+  name: bc_transformer_v1
+  config:
+    sequence_length: 300
+    hidden_size: 512
+    num_layers: 4
+    num_heads: 8
+    dropout: 0.3
+
+algorithm:
+  name: bc
+  config:
+    lr: 1.0e-4
+    weight_decay: 0.05
+    button_loss_weight: 1.0
+    action_weight: 5.0
+    stick_deadzone: 0.1
+    grad_clip: 1.0
+    epochs: 500
+    project_name: nxrl-bc
+
+data:
+  data_paths:
+    - data/roundtrip/latents          # default; override per run
+  val_files:
+    - 20260222_232608_6-26pm_part0.npz
+  batch_size_per_gpu: 8
+  num_workers: 4
+  align_starts: true
+
+run:
+  # resume_from: checkpoints/run_001/best.pt

@@ -1,0 +1,193 @@
+/* nxwm-ui — portrait 1080x1920 layout, gamepad-driven. */
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: #0c0d10; color: #e6e6e6;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.viewport {
+  width: 1080px;
+  max-width: 100vw;
+  margin: 0 auto;
+  display: flex; flex-direction: column;
+  background: #0c0d10;
+}
+
+@media (max-width: 1100px) {
+  /* Match the page width to the viewport on smaller screens (phones, narrow
+     desktop windows). The image scales naturally via width:100%. */
+  .viewport { width: 100vw; }
+}
+
+/* ------------------------------------------------------------------
+   Frame pane — frames are 256x128 (training res). We display them in a
+   strict 2:1 area sized to the page width (1080 × 540 at full size),
+   anchored to the top so the frame is the first thing on screen.
+   ------------------------------------------------------------------ */
+.frame-pane {
+  position: relative;
+  width: 100%; aspect-ratio: 2 / 1;
+  background: #000;
+  border-bottom: 1px solid #1f2025;
+  overflow: hidden;
+}
+#frame {
+  width: 100%; height: 100%;
+  display: block;
+  object-fit: contain;
+  image-rendering: pixelated;  /* show the model's actual fidelity, no bilinear smoothing */
+}
+#frame:not([src]) { display: none; }
+#frame-empty {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1.4rem; color: #888; text-align: center;
+}
+#frame[src] ~ #frame-empty { display: none; }
+
+#fullscreen-btn {
+  position: absolute; top: 0.6rem; right: 0.6rem;
+  z-index: 5;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.6rem; height: 2.6rem;
+  background: rgba(0, 0, 0, 0.55);
+  color: #e6e6e6;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0.4rem;
+  cursor: pointer;
+  opacity: 0.4;
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+#fullscreen-btn:hover { opacity: 1; background: rgba(0, 0, 0, 0.75); }
+
+/* When the pane is fullscreened, fill the screen and keep the frame letter-boxed
+   inside without the layout's aspect-ratio constraint forcing a 2:1 box. */
+.frame-pane:fullscreen,
+.frame-pane:-webkit-full-screen {
+  width: 100vw; height: 100vh;
+  aspect-ratio: auto;
+  background: #000;
+  border: none;
+}
+#frame-empty .big { font-size: 1.8rem; margin: 0; }
+#frame-empty .small { font-size: 1.2rem; margin: 0; color: #666; }
+
+/* ------------------------------------------------------------------
+   HUD — controls panel under the frame
+   ------------------------------------------------------------------ */
+.hud {
+  padding: 1.2rem 1.6rem;
+  display: flex; flex-direction: column; gap: 0.9rem;
+}
+
+.hud .row {
+  display: flex; align-items: center; gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.hud label { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 1.1rem; color: #aaa; }
+.hud .toggle { font-size: 1rem; }
+
+.hud button {
+  background: #21232a; color: #e6e6e6; border: 1px solid #34363d;
+  padding: 0.55rem 1.2rem; border-radius: 0.4rem; cursor: pointer;
+  font-size: 1.1rem;
+}
+.hud button:hover { background: #2a2c33; }
+.hud button.playing {
+  background: #2d5a2d; border-color: #4a7a4a;
+}
+
+.hud input[type=text],
+.hud input[type=number],
+.hud select {
+  background: #18191e; color: #e6e6e6; border: 1px solid #2a2b30;
+  padding: 0.5rem 0.6rem; border-radius: 0.35rem;
+  font-size: 1.05rem;
+}
+.hud input[type=text] { flex: 1 1 auto; min-width: 14rem; }
+.hud input[type=number] { width: 6rem; }
+.hud select { flex: 1 1 auto; min-width: 12rem; }
+
+.status {
+  flex: 1 1 auto;
+  padding: 0.4rem 0.8rem; border-radius: 0.3rem;
+  background: #18191e; color: #aaa; font-size: 1rem;
+  min-height: 2.2rem; display: flex; align-items: center;
+}
+.status.error { background: #3a1818; color: #ffb4b4; }
+.status.ok    { background: #1a3a1a; color: #b4ffb4; }
+
+.gamepad-status {
+  flex: 1 1 auto;
+  font-size: 0.95rem; color: #888; font-family: monospace;
+  background: #15161b; padding: 0.45rem 0.8rem; border-radius: 0.3rem;
+  border: 1px solid #1f2025;
+}
+.gamepad-status.connected { color: #b4ffb4; border-color: #2d5a2d; }
+
+.info-panel {
+  background: #15161b; border: 1px solid #1f2025; border-radius: 0.4rem;
+  padding: 0.5rem 0.8rem;
+}
+.info-panel summary { cursor: pointer; font-weight: 600; padding: 0.3rem 0; user-select: none; }
+.info-panel pre {
+  margin: 0.4rem 0 0 0; max-height: 22rem; overflow: auto;
+  background: #0c0d10; padding: 0.6rem; border-radius: 0.3rem;
+  font-size: 0.85rem;
+}
+
+kbd {
+  background: #21232a; border: 1px solid #34363d; border-radius: 0.25rem;
+  padding: 0.1rem 0.4rem; font-family: monospace; font-size: 0.95em;
+}
+
+/* ---------- detector panel ---------- */
+
+.detector-panel {
+  background: #15161b; border: 1px solid #1f2025; border-radius: 0.4rem;
+  padding: 0.5rem 0.8rem;
+}
+.detector-panel summary {
+  cursor: pointer; font-weight: 600; padding: 0.3rem 0; user-select: none;
+}
+.detector-panel .muted { color: #888; font-weight: 400; font-family: monospace; font-size: 0.9rem; }
+
+.detector-readout {
+  display: flex; align-items: center; gap: 0.6rem;
+  margin: 0.4rem 0 0.6rem;
+  font-family: monospace; font-size: 0.95rem;
+}
+.detector-readout .readout-line { flex: 1 1 auto; color: #ccc; }
+.detector-readout button {
+  background: #21232a; color: #e6e6e6; border: 1px solid #34363d;
+  border-radius: 0.3rem; padding: 0.3rem 0.6rem; cursor: pointer; font-size: 0.85rem;
+}
+.detector-readout button:hover { background: #2a2c34; }
+
+.lamp {
+  width: 0.9rem; height: 0.9rem; border-radius: 50%;
+  background: #444; box-shadow: inset 0 0 4px rgba(0, 0, 0, 0.5);
+  flex: 0 0 auto;
+}
+.lamp[data-detected="true"]  { background: #5cff7a; box-shadow: 0 0 6px #5cff7a; }
+.lamp[data-detected="false"] { background: #444; }
+
+#detector-sliders {
+  display: grid; grid-template-columns: 9rem 1fr 4rem; gap: 0.4rem 0.6rem;
+  align-items: center; margin: 0.5rem 0;
+}
+#detector-sliders label { font-family: monospace; font-size: 0.9rem; color: #ccc; }
+#detector-sliders input[type=range] { width: 100%; }
+#detector-sliders .value-cell {
+  font-family: monospace; font-size: 0.85rem; color: #b4ffb4; text-align: right;
+}
+
+#detector-debug {
+  display: block; margin: 0.4rem 0 0; max-width: 100%;
+  background: #0c0d10; border-radius: 0.3rem;
+  image-rendering: pixelated;
+}
+#detector-debug:not([src]) { display: none; }

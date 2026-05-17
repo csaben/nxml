@@ -1,0 +1,64 @@
+# Train the dit_v1 world model on the public ZA latents dataset.
+#
+# Setup (one-time):
+#   hf download arelius/nxml-pokemon-legends-za-latents \
+#       --repo-type dataset --local-dir ./za-latents
+#   uv run --with click --with pandas --with pyarrow python \
+#       tools/latents_parquet_to_npz.py \
+#       --parquet ./za-latents/data/chunk-000.parquet \
+#       --meta    ./za-latents/meta/episodes.parquet \
+#       --out     ./data/latents
+#
+# Run (single GPU):
+#   uv run nxwm train configs/wm/wm_dit_v1_za.yaml
+#
+# Multi-GPU:
+#   CUDA_VISIBLE_DEVICES=0,1 uv run nxwm train \
+#       configs/wm/wm_dit_v1_za.yaml --world-size 2
+#
+# Architecture knobs below are a conservative starting point; bump
+# embed_dim / depth / num_heads (and batch_size_per_gpu / epochs)
+# for serious runs.
+
+architecture:
+  name: dit_v1
+  config:
+    embed_dim: 256
+    depth: 6
+    num_heads: 8
+    seq_len: 10
+
+training:
+  lr: 3.0e-5
+  cfg_dropout_prob: 0.1
+  noise_aug_prob: 0.1
+  noise_aug_scale: 0.25
+  unroll_steps: 8
+  unroll_min: 1
+  unroll_ramp_epochs: 3
+  tbptt_window: 4
+  precision: bf16
+  compile_model: false
+  grad_clip: 1.0
+  project_name: nxwm-pokemon-za
+
+  # Eval-rollout GIFs logged to wandb under eval/rollout (and saved to
+  # {run_dir}/rollouts/). Set every_n_epochs > 0 to enable.
+  eval_gif_every_n_epochs: 1
+  eval_gif_mode: repeat_last
+  eval_gif_frames: 32
+  eval_gif_flow_steps: 4
+  eval_gif_cfg_scale: 1.0
+  eval_gif_episode_idx: 0
+  eval_gif_start_frame: 0
+
+data:
+  data_paths:
+    - ./data/latents
+  sequence_length: 10
+  goal_offset: 30
+  batch_size_per_gpu: 4
+  num_workers: 4
+  epochs: 50
+  # val_files:                 # basenames pulled out of data_paths as val set
+  #   - some-episode.npz

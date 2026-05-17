@@ -1,0 +1,27 @@
+[project]
+name = "nx-macros"
+version = "0.1.0"
+description = "Record and replay 26-dim Switch action macros across the nxml ecosystem"
+requires-python = ">=3.14"
+authors = [{ name = "Clark Saben" }]
+license = { text = "MIT" }
+readme = "README.md"
+dependencies = [
+    "numpy>=1.26",
+    "pydantic>=2",
+    "nx-packets",
+]
+
+[project.urls]
+Repository = "https://github.com/csaben/nxml"
+Issues = "https://github.com/csaben/nxml/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nx_macros"]
+
+[tool.uv.sources]
+nx-packets = { workspace = true }

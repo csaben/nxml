@@ -1,0 +1,17 @@
+[Unit]
+Description=nxbt-orchestrator (Bluetooth controller server for nxml)
+After=bluetooth.service network.target
+Requires=bluetooth.service
+
+[Service]
+Type=simple
+# nxbt requires root to open the BlueZ HCI socket.
+User=root
+ExecStart=/usr/local/bin/nxbt-orchestrator serve --host 127.0.0.1 --port 7777
+Restart=on-failure
+RestartSec=2
+# Bluetooth pairing can take several seconds on a cold boot.
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

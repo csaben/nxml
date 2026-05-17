@@ -1,0 +1,882 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>nxml-coplay</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0;
+    background: #111;
+    color: #ddd;
+    font: 14px/1.4 system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+  }
+  header { padding: 8px 12px; width: 100%; box-sizing: border-box; }
+  h1 { font-size: 14px; margin: 0; opacity: 0.75; }
+  #stream {
+    width: 1920px;
+    height: 1080px;
+    max-width: 100%;
+    max-height: 85vh;
+    object-fit: contain;
+    background: #000;
+    border: 1px solid #222;
+  }
+  #controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 12px;
+    width: 100%;
+    max-width: 960px;
+    box-sizing: border-box;
+  }
+  #recordBtn {
+    appearance: none;
+    border: 1px solid #444;
+    background: #222;
+    color: #ddd;
+    padding: 6px 14px;
+    border-radius: 4px;
+    font: inherit;
+    cursor: pointer;
+  }
+  #recordBtn:hover, #fullscreenBtn:hover { background: #2a2a2a; }
+  #recordBtn[disabled] { opacity: 0.5; cursor: not-allowed; }
+  #recordBtn.recording {
+    background: #5a1d1d;
+    border-color: #a33;
+    color: #fdd;
+  }
+  #fullscreenBtn {
+    appearance: none;
+    border: 1px solid #444;
+    background: #222;
+    color: #ddd;
+    padding: 6px 14px;
+    border-radius: 4px;
+    font: inherit;
+    cursor: pointer;
+  }
+  #stream:fullscreen {
+    width: 100vw;
+    height: 100vh;
+    max-width: none;
+    max-height: none;
+    border: none;
+  }
+  #recordInfo { font-family: ui-monospace, monospace; font-size: 12px; color: #9c9; }
+  #macros {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 12px;
+    width: 100%;
+    max-width: 960px;
+    box-sizing: border-box;
+    border-top: 1px solid #222;
+  }
+  #macros button, #macros select {
+    appearance: none;
+    border: 1px solid #444;
+    background: #222;
+    color: #ddd;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font: inherit;
+  }
+  #macros button:hover { background: #2a2a2a; cursor: pointer; }
+  #macros button[disabled] { opacity: 0.4; cursor: not-allowed; }
+  #macros label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+  }
+  #macros label:has(input:disabled) { opacity: 0.4; cursor: not-allowed; }
+  #macros input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: #36a;
+    cursor: pointer;
+  }
+  #macroRecBtn.recording { background: #5a1d1d; border-color: #a33; color: #fdd; }
+  #macroPlayBtn.playing { background: #1d5a3a; border-color: #3a3; color: #dfd; }
+  #macroInfo { font-family: ui-monospace, monospace; font-size: 12px; color: #9c9; }
+  #runtime {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 12px;
+    width: 100%;
+    max-width: 960px;
+    box-sizing: border-box;
+    border-top: 1px solid #222;
+  }
+  #runtime button {
+    appearance: none;
+    border: 1px solid #444;
+    background: #222;
+    color: #ddd;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font: inherit;
+    cursor: pointer;
+  }
+  #runtime button:hover { background: #2a2a2a; }
+  #runtime button[disabled] { opacity: 0.4; cursor: not-allowed; }
+  #runtime button.active {
+    background: #1d3a5a; border-color: #36a; color: #def;
+  }
+  #aiToggleBtn.off { background: #5a3a1d; border-color: #a83; color: #fed; }
+  #runtimeInfo { font-family: ui-monospace, monospace; font-size: 12px; color: #9c9; }
+  #triggers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 12px;
+    width: 100%;
+    max-width: 960px;
+    box-sizing: border-box;
+    border-top: 1px solid #222;
+  }
+  #triggerInfo { font-family: ui-monospace, monospace; font-size: 12px; color: #9c9; }
+  #triggers label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
+  #triggers label:has(input:disabled) { opacity: 0.4; cursor: not-allowed; }
+  #triggers input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: #36a;
+    cursor: pointer;
+  }
+  #triggers .trigger-detail { font-family: ui-monospace, monospace; font-size: 12px; }
+  #triggers .trigger-detail.playing { color: #dfd; font-weight: bold; }
+  #triggers .trigger-cooldown {
+    width: 48px;
+    padding: 1px 4px;
+    background: #161616;
+    border: 1px solid #333;
+    border-radius: 3px;
+    color: #ddd;
+    font: inherit;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    text-align: right;
+  }
+  #triggers .trigger-cooldown.saved { border-color: #36a; }
+  #triggers .trigger-cooldown.error { border-color: #a44; }
+  #status {
+    width: 100%;
+    max-width: 960px;
+    padding: 8px 12px;
+    box-sizing: border-box;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    color: #9c9;
+    white-space: pre-wrap;
+  }
+  .bad { color: #e88; }
+  .ok { color: #9c9; }
+</style>
+</head>
+<body>
+  <header><h1>nxml-coplay</h1></header>
+  <img id="stream" alt="capture stream" />
+  <div id="controls">
+    <button id="recordBtn" type="button">Record</button>
+    <button id="fullscreenBtn" type="button">⛶ Fullscreen</button>
+    <span id="recordInfo">recording: idle</span>
+  </div>
+  <div id="runtime">
+    <button id="aiToggleBtn" type="button">AI: …</button>
+    <span style="opacity:0.6">|</span>
+    <span style="opacity:0.6">mode:</span>
+    <button id="modeHpBtn" type="button" data-mode="human-priority">human-priority</button>
+    <button id="modeHtBtn" type="button" data-mode="human-takeover">human-takeover</button>
+    <span id="runtimeInfo">runtime: not attached</span>
+  </div>
+  <div id="macros">
+    <button id="macroRecBtn" type="button">Record macro</button>
+    <select id="macroSelect"><option value="">(no macros)</option></select>
+    <button id="macroPlayBtn" type="button">Play</button>
+    <label><input id="macroLoop" type="checkbox" /> loop</label>
+    <button id="macroDeleteBtn" type="button">Delete</button>
+    <span id="macroInfo">macros: not configured</span>
+  </div>
+  <div id="triggers">
+    <span style="opacity:0.6">triggers:</span>
+    <span id="triggerList"></span>
+    <span id="triggerInfo">triggers: not configured</span>
+  </div>
+  <pre id="status"></pre>
+
+<script>
+"use strict";
+// 26-dim Switch action vector layout — must match
+// nx_packets.action_spec exactly.
+//   0..3   sticks (continuous, [-1, 1])
+//   4..5   stick PRESSED
+//   6..9   DPAD up/left/right/down
+//   10..13 L, ZL, R, ZR
+//   14..17 JCL_SR/SL, JCR_SR/SL  (no standard-pad mapping; left 0)
+//   18..21 PLUS, MINUS, HOME, CAPTURE
+//   22..25 Y, X, B, A
+const ACTION_DIM = 26;
+// Match requestAnimationFrame rate so a brief tap doesn't fall between
+// two POSTs. The orchestrator's nxbt update_rate is 120Hz, so 60Hz
+// ingress is well within its absorption rate.
+const POST_HZ = 60;
+
+const params = new URLSearchParams(window.location.search);
+const token = params.get("token") || "";
+
+const streamEl = document.getElementById("stream");
+streamEl.src = token ? `/mjpeg?token=${encodeURIComponent(token)}` : "/mjpeg";
+
+const statusEl = document.getElementById("status");
+let postsSent = 0;
+let postsFailed = 0;
+let lastPadName = null;
+let lastAction = null;
+let lastPostMs = 0;
+
+function btn(gp, i) {
+  const b = gp.buttons[i];
+  return b && b.pressed ? 1 : 0;
+}
+
+function gamepadToAction(gp) {
+  const a = new Array(ACTION_DIM).fill(0);
+
+  // Sticks. Browser gamepad axis convention is +Y=down; Switch +Y=up,
+  // so invert the Y axes.
+  a[0] = gp.axes[0] || 0;
+  a[1] = -(gp.axes[1] || 0);
+  a[2] = gp.axes[2] || 0;
+  a[3] = -(gp.axes[3] || 0);
+
+  // L_STICK / R_STICK pressed.
+  a[4] = btn(gp, 10);
+  a[5] = btn(gp, 11);
+
+  // DPAD.
+  a[6] = btn(gp, 12);   // UP
+  a[7] = btn(gp, 14);   // LEFT
+  a[8] = btn(gp, 15);   // RIGHT
+  a[9] = btn(gp, 13);   // DOWN
+
+  // Shoulders.
+  a[10] = btn(gp, 4);   // L
+  a[11] = btn(gp, 6);   // ZL
+  a[12] = btn(gp, 5);   // R
+  a[13] = btn(gp, 7);   // ZR
+
+  // Joycon SR/SL — no standard mapping; leave 0 (a[14..17]).
+
+  // PLUS/MINUS/HOME/CAPTURE.
+  a[18] = btn(gp, 9);             // PLUS  (start)
+  a[19] = btn(gp, 8);             // MINUS (back/select)
+  a[20] = gp.buttons[16] ? btn(gp, 16) : 0;  // HOME (some pads)
+  // CAPTURE — no mapping (a[21]).
+
+  // Face buttons. Position-based: south/east/west/north on the controller
+  // map to Switch positions B/A/Y/X. So Xbox A (south, button 0) → Switch B.
+  a[22] = btn(gp, 2);   // Y  (west)
+  a[23] = btn(gp, 3);   // X  (north)
+  a[24] = btn(gp, 0);   // B  (south)
+  a[25] = btn(gp, 1);   // A  (east)
+
+  return a;
+}
+
+async function postAction(action) {
+  try {
+    const headers = { "Content-Type": "application/json" };
+    if (token) headers["X-Coplay-Token"] = token;
+    const r = await fetch("/action", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ vector: action }),
+    });
+    if (!r.ok) postsFailed++;
+    else postsSent++;
+  } catch (_e) {
+    postsFailed++;
+  }
+}
+
+function findGamepad() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  for (const gp of pads) if (gp) return gp;
+  return null;
+}
+
+function fmtAction(a) {
+  if (!a) return "(none)";
+  const sticks = a.slice(0, 4).map(x => x.toFixed(2)).join(",");
+  const buttons = a.slice(4).map(x => x ? "1" : "0").join("");
+  return `sticks=[${sticks}] buttons=${buttons}`;
+}
+
+function render() {
+  const ratePerSec = (postsSent + postsFailed) /
+    Math.max(1, (performance.now() / 1000));
+  statusEl.textContent =
+    `gamepad: ${lastPadName || "(none — connect & press any button)"}\n` +
+    `posts:   sent=${postsSent} failed=${postsFailed} rate≈${ratePerSec.toFixed(1)}/s\n` +
+    `action:  ${fmtAction(lastAction)}`;
+}
+
+const interval = 1000 / POST_HZ;
+
+async function loop() {
+  const now = performance.now();
+  const gp = findGamepad();
+  if (gp) {
+    lastPadName = gp.id;
+    if (now - lastPostMs >= interval) {
+      lastPostMs = now;
+      const action = gamepadToAction(gp);
+      lastAction = action;
+      postAction(action);
+    }
+  }
+  render();
+  requestAnimationFrame(loop);
+}
+
+window.addEventListener("gamepadconnected", e => {
+  lastPadName = e.gamepad.id;
+});
+window.addEventListener("gamepaddisconnected", () => {
+  lastPadName = null;
+});
+
+// --- Recording toggle --------------------------------------------------
+const recordBtn = document.getElementById("recordBtn");
+const recordInfo = document.getElementById("recordInfo");
+let recordingActive = false;
+let recordingConfigured = true;
+
+function authHeaders(extra) {
+  const h = Object.assign({}, extra || {});
+  if (token) h["X-Coplay-Token"] = token;
+  return h;
+}
+
+function renderRecordingState(s) {
+  recordingActive = !!(s && s.active);
+  recordingConfigured = s && s.configured !== false;
+  recordBtn.classList.toggle("recording", recordingActive);
+  recordBtn.textContent = recordingActive ? "Stop" : "Record";
+  recordBtn.disabled = !recordingConfigured;
+  if (!recordingConfigured) {
+    recordInfo.textContent = "recording: not configured (--record DIR)";
+  } else if (recordingActive) {
+    recordInfo.textContent = `recording: ${s.frames || 0} frames → ${s.path || ""}`;
+  } else {
+    const last = s && s.last_finalized ? ` (last: ${s.last_finalized})` : "";
+    recordInfo.textContent = `recording: idle${last}`;
+  }
+}
+
+async function refreshRecordingStatus() {
+  try {
+    const url = "/recording/status" + (token ? `?token=${encodeURIComponent(token)}` : "");
+    const r = await fetch(url, { headers: authHeaders() });
+    if (!r.ok) return;
+    renderRecordingState(await r.json());
+  } catch (_e) { /* network blip; try again next tick */ }
+}
+
+recordBtn.addEventListener("click", async () => {
+  recordBtn.disabled = true;
+  try {
+    const path = recordingActive ? "/recording/stop" : "/recording/start";
+    const r = await fetch(path, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: "{}",
+    });
+    if (!r.ok) {
+      const msg = await r.text();
+      recordInfo.textContent = `recording error: ${r.status} ${msg.slice(0, 120)}`;
+    }
+  } finally {
+    await refreshRecordingStatus();
+  }
+});
+
+setInterval(refreshRecordingStatus, 1000);
+refreshRecordingStatus();
+
+// --- Fullscreen toggle -------------------------------------------------
+const fullscreenBtn = document.getElementById("fullscreenBtn");
+fullscreenBtn.addEventListener("click", async () => {
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await streamEl.requestFullscreen();
+    }
+  } catch (e) {
+    console.warn("fullscreen toggle failed:", e);
+  }
+});
+document.addEventListener("fullscreenchange", () => {
+  fullscreenBtn.textContent = document.fullscreenElement ? "⛶ Exit fullscreen" : "⛶ Fullscreen";
+});
+
+// --- Macros ------------------------------------------------------------
+const macroRecBtn = document.getElementById("macroRecBtn");
+const macroPlayBtn = document.getElementById("macroPlayBtn");
+const macroDeleteBtn = document.getElementById("macroDeleteBtn");
+const macroSelect = document.getElementById("macroSelect");
+const macroLoopChk = document.getElementById("macroLoop");
+const macroInfo = document.getElementById("macroInfo");
+
+let macroState = {
+  configured: false,
+  recording: false,
+  recording_name: null,
+  recording_frames: 0,
+  playing: false,
+  loop: false,
+  macros: [],
+};
+
+function renderMacros() {
+  const s = macroState;
+  macroRecBtn.classList.toggle("recording", s.recording);
+  macroRecBtn.textContent = s.recording ? "Stop & save" : "Record macro";
+  macroRecBtn.disabled = !s.configured || s.playing;
+
+  macroPlayBtn.classList.toggle("playing", s.playing);
+  macroPlayBtn.textContent = s.playing ? "Stop" : "Play";
+  macroPlayBtn.disabled = !s.configured || s.recording ||
+    (!s.playing && !macroSelect.value);
+
+  macroDeleteBtn.disabled = !s.configured || s.recording || s.playing ||
+    !macroSelect.value;
+  macroSelect.disabled = !s.configured || s.recording || s.playing;
+  // The loop checkbox is purely user-intent for the *next* play. Don't
+  // sync it from the server — that would clobber a tick the user made
+  // before the play has started.
+  macroLoopChk.disabled = !s.configured || s.recording;
+
+  if (!s.configured) {
+    macroInfo.textContent = "macros: not configured (--macro-dir DIR)";
+  } else if (s.recording) {
+    macroInfo.textContent =
+      `macros: recording '${s.recording_name}' (${s.recording_frames} frames)`;
+  } else if (s.playing) {
+    macroInfo.textContent =
+      `macros: playing${s.loop ? " (loop)" : ""}`;
+  } else {
+    macroInfo.textContent = `macros: ${s.macros.length} saved`;
+  }
+
+  // Reconcile <select> options with the server's list, preserving the
+  // user's current selection where possible.
+  const want = new Set(s.macros);
+  const have = new Set();
+  for (const opt of Array.from(macroSelect.options)) {
+    if (opt.value === "") { macroSelect.removeChild(opt); continue; }
+    if (!want.has(opt.value)) macroSelect.removeChild(opt);
+    else have.add(opt.value);
+  }
+  for (const name of s.macros) {
+    if (!have.has(name)) {
+      const opt = document.createElement("option");
+      opt.value = name; opt.textContent = name;
+      macroSelect.appendChild(opt);
+    }
+  }
+  if (!s.macros.length) {
+    const opt = document.createElement("option");
+    opt.value = ""; opt.textContent = "(no macros)";
+    macroSelect.appendChild(opt);
+  }
+}
+
+async function refreshMacroStatus() {
+  try {
+    const url = "/macros/status" + (token ? `?token=${encodeURIComponent(token)}` : "");
+    const r = await fetch(url, { headers: authHeaders() });
+    if (!r.ok) return;
+    macroState = await r.json();
+    renderMacros();
+  } catch (_e) { /* ignore */ }
+}
+
+async function macroFetch(path, body) {
+  const r = await fetch(path, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(body || {}),
+  });
+  if (!r.ok) {
+    const msg = await r.text();
+    macroInfo.textContent = `macros: ${r.status} ${msg.slice(0, 140)}`;
+    return null;
+  }
+  return r.json();
+}
+
+macroRecBtn.addEventListener("click", async () => {
+  macroRecBtn.disabled = true;
+  try {
+    if (!macroState.recording) {
+      const name = (window.prompt("Macro name:") || "").trim();
+      if (!name) return;
+      const out = await macroFetch("/macros/record/start", { name });
+      if (out) macroState = out;
+    } else {
+      const out = await macroFetch("/macros/record/stop", {});
+      if (out) macroState = out;
+    }
+    renderMacros();
+  } finally {
+    await refreshMacroStatus();
+  }
+});
+
+macroPlayBtn.addEventListener("click", async () => {
+  macroPlayBtn.disabled = true;
+  try {
+    if (macroState.playing) {
+      const out = await macroFetch("/macros/stop", {});
+      if (out) macroState = out;
+    } else {
+      const name = macroSelect.value;
+      if (!name) return;
+      const out = await macroFetch("/macros/play",
+        { name, loop: !!macroLoopChk.checked });
+      if (out) macroState = out;
+    }
+    renderMacros();
+  } finally {
+    await refreshMacroStatus();
+  }
+});
+
+macroDeleteBtn.addEventListener("click", async () => {
+  const name = macroSelect.value;
+  if (!name) return;
+  if (!window.confirm(`Delete macro '${name}'?`)) return;
+  macroDeleteBtn.disabled = true;
+  try {
+    const out = await macroFetch("/macros/delete", { name });
+    if (out) macroState = out;
+    renderMacros();
+  } finally {
+    await refreshMacroStatus();
+  }
+});
+
+macroSelect.addEventListener("change", renderMacros);
+
+setInterval(refreshMacroStatus, 1000);
+refreshMacroStatus();
+
+// --- Runtime (AI overlay + mode) --------------------------------------
+const aiToggleBtn = document.getElementById("aiToggleBtn");
+const modeHpBtn = document.getElementById("modeHpBtn");
+const modeHtBtn = document.getElementById("modeHtBtn");
+const runtimeInfo = document.getElementById("runtimeInfo");
+
+let runtimeState = {
+  attached: false,
+  ai_enabled: true,
+  mode: null,
+  supported_modes: [],
+};
+
+function renderRuntime() {
+  const s = runtimeState;
+  if (!s.attached) {
+    aiToggleBtn.disabled = true;
+    modeHpBtn.disabled = true;
+    modeHtBtn.disabled = true;
+    aiToggleBtn.textContent = "AI: …";
+    aiToggleBtn.classList.remove("off", "active");
+    modeHpBtn.classList.remove("active");
+    modeHtBtn.classList.remove("active");
+    runtimeInfo.textContent = "runtime: not attached";
+    return;
+  }
+  aiToggleBtn.disabled = false;
+  aiToggleBtn.textContent = s.ai_enabled ? "AI: on" : "AI: off";
+  aiToggleBtn.classList.toggle("off", !s.ai_enabled);
+  aiToggleBtn.classList.toggle("active", s.ai_enabled);
+
+  const modeBtns = [modeHpBtn, modeHtBtn];
+  for (const b of modeBtns) {
+    const supported = s.supported_modes.includes(b.dataset.mode);
+    b.disabled = !supported;
+    b.classList.toggle("active", b.dataset.mode === s.mode);
+  }
+  runtimeInfo.textContent = `mode=${s.mode} ai=${s.ai_enabled ? "on" : "off"}`;
+}
+
+async function refreshRuntimeStatus() {
+  try {
+    const url = "/runtime/status" + (token ? `?token=${encodeURIComponent(token)}` : "");
+    const r = await fetch(url, { headers: authHeaders() });
+    if (!r.ok) return;
+    runtimeState = await r.json();
+    renderRuntime();
+  } catch (_e) { /* ignore */ }
+}
+
+async function runtimeFetch(path, body) {
+  const r = await fetch(path, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(body || {}),
+  });
+  if (!r.ok) {
+    const msg = await r.text();
+    runtimeInfo.textContent = `runtime: ${r.status} ${msg.slice(0, 140)}`;
+    return null;
+  }
+  return r.json();
+}
+
+aiToggleBtn.addEventListener("click", async () => {
+  if (!runtimeState.attached) return;
+  aiToggleBtn.disabled = true;
+  try {
+    const out = await runtimeFetch("/runtime/ai", { enabled: !runtimeState.ai_enabled });
+    if (out) runtimeState = out;
+    renderRuntime();
+  } finally {
+    await refreshRuntimeStatus();
+  }
+});
+
+for (const b of [modeHpBtn, modeHtBtn]) {
+  b.addEventListener("click", async () => {
+    if (!runtimeState.attached) return;
+    const mode = b.dataset.mode;
+    b.disabled = true;
+    try {
+      const out = await runtimeFetch("/runtime/mode", { mode });
+      if (out) runtimeState = out;
+      renderRuntime();
+    } finally {
+      await refreshRuntimeStatus();
+    }
+  });
+}
+
+setInterval(refreshRuntimeStatus, 1000);
+refreshRuntimeStatus();
+
+// --- Triggers (visual-detect → run macro) -----------------------------
+const triggerList = document.getElementById("triggerList");
+const triggerInfo = document.getElementById("triggerInfo");
+
+let triggerState = {
+  configured: false,
+  triggers: [],
+  armed: [],
+  states: {},
+  playing: null,
+};
+// Per-trigger row elements, keyed by trigger name. Rebuilt lazily when
+// the set of triggers changes; the contents are updated in-place on each
+// status refresh so the checkbox doesn't flicker mid-click.
+const triggerRows = new Map();
+
+function _buildTriggerRow(name) {
+  const row = document.createElement("label");
+  row.style.marginRight = "12px";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.dataset.triggerName = name;
+  cb.addEventListener("change", () => onTriggerToggle(name, cb));
+  const labelText = document.createElement("span");
+  labelText.textContent = ` ${name} `;
+  // Per-trigger cooldown editor. Connection latency varies, so the
+  // sweet-spot post-mash buffer is something to tune live rather than
+  // bake into the seed.
+  const cooldown = document.createElement("input");
+  cooldown.type = "number";
+  cooldown.className = "trigger-cooldown";
+  cooldown.min = "0";
+  cooldown.step = "1";
+  cooldown.title = "cooldown seconds (post-fire re-trigger lockout)";
+  // Keep clicks on the input from toggling the parent label's checkbox.
+  cooldown.addEventListener("click", (ev) => ev.preventDefault());
+  cooldown.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") { ev.preventDefault(); cooldown.blur(); }
+  });
+  cooldown.addEventListener("change", () => onCooldownChange(name, cooldown));
+  const cooldownUnit = document.createElement("span");
+  cooldownUnit.textContent = "s cd";
+  cooldownUnit.style.opacity = "0.5";
+  cooldownUnit.style.fontSize = "11px";
+  const detail = document.createElement("span");
+  detail.className = "trigger-detail";
+  detail.style.opacity = "0.7";
+  row.append(cb, labelText, cooldown, cooldownUnit, detail);
+  triggerList.appendChild(row);
+  triggerRows.set(name, { row, cb, cooldown, detail });
+  return triggerRows.get(name);
+}
+
+function renderTriggers() {
+  const s = triggerState;
+  if (!s.configured) {
+    triggerInfo.textContent = "triggers: not configured (--trigger-dir DIR)";
+    for (const { row } of triggerRows.values()) row.remove();
+    triggerRows.clear();
+    return;
+  }
+  triggerInfo.textContent =
+    s.triggers.length === 0 ? "triggers: none seeded" : "";
+
+  // Drop rows for triggers that no longer exist.
+  for (const [name, ref] of Array.from(triggerRows.entries())) {
+    if (!s.triggers.includes(name)) {
+      ref.row.remove();
+      triggerRows.delete(name);
+    }
+  }
+  // Ensure a row for every known trigger; update its checkbox + detail.
+  const armedSet = new Set(s.armed || []);
+  for (const name of s.triggers) {
+    const ref = triggerRows.get(name) || _buildTriggerRow(name);
+    // Don't fight a user mid-click: only sync the checkbox to server
+    // state when the row isn't currently being toggled.
+    if (!ref.cb.dataset.pending) {
+      ref.cb.checked = armedSet.has(name);
+    }
+    const st = (s.states || {})[name];
+    if (st) {
+      // Sync cooldown editor unless the user is mid-edit.
+      if (ref.cooldown && !ref.cooldown.dataset.pending &&
+          document.activeElement !== ref.cooldown) {
+        const cdVal = st.cooldown_sec;
+        if (typeof cdVal === "number" && Number(ref.cooldown.value) !== cdVal) {
+          ref.cooldown.value = String(cdVal);
+        }
+      }
+      const score = (st.score || 0).toFixed(3);
+      const thr = (st.threshold || 0).toFixed(2);
+      const fires = st.fire_count ? ` fires=${st.fire_count}` : "";
+      // While the macro this trigger fires is the one currently playing
+      // (and last_fire is recent), show playback progress instead of
+      // cooldown — cooldown only kicks in *after* playback ends.
+      const playing = s.playing;
+      const isPlayingMine =
+        playing && playing.name === st.macro &&
+        st.last_fire_at && Math.abs(playing.started_at - st.last_fire_at) < 1.5;
+      let tail = "";
+      if (isPlayingMine) {
+        const el = (playing.elapsed_sec || 0).toFixed(1);
+        if (playing.total_sec) {
+          const tot = playing.total_sec.toFixed(1);
+          const rem = Math.max(0, playing.total_sec - playing.elapsed_sec).toFixed(1);
+          tail = ` PLAYING ${el}s/${tot}s (${rem}s left)`;
+        } else {
+          tail = ` PLAYING ${el}s (looping)`;
+        }
+      } else if (st.in_cooldown) {
+        tail = ` cooldown=${st.cooldown_remaining.toFixed(1)}s`;
+      }
+      ref.detail.textContent = `→ ${st.macro} ${score}/${thr}${tail}${fires}`;
+      ref.detail.classList.toggle("playing", !!isPlayingMine);
+    } else {
+      ref.detail.textContent = "";
+      ref.detail.classList.remove("playing");
+    }
+  }
+}
+
+async function refreshTriggerStatus() {
+  try {
+    const url = "/triggers/status" + (token ? `?token=${encodeURIComponent(token)}` : "");
+    const r = await fetch(url, { headers: authHeaders() });
+    if (!r.ok) return;
+    triggerState = await r.json();
+    renderTriggers();
+  } catch (_e) { /* ignore */ }
+}
+
+async function triggerFetch(path, body) {
+  const r = await fetch(path, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(body || {}),
+  });
+  if (!r.ok) {
+    const msg = await r.text();
+    triggerInfo.textContent = `triggers: ${r.status} ${msg.slice(0, 140)}`;
+    return null;
+  }
+  return r.json();
+}
+
+async function onCooldownChange(name, input) {
+  const raw = parseFloat(input.value);
+  if (!Number.isFinite(raw) || raw < 0) {
+    input.classList.add("error");
+    return;
+  }
+  input.dataset.pending = "1";
+  input.classList.remove("error", "saved");
+  try {
+    const out = await triggerFetch("/triggers/update", {
+      name, cooldown_sec: raw,
+    });
+    if (out === null) {
+      input.classList.add("error");
+    } else {
+      input.classList.add("saved");
+      setTimeout(() => input.classList.remove("saved"), 1200);
+      refreshTriggerStatus();
+    }
+  } finally {
+    delete input.dataset.pending;
+  }
+}
+
+async function onTriggerToggle(name, cb) {
+  const wantArmed = cb.checked;
+  cb.dataset.pending = "1";
+  cb.disabled = true;
+  try {
+    const out = await triggerFetch(
+      wantArmed ? "/triggers/arm" : "/triggers/disarm",
+      { name },
+    );
+    if (out === null) {
+      // Server rejected — roll the checkbox back.
+      cb.checked = !wantArmed;
+    } else {
+      triggerState = out;
+    }
+  } finally {
+    delete cb.dataset.pending;
+    cb.disabled = false;
+    renderTriggers();
+  }
+}
+
+setInterval(refreshTriggerStatus, 1000);
+refreshTriggerStatus();
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

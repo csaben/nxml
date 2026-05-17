@@ -1,0 +1,17 @@
+checkpoints/
+data/
+za-latents/
+latents/
+rollouts/*
+*.mkv
+*.png
+!assets/dit_v1/*.png
+!packages/nxml-games/src/nxml_games/pokemon_za/assets/connection_lost.png
+!packages/nxml-games/src/nxml_games/pokemon_za/assets/end_screen.png
+
+# Python bytecode
+**/__pycache__/
+*.pyc
+
+# Weights & Biases
+wandb/

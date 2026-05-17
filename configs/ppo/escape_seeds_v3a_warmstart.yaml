@@ -1,0 +1,134 @@
+# PPO config v3 — SPARSE-ONLY. Every per-step reward signal is off; the
+# only thing that pays is the verified-lock terminal (find target + attack
+# during streak → episode ends with terminal_bonus).
+#
+# Rationale: v2 with shaped rewards (movement, slide_stag, png_pen, etc.)
+# kept producing collapsed policies that found a 0-reward local minimum
+# and stopped exploring. v3 is the "throw out the shaping, force PPO to
+# discover the real objective via exploration" approach. Standard sparse-
+# reward fix: high entropy bonus so the policy keeps sampling diverse
+# actions until it stumbles into a successful trajectory.
+#
+# What's enabled:
+#   - target_ui_detection (DETECTOR ONLY — reward_per_step=0, streak_ramp_scale=0)
+#   - verified_lock_terminal (the only reward — fires on streak + attack-while-targeting)
+#
+# What's OFF in v3 (was on in v2):
+#   - movement_rewards   (stick deflection bonus)
+#   - sliding_stagnation (stand-still penalty)
+#   - png_similarity_penalty (miss-state avoidance)
+#   - locked_attack      (per-step lock-attack reward)
+#   - unique_acquisition (lock-on bonuses; would also activate legacy terminal)
+#
+# Other v3 deltas vs v2:
+#   - ent_coef:    0.01 → 0.05   (force exploration under sparse signal)
+#   - terminal_bonus: 20 → 50    (big jackpot so when the agent finds it, advantage is huge)
+#
+# Same seeds + WM + BC init as v2 so curves are directly comparable.
+#
+# To run:
+#   uv run nxrl train configs/ppo/escape_seeds_v3.yaml [--world-size 2]
+
+policy:
+  name: ppo_policy_v1
+  config:
+    base_policy_name: bc_transformer_v1
+    base_policy_config:
+      sequence_length: 300
+      hidden_size: 512
+      num_layers: 4
+      num_heads: 8
+      dropout: 0.3
+    action_std_init: 0.3
+
+algorithm:
+  name: ppo
+  config:
+    lr: 7.5e-5
+    gamma: 0.995
+    gae_lambda: 0.97
+    clip_epsilon: 0.1
+    vf_coef: 0.5
+    ent_coef: 0.1           # bumped 10x from v2 (0.01) — sparse rewards need exploration.
+                            # Round 2: bumped from 0.05 after observing policy collapse
+                            # — terminal rate went to 0 by update ~20 because policy
+                            # locked into a deterministic non-terminating state.
+    bc_reg_coef: 1.0
+    max_grad_norm: 0.5
+    ppo_epochs: 2
+    minibatch_size: 64
+    rollouts_per_update: 10
+    total_updates: 1000
+    flow_steps: 5
+    cfg_scale: 1.0
+    button_logit_bias_indices: [18, 19, 20, 21]
+    button_logit_bias_value: 8.0
+    project_name: nxrl-ppo-escape-seeds-v3a-warmstart
+
+world_model:
+  ckpt_path: checkpoints/wm/migrated/run_021_best.pt
+
+bc_init:
+  ckpt_path: checkpoints/bc/migrated/bc_transformer_v1_seq300_run001.pt
+
+rollout:
+  frames: 150
+  goal_offset: 30
+
+seeds:
+  - {npz_path: data/roundtrip/latents/20260406_151519_11-15am_part1.npz, start_frame: 0}
+  - {npz_path: data/roundtrip/latents/20260406_145009_10-50am_part0.npz, start_frame: 0}
+  - {npz_path: data/roundtrip/latents/20260406_151519_11-15am_part0.npz, start_frame: 0}
+  - {npz_path: data/roundtrip/latents/20260222_232608_6-26pm_part0.npz,  start_frame: 45}
+  - {npz_path: data/roundtrip/latents/20260406_151519_11-15am_part0.npz, start_frame: 39}
+  - {npz_path: data/roundtrip/latents/20260221_051425_12-14am_part0.npz, start_frame: 636}
+  - {npz_path: data/roundtrip/latents/20260406_151519_11-15am_part2.npz, start_frame: 945}
+  - {npz_path: data/roundtrip/latents/20260406_143027_10-30am_part1.npz, start_frame: 21}
+  - {npz_path: data/roundtrip/latents/20260406_144545_10-45am_part1.npz, start_frame: 21}
+  - {npz_path: data/roundtrip/latents/20260406_144545_10-45am_part1.npz, start_frame: 691}
+  - {npz_path: data/roundtrip/latents/20260406_145009_10-50am_part0.npz, start_frame: 691}
+  - {npz_path: data/roundtrip/latents/20260221_051841_12-18am_part1.npz, start_frame: 1184}
+
+reward:
+  callable: nxml_games.pokemon_za:make_reward_fn
+  kwargs:
+    vae_path: stabilityai/sd-vae-ft-mse
+    config:
+      reward_type: seed-based
+      start_frame_idx: 0
+      goal_frame_idx: -1
+
+      # Detector stays ON (its streak counter feeds the terminal gate).
+      # But its per-step reward is ZEROED — no continuous pay for popup hits.
+      # min_consecutive_hits=3 (was 5) — round-2 fix after policy collapse:
+      # streak=5 was too tight, terminals fired only stochastically, value
+      # head collapsed to "predict 0" once a few unlucky updates landed.
+      # Streak=3 lets the BC-driven WM rollouts actually reach the gate.
+      target_ui_detection:
+        template_path: data/detectors/pokemon-move-selection.PNG
+        score_threshold: 0.15
+        sat_threshold: 68.0
+        min_consecutive_hits: 3
+        reward_per_step: 0.0
+        streak_ramp_scale: 0.0
+
+      # The ONLY reward signal in v3. Big terminal bonus on
+      # (streak >= 3) AND (>= 3 attack-presses-while-targeting in last 10 frames).
+      # Threshold lowered from 5 to 3 in round 2 — see target_ui_detection above.
+      verified_lock_terminal:
+        enabled: true
+        min_detector_streak: 3
+        attack_window: 10
+        min_attack_presses: 3
+        button_indices: [22, 23, 24, 25]  # Y, X, B, A action-vector indices
+        terminal_bonus: 50.0
+
+run:
+  checkpoint_frequency: 5
+  snapshot_frequency: 5
+  resume_from: checkpoints/rl/migrated/ppo_run_062_update_0002.pt
+  # Eval-mkv: every N updates, render one rollout per listed seed to mp4
+  # and upload as wandb.Video (browser-friendly H.264 via moviepy).
+  eval_mkv_every_n_updates: 25
+  eval_mkv_seed_indices: [0, 3, 6]
+  eval_mkv_fps: 30

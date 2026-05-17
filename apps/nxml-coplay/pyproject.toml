@@ -1,0 +1,45 @@
+[project]
+name = "nxml-coplay"
+version = "0.1.0"
+description = "Hybrid human/AI play: human controls a Switch via evdev while a policy runs non-blocking alongside; merged actions are sent to nxbt-orchestrator and optionally recorded for source-tagged training."
+requires-python = ">=3.14"
+authors = [{ name = "Clark Saben" }]
+license = { text = "MIT" }
+readme = "README.md"
+dependencies = [
+    "click>=8.1",
+    "fastapi>=0.115",
+    "httpx>=0.27",
+    "numpy>=1.26",
+    "nx-macros",
+    "nxml-capture",
+    "nxml-mux",
+    "nxrl",
+    "nxwm",
+    "opencv-python>=4.10",
+    "uvicorn[standard]>=0.30",
+]
+
+[project.urls]
+Repository = "https://github.com/csaben/nxml"
+Issues = "https://github.com/csaben/nxml/issues"
+
+[project.scripts]
+nxml-coplay = "nxml_coplay.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nxml_coplay"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/nxml_coplay/static/index.html" = "nxml_coplay/static/index.html"
+
+[tool.uv.sources]
+nx-macros = { workspace = true }
+nxml-capture = { workspace = true }
+nxml-mux = { workspace = true }
+nxrl = { workspace = true }
+nxwm = { workspace = true }

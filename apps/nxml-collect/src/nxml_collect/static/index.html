@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>nxml-collect teleop</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0;
+    background: #111;
+    color: #ddd;
+    font: 14px/1.4 system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+  }
+  header { padding: 8px 12px; width: 100%; box-sizing: border-box; }
+  h1 { font-size: 14px; margin: 0; opacity: 0.75; }
+  #stream {
+    max-width: 100%;
+    max-height: 80vh;
+    background: #000;
+    border: 1px solid #222;
+  }
+  #status {
+    width: 100%;
+    max-width: 960px;
+    padding: 8px 12px;
+    box-sizing: border-box;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    color: #9c9;
+    white-space: pre-wrap;
+  }
+  .bad { color: #e88; }
+  .ok { color: #9c9; }
+</style>
+</head>
+<body>
+  <header><h1>nxml-collect teleop</h1></header>
+  <img id="stream" src="/mjpeg" alt="capture stream" />
+  <pre id="status"></pre>
+
+<script>
+"use strict";
+// 26-dim Switch action vector layout — must match
+// nx_packets.action_spec exactly.
+//   0..3   sticks (continuous, [-1, 1])
+//   4..5   stick PRESSED
+//   6..9   DPAD up/left/right/down
+//   10..13 L, ZL, R, ZR
+//   14..17 JCL_SR/SL, JCR_SR/SL  (no standard-pad mapping; left 0)
+//   18..21 PLUS, MINUS, HOME, CAPTURE
+//   22..25 Y, X, B, A
+const ACTION_DIM = 26;
+const POST_HZ = 30;
+const ORCHESTRATOR_SOURCE = "human";
+
+const statusEl = document.getElementById("status");
+let postsSent = 0;
+let postsFailed = 0;
+let lastPadName = null;
+let lastAction = null;
+let lastPostMs = 0;
+
+function btn(gp, i) {
+  const b = gp.buttons[i];
+  return b && b.pressed ? 1 : 0;
+}
+
+function gamepadToAction(gp) {
+  const a = new Array(ACTION_DIM).fill(0);
+
+  // Sticks. Browser gamepad axis convention is +Y=down; Switch +Y=up,
+  // so invert the Y axes.
+  a[0] = gp.axes[0] || 0;
+  a[1] = -(gp.axes[1] || 0);
+  a[2] = gp.axes[2] || 0;
+  a[3] = -(gp.axes[3] || 0);
+
+  // L_STICK / R_STICK pressed.
+  a[4] = btn(gp, 10);
+  a[5] = btn(gp, 11);
+
+  // DPAD.
+  a[6] = btn(gp, 12);   // UP
+  a[7] = btn(gp, 14);   // LEFT
+  a[8] = btn(gp, 15);   // RIGHT
+  a[9] = btn(gp, 13);   // DOWN
+
+  // Shoulders.
+  a[10] = btn(gp, 4);   // L
+  a[11] = btn(gp, 6);   // ZL
+  a[12] = btn(gp, 5);   // R
+  a[13] = btn(gp, 7);   // ZR
+
+  // Joycon SR/SL — no standard mapping; leave 0 (a[14..17]).
+
+  // PLUS/MINUS/HOME/CAPTURE.
+  a[18] = btn(gp, 9);             // PLUS  (start)
+  a[19] = btn(gp, 8);             // MINUS (back/select)
+  a[20] = gp.buttons[16] ? btn(gp, 16) : 0;  // HOME (some pads)
+  // CAPTURE — no mapping (a[21]).
+
+  // Face buttons. Position-based: south/east/west/north on the controller
+  // map to Switch positions B/A/Y/X. So Xbox A (south, button 0) → Switch B.
+  a[22] = btn(gp, 2);   // Y  (west)
+  a[23] = btn(gp, 3);   // X  (north)
+  a[24] = btn(gp, 0);   // B  (south)
+  a[25] = btn(gp, 1);   // A  (east)
+
+  return a;
+}
+
+async function postAction(action) {
+  try {
+    const r = await fetch("/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ vector: action, source: ORCHESTRATOR_SOURCE }),
+    });
+    if (!r.ok) postsFailed++;
+    else postsSent++;
+  } catch (_e) {
+    postsFailed++;
+  }
+}
+
+function findGamepad() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  for (const gp of pads) if (gp) return gp;
+  return null;
+}
+
+function fmtAction(a) {
+  if (!a) return "(none)";
+  const sticks = a.slice(0, 4).map(x => x.toFixed(2)).join(",");
+  const buttons = a.slice(4).map(x => x ? "1" : "0").join("");
+  return `sticks=[${sticks}] buttons=${buttons}`;
+}
+
+function render() {
+  const ratePerSec = (postsSent + postsFailed) /
+    Math.max(1, (performance.now() / 1000));
+  statusEl.textContent =
+    `gamepad: ${lastPadName || "(none — connect & press any button)"}\n` +
+    `posts:   sent=${postsSent} failed=${postsFailed} rate≈${ratePerSec.toFixed(1)}/s\n` +
+    `action:  ${fmtAction(lastAction)}`;
+}
+
+const interval = 1000 / POST_HZ;
+
+async function loop() {
+  const now = performance.now();
+  const gp = findGamepad();
+  if (gp) {
+    lastPadName = gp.id;
+    if (now - lastPostMs >= interval) {
+      lastPostMs = now;
+      const action = gamepadToAction(gp);
+      lastAction = action;
+      postAction(action);
+    }
+  }
+  render();
+  requestAnimationFrame(loop);
+}
+
+window.addEventListener("gamepadconnected", e => {
+  lastPadName = e.gamepad.id;
+});
+window.addEventListener("gamepaddisconnected", () => {
+  lastPadName = null;
+});
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

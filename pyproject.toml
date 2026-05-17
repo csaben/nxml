@@ -1,0 +1,64 @@
+[project]
+name = "nxml"
+version = "0"
+requires-python = ">=3.14"
+
+[project.urls]
+Repository = "https://github.com/csaben/nxml"
+Issues = "https://github.com/csaben/nxml/issues"
+
+[tool.uv.workspace]
+members = ["packages/*", "apps/*"]
+exclude = ["packages/nxbt-orchestrator"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-xdist>=3",
+    "ruff>=0.7",
+    "pyright>=1.1.380",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",     # pycodestyle, pyflakes
+    "I",               # import sorting
+    "B",               # bugbear (catches real bugs)
+    "UP",              # pyupgrade (modernization)
+    "N",               # naming conventions
+    "RUF",             # ruff-specific
+    "SIM",             # simplification
+    "PTH",             # use pathlib over os.path
+]
+ignore = ["E501", "N812"]  # N812: lowercase imports as uppercase (np, F, etc.)
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]
+"**/__init__.py" = ["F401"]
+"packages/nxwm/src/nxwm/training/**" = ["N802", "N803", "N806", "N817", "SIM108", "SIM112", "PTH123"]
+"packages/nxrl/src/nxrl/training/**" = ["N802", "N803", "N806", "N817", "SIM108", "SIM112", "PTH123"]
+"packages/nxml-games/src/nxml_games/pokemon_za/rewards/composite.py" = ["N802", "N803", "N806", "SIM102", "SIM103", "SIM108", "SIM114", "SIM118"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:torch.*",
+    "ignore::UserWarning:diffusers.*",
+]
+
+[tool.pyright]
+typeCheckingMode = "basic"
+reportMissingTypeArgument = "warning"
+reportUnnecessaryTypeIgnoreComment = "warning"
+include = ["packages/*/src", "apps/*/src", "tests"]
+# nxbt-orchestrator targets Python 3.11 (nxbt + pybluez constraint) and is
+# installed as a `uv tool`, not into the workspace 3.14 venv. Type-check it
+# inside that tool venv, not here.
+exclude = ["packages/nxbt-orchestrator/src"]
+venvPath = "."
+venv = ".venv"

@@ -1,0 +1,105 @@
+# Train the fa_dit (Future-Anchored Diffusion Transformer) world model
+# on the public ZA latents dataset.
+#
+# Adapts comma.ai's "Learning to Drive from a World Model" (arXiv:2504.19077)
+# to nxwm: future-anchor frames condition the diffusion target, and a
+# multi-hypothesis plan head predicts the next ``plan_horizon`` actions in
+# parallel. Same dataset and tooling as the dit_v1 config — `nxwm train`
+# dispatches on architecture under the hood.
+#
+# Setup (one-time, same as wm_dit_v1_za.yaml):
+#   hf download arelius/nxml-pokemon-legends-za-latents \
+#       --repo-type dataset --local-dir ./za-latents
+#   uv run --with click --with pandas --with pyarrow python \
+#       tools/latents_parquet_to_npz.py \
+#       --parquet ./za-latents/data/chunk-000.parquet \
+#       --meta    ./za-latents/meta/episodes.parquet \
+#       --out     ./data/latents
+#
+# Run (single GPU):
+#   uv run nxwm train configs/wm/wm_fa_dit_za.yaml
+#
+# Multi-GPU:
+#   CUDA_VISIBLE_DEVICES=0,1 uv run nxwm train \
+#       configs/wm/wm_fa_dit_za.yaml --world-size 2
+#
+# Architecture knobs sit between the paper's "small/gpt" (768/12/12, ~250M
+# params) and our scaled defaults. Bump embed_dim / depth / num_heads for
+# serious runs; the plan-head knobs scale cheaply.
+
+architecture:
+  name: fa_dit
+  config:
+    # Transformer trunk. embed_dim=640 keeps the model single-GPU friendly
+    # on 16×32 latents while staying close to the paper's "small" config.
+    embed_dim: 640
+    depth: 12
+    num_heads: 8
+    mlp_ratio: 4
+    patch_size: 2
+
+    # Sequence layout: [F_a anchor | T past | 1 target] = 16 frames.
+    # past_seq_len matches data.sequence_length below — keep them aligned.
+    past_seq_len: 10
+    future_anchor_len: 5
+
+    # Latent shape (sd-vae-ft-mse @ 128×256).
+    latent_channels: 4
+    latent_height: 16
+    latent_width: 32
+
+    # Action / pose conditioning.
+    pose_dims: 26
+
+    # Plan head: predicts plan_horizon × 26-dim trajectory hypotheses with
+    # multi-hypothesis Laplace NLL. 30 frames @ 30 fps ≈ 1 s lookahead
+    # (paper used 50 @ 5Hz = 10s, but ZA dynamics are faster — short
+    # horizon is plenty of supervision and keeps the head cheap).
+    plan_horizon: 30
+    plan_features: 26
+    plan_num_hypotheses: 5
+    plan_depth: 3
+
+    flow_steps: 15
+
+training:
+  lr: 3.0e-5
+  weight_decay: 0.01
+  cfg_dropout_prob: 0.1
+  noise_aug_prob: 0.1
+  noise_aug_scale: 0.25
+  # fa_dit tolerates longer unrolls than dit_v1: the future anchor provides
+  # a strong long-horizon signal that resists drift through TBPTT detaches.
+  unroll_steps: 16
+  unroll_min: 1
+  unroll_ramp_epochs: 5
+  tbptt_window: 4
+  precision: bf16
+  compile_model: false
+  grad_clip: 1.0
+  project_name: nxwm-pokemon-za-fa_dit
+
+  # Weight on the multi-hypothesis plan-head loss (paper §4.2.2).
+  # Set to 0 to train just the world-model head (rectified-flow only).
+  plan_loss_weight: 1.0
+
+  # Eval-rollout GIFs every 5 epochs (logged to wandb + saved under
+  # {run_dir}/rollouts/). Set to 0 to skip and avoid loading the VAE.
+  eval_gif_every_n_epochs: 5
+  eval_gif_mode: repeat_last
+  eval_gif_frames: 64
+  eval_gif_flow_steps: 8
+  eval_gif_episode_idx: 0
+  eval_gif_start_frame: 0
+
+data:
+  data_paths:
+    - ./data/latents
+  # Keep sequence_length == architecture.config.past_seq_len.
+  sequence_length: 10
+  goal_offset: 30
+  batch_size_per_gpu: 4
+  num_workers: 4
+  epochs: 200
+  # val_files:                 # basenames pulled out of data_paths as val set
+  #   - some-episode.npz
