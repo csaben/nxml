@@ -28,13 +28,19 @@ sudo apt-get install \
 
 ### Python 3.11
 
-`uv tool install --python 3.11 ...` will **automatically download a
-uv-managed CPython 3.11** if no system Python 3.11 is present — no extra
-work needed on Ubuntu 24.04, where `python3.11` is no longer in the
-default repos.
+**Use a system Python 3.11, not uv's managed one.** `nxbt` opens an L2CAP
+socket via `socket.AF_BLUETOOTH`, which is only present in a CPython built
+against `libbluetooth-dev`. uv-managed Pythons (from
+[`python-build-standalone`](https://github.com/astral-sh/python-build-standalone))
+deliberately strip optional modules including `AF_BLUETOOTH`, so they will
+install fine but crash on first connect with:
 
-If you'd rather use a system Python 3.11 (e.g. for sharing the interpreter
-with other tools), install via the deadsnakes PPA:
+```
+AttributeError: module 'socket' has no attribute 'AF_BLUETOOTH'
+```
+
+The fix is to install Ubuntu's Python 3.11 from the deadsnakes PPA
+(its build includes bluetooth support) and point uv at it explicitly:
 
 ```bash
 sudo add-apt-repository ppa:deadsnakes/ppa
@@ -45,15 +51,15 @@ sudo apt-get install python3.11 python3.11-dev
 ### Install from a local checkout
 
 ```bash
-uv tool install --python 3.11 ./packages/nxbt-orchestrator
+uv tool install --python /usr/bin/python3.11 ./packages/nxbt-orchestrator
 # Or from inside the package directory:
-#   cd packages/nxbt-orchestrator && uv tool install --python 3.11 .
+#   cd packages/nxbt-orchestrator && uv tool install --python /usr/bin/python3.11 .
 ```
 
 ### Install from git (no local checkout)
 
 ```bash
-uv tool install --python 3.11 \
+uv tool install --python /usr/bin/python3.11 \
     "git+https://github.com/csaben/nxml.git#subdirectory=packages/nxbt-orchestrator"
 
 # Pin to a tag or commit:
@@ -61,6 +67,11 @@ uv tool install --python 3.11 \
 ```
 
 uv clones the whole repo so the `../nx-packets` path source resolves.
+
+Passing the absolute path (`/usr/bin/python3.11`) is what forces uv to use
+the system interpreter; bare `--python 3.11` may match either a system or
+a previously-downloaded managed Python depending on what uv discovers
+first.
 
 ## Run
 
