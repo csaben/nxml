@@ -9,25 +9,48 @@ capture, and gates inference actions when a human is also driving (see
 
 ## Install
 
-This package depends on `nxbt` and `pybluez`, both of which require the
-**system** Python 3.11 + `sudo` privileges to bind the BlueZ HCI socket. It
-does **not** install into the workspace 3.14 venv. Install it standalone with
-`uv tool`:
+This package depends on `nxbt` and `pybluez`, which are pinned to Python
+3.11 and need `sudo` at runtime to bind the BlueZ HCI socket. It does
+**not** install into the workspace 3.14 venv — install it standalone with
+`uv tool`.
+
+### System libraries (Ubuntu/Debian)
+
+The C extensions `dbus-python` and `pybluez` compile against system
+headers. Install these first:
 
 ```bash
-# System libs: BlueZ (controller emulation) + libdbus headers (dbus-python build).
 sudo apt-get install \
     bluetooth bluez libbluetooth-dev \
     libdbus-1-dev libdbus-glib-1-dev \
-    pkg-config \
-    python3.11 python3.11-dev
+    pkg-config
+```
 
+### Python 3.11
+
+`uv tool install --python 3.11 ...` will **automatically download a
+uv-managed CPython 3.11** if no system Python 3.11 is present — no extra
+work needed on Ubuntu 24.04, where `python3.11` is no longer in the
+default repos.
+
+If you'd rather use a system Python 3.11 (e.g. for sharing the interpreter
+with other tools), install via the deadsnakes PPA:
+
+```bash
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt-get update
+sudo apt-get install python3.11 python3.11-dev
+```
+
+### Install from a local checkout
+
+```bash
 uv tool install --python 3.11 ./packages/nxbt-orchestrator
 # Or from inside the package directory:
 #   cd packages/nxbt-orchestrator && uv tool install --python 3.11 .
 ```
 
-### From git (no local checkout)
+### Install from git (no local checkout)
 
 ```bash
 uv tool install --python 3.11 \

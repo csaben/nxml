@@ -11,15 +11,15 @@ From a workspace checkout: `uv sync --all-packages --all-extras`, then `uv run n
 Standalone (no clone), as a `uv tool`:
 
 ```bash
-uv tool install --with-extras training \
-    "git+https://github.com/csaben/nxml.git#subdirectory=packages/nxwm"
+uv tool install \
+    "nxwm[training] @ git+https://github.com/csaben/nxml.git#subdirectory=packages/nxwm"
 
 # Pin to a commit or tag for reproducibility:
-#   "git+https://github.com/csaben/nxml.git@<sha>#subdirectory=packages/nxwm"
+#   "nxwm[training] @ git+https://github.com/csaben/nxml.git@<sha>#subdirectory=packages/nxwm"
 
-# Skip wandb logging (drop the extras):
+# Skip wandb logging (drop [training]):
 #   uv tool install \
-#       "git+https://github.com/csaben/nxml.git#subdirectory=packages/nxwm"
+#       "nxwm @ git+https://github.com/csaben/nxml.git#subdirectory=packages/nxwm"
 ```
 
 The `training` extras pull in `wandb` + `python-dotenv`. `nxwm train` logs
