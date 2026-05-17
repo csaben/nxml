@@ -278,7 +278,30 @@ class Session:
         npz_files = sorted(srv.data_path.glob("*.npz"))
         if not npz_files:
             return
-        self._seed_from_npz(npz_files[0], start_frame=0)
+        last_error: Exception | None = None
+        skipped: list[str] = []
+        for npz_path in npz_files:
+            try:
+                self._seed_from_npz(npz_path, start_frame=0)
+            except ValueError as e:
+                last_error = e
+                skipped.append(npz_path.name)
+                continue
+            if skipped:
+                print(
+                    f"[serve] auto-seed: skipped {len(skipped)} too-short "
+                    f"episode(s); seeded from {npz_path.name}",
+                    flush=True,
+                )
+            return
+        raise RuntimeError(
+            f"[serve] no usable episodes in {srv.data_path}: all "
+            f"{len(npz_files)} .npz files failed seed validation. "
+            f"Need at least {srv.history_length + srv.goal_offset + 1} frames "
+            f"per episode (history_length={srv.history_length} + "
+            f"goal_offset={srv.goal_offset} + 1). "
+            f"Last error: {last_error}"
+        )
 
 
 class WorldModelServer:
