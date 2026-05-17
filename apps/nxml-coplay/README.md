@@ -70,11 +70,24 @@ If auto-detection of your gamepad fails, pass `--device-path /dev/input/eventNN`
 Run coplay on the box with the capture card and orchestrator, but drive it
 from a controller plugged into a phone or laptop on your network:
 
+simple:
+
 ```bash
 nxml-coplay --game pokemon-za \
-    --policy hf:csaben/za-ppo-v1.pt \
+    --policy hf:arelius/nxwm-pokemon-za-rl/ppo_run_062_update_0002.pt \
     --controller http://localhost:7777 \
-    --camera 10 \
+    --camera 0 \
+    --input-source web 
+```
+
+
+with access token:
+
+```bash
+nxml-coplay --game pokemon-za \
+    --policy arelius/nxwm-pokemon-za-rl/ppo_run_062_update_0002.pt \
+    --controller http://localhost:7777 \
+    --camera 0 \
     --input-source web \
     --web-port 8080 \
     --web-token "$(openssl rand -hex 16)"
