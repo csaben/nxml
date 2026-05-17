@@ -103,7 +103,16 @@ def _build_detector(name: str, args: dict[str, Any]):
     """
     game_prefix = name.split(":", 1)[0]
     if game_prefix == "pokemon_za":
-        import nxml_games.pokemon_za.detector_adapter  # noqa: F401  (registers)
+        try:
+            import nxml_games.pokemon_za.detector_adapter  # noqa: F401  (registers)
+        except ImportError as e:
+            raise RuntimeError(
+                f"detector {name!r} requires the `pokemon-za` extra. "
+                "Reinstall with:\n"
+                "  uv tool install --reinstall "
+                '"nxwm[pokemon-za] @ git+https://github.com/csaben/nxml.git#subdirectory=packages/nxwm"\n'
+                f"(underlying ImportError: {e})"
+            ) from e
     else:
         raise ValueError(f"unknown detector namespace: {game_prefix!r}")
 

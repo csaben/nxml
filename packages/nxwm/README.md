@@ -106,6 +106,16 @@ nxwm rollout --model ./checkpoints/best.pt \
 
 ### Probe with a target-UI detector
 
+Game-specific detectors live in `nxml-games`, which is opt-in via the
+`pokemon-za` extra (a vanilla `nxwm` install stays game-agnostic):
+
+```bash
+uv tool install --reinstall \
+    "nxwm[pokemon-za,training] @ git+https://github.com/csaben/nxml.git#subdirectory=packages/nxwm"
+```
+
+Then:
+
 ```bash
 nxwm ui pokemon_za \
     --model hf:arelius/nxwm-pokemon-za/run_021_best.pt \

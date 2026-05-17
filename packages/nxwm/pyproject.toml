@@ -34,6 +34,12 @@ training = [
     "wandb>=0.18",
     "python-dotenv>=1",
 ]
+# Opt-in: ship the pokemon_za game adapters (detectors, default templates).
+# Required for `nxwm ui ... --detector pokemon_za:...`. Skipped by default
+# so a vanilla `nxwm` install stays game-agnostic.
+pokemon-za = [
+    "nxml-games",
+]
 
 [project.urls]
 Repository = "https://github.com/csaben/nxml"
@@ -52,6 +58,7 @@ packages = ["src/nxwm"]
 [tool.uv.sources]
 nxml-core = { workspace = true }
 nx-packets = { workspace = true }
+nxml-games = { workspace = true }
 torch = [{ index = "pytorch-cu128" }]
 torchvision = [{ index = "pytorch-cu128" }]
 # torchcodec = [{ index = "pytorch-cu128" }]

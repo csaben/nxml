@@ -627,6 +627,15 @@ class CoplayRunner:
         try:
             from nxml_games.pokemon_za.assets import default_triggers
         except ImportError:
+            print(
+                "[coplay] --game=pokemon-za but `nxml-games` is not installed; "
+                "skipping default-trigger seeding (`end_screen`, `connection_lost`).\n"
+                "         To enable, reinstall with the `pokemon-za` extra:\n"
+                "           uv tool install --reinstall "
+                '"nxml-coplay[pokemon-za] @ '
+                'git+https://github.com/csaben/nxml.git#subdirectory=apps/nxml-coplay"',
+                flush=True,
+            )
             return
 
         store.ensure_dirs()

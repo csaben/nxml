@@ -20,6 +20,15 @@ dependencies = [
     "uvicorn[standard]>=0.30",
 ]
 
+[project.optional-dependencies]
+# Opt-in: ship the pokemon_za game adapters so coplay seeds the default
+# triggers (end_screen / connection_lost) on first launch with
+# `--game=pokemon-za`. Skipped by default — coplay otherwise stays
+# game-agnostic and just emits a startup hint if you opt out.
+pokemon-za = [
+    "nxml-games",
+]
+
 [project.urls]
 Repository = "https://github.com/csaben/nxml"
 Issues = "https://github.com/csaben/nxml/issues"
@@ -40,6 +49,7 @@ packages = ["src/nxml_coplay"]
 [tool.uv.sources]
 nx-macros = { workspace = true }
 nxml-capture = { workspace = true }
+nxml-games = { workspace = true }
 nxml-mux = { workspace = true }
 nxrl = { workspace = true }
 nxwm = { workspace = true }

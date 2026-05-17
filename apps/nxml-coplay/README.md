@@ -23,9 +23,19 @@ uv tool install \
 #   "git+https://github.com/csaben/nxml.git@<sha>#subdirectory=apps/nxml-coplay"
 ```
 
+pokemon-za
+```bash
+uv tool install \
+    "nxml-coplay[pokemon-za] @ git+https://github.com/csaben/nxml.git#subdirectory=apps/nxml-coplay"
+```
+
 uv clones the whole repo so the workspace siblings (`nxml-mux`, `nxrl`,
 `nxml-capture`, etc.) resolve from the same tree. Once installed, drop the
 `uv run` prefix from the invocations below.
+
+Without the `pokemon-za` extra, `--game=pokemon-za` still works — just the
+seeded `end_screen` / `connection_lost` triggers won't be installed and
+you'll get a startup hint pointing at the reinstall command.
 
 ## Quick start (Ubuntu)
 
