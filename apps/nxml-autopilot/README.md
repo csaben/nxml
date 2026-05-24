@@ -37,32 +37,7 @@ Without the `pokemon-za` extra, `--game=pokemon-za` still works — just the
 seeded `end_screen` / `connection_lost` triggers won't be installed and
 you'll get a startup hint pointing at the reinstall command.
 
-## Quick start (Ubuntu)
 
-Set up a virtual camera from your capture card and start the orchestrator:
-
-```bash
-# terminal 1: virtual camera (so multiple consumers can read the capture)
-sudo modprobe v4l2loopback devices=1 video_nr=10 \
-    card_label="Virtual-Loopback" exclusive_caps=0
-ffmpeg -f v4l2 -i /dev/video0 -f v4l2 /dev/video10
-
-# terminal 2: local nxbt-orchestrator
-sudo -E env "PYTHONDONTWRITEBYTECODE=1" PATH=$PATH \
-    nxbt-orchestrator serve --reconnect-address "AA:BB:CC:DD:EE:FF"
-```
-
-Verify the camera in OBS/VLC on `/dev/video10`, then run autopilot:
-
-```bash
-nxml-autopilot --game pokemon-za \
-    --policy hf:csaben/za-ppo-v1.pt \
-    --controller http://localhost:7777 \
-    --controller-input auto \
-    --camera 10
-```
-
-If auto-detection of your gamepad fails, pass `--device-path /dev/input/eventNN`.
 
 ## Loading policies
 
@@ -114,6 +89,34 @@ needed when playing remotely.
 Tunnel over Tailscale/WireGuard for play outside your LAN; do not expose
 the port publicly without setting `--web-token` (anyone hitting it can
 drive your Switch).
+
+
+## Quick start (Ubuntu)
+
+Set up a virtual camera from your capture card and start the orchestrator:
+
+```bash
+# terminal 1: virtual camera (so multiple consumers can read the capture)
+sudo modprobe v4l2loopback devices=1 video_nr=10 \
+    card_label="Virtual-Loopback" exclusive_caps=0
+ffmpeg -f v4l2 -i /dev/video0 -f v4l2 /dev/video10
+
+# terminal 2: local nxbt-orchestrator
+sudo -E env "PYTHONDONTWRITEBYTECODE=1" PATH=$PATH \
+    nxbt-orchestrator serve --reconnect-address "AA:BB:CC:DD:EE:FF"
+```
+
+Verify the camera in OBS/VLC on `/dev/video10`, then run autopilot:
+
+```bash
+nxml-autopilot --game pokemon-za \
+    --policy hf:arelius/nxwm-pokemon-za-rl/ppo_run_062_update_0002.pt \
+    --controller http://localhost:7777 \
+    --controller-input auto \
+    --camera 10
+```
+
+If auto-detection of your gamepad fails, pass `--device-path /dev/input/eventNN`.
 
 ### Remote policy: `zmq://` (client holds VAE)
 
@@ -181,7 +184,7 @@ in the web UI is enabled automatically.
 
 ```bash
 nxml-autopilot --game pokemon-za \
-    --policy hf:csaben/za-ppo-v1.pt \
+    --policy hf:arelius/nxwm-pokemon-za-rl/ppo_run_062_update_0002.pt \
     --controller http://localhost:7777 \
     --camera 0 --input-source web --web-port 8081 \
     --macro-dir ./data/macros/pokemon-za
