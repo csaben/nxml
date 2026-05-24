@@ -3,7 +3,7 @@
 For each of the 26 action dimensions, the human's actively-contributed
 value wins. AI/macro/policy sources fill in indices the human is *not*
 actively touching, so they run non-blockingly alongside live play (the
-nxml-coplay use case).
+nxml-autopilot use case).
 
 "Actively contributing" is whatever the source chose to mark in
 ``ActionSnapshot.mask``. ``EvdevReader`` marks buttons it sees pressed and

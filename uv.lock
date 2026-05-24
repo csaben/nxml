@@ -7,9 +7,9 @@ members = [
     "nx-macros",
     "nx-packets",
     "nxml",
+    "nxml-autopilot",
     "nxml-capture",
     "nxml-collect",
-    "nxml-coplay",
     "nxml-core",
     "nxml-games",
     "nxml-mux",
@@ -864,6 +864,46 @@ dev = [
 ]
 
 [[package]]
+name = "nxml-autopilot"
+version = "0.1.0"
+source = { editable = "apps/nxml-autopilot" }
+dependencies = [
+    { name = "click" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "numpy" },
+    { name = "nx-macros" },
+    { name = "nxml-capture" },
+    { name = "nxml-mux" },
+    { name = "nxrl" },
+    { name = "nxwm" },
+    { name = "opencv-python" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+pokemon-za = [
+    { name = "nxml-games" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "click", specifier = ">=8.1" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "nx-macros", editable = "packages/nx-macros" },
+    { name = "nxml-capture", editable = "packages/nxml-capture" },
+    { name = "nxml-games", marker = "extra == 'pokemon-za'", editable = "packages/nxml-games" },
+    { name = "nxml-mux", editable = "packages/nxml-mux" },
+    { name = "nxrl", editable = "packages/nxrl" },
+    { name = "nxwm", editable = "packages/nxwm" },
+    { name = "opencv-python", specifier = ">=4.10" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+]
+provides-extras = ["pokemon-za"]
+
+[[package]]
 name = "nxml-capture"
 version = "0.1.0"
 source = { editable = "packages/nxml-capture" }
@@ -908,46 +948,6 @@ requires-dist = [
     { name = "nxml-capture", editable = "packages/nxml-capture" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
-
-[[package]]
-name = "nxml-coplay"
-version = "0.1.0"
-source = { editable = "apps/nxml-coplay" }
-dependencies = [
-    { name = "click" },
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "numpy" },
-    { name = "nx-macros" },
-    { name = "nxml-capture" },
-    { name = "nxml-mux" },
-    { name = "nxrl" },
-    { name = "nxwm" },
-    { name = "opencv-python" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.optional-dependencies]
-pokemon-za = [
-    { name = "nxml-games" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "click", specifier = ">=8.1" },
-    { name = "fastapi", specifier = ">=0.115" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "numpy", specifier = ">=1.26" },
-    { name = "nx-macros", editable = "packages/nx-macros" },
-    { name = "nxml-capture", editable = "packages/nxml-capture" },
-    { name = "nxml-games", marker = "extra == 'pokemon-za'", editable = "packages/nxml-games" },
-    { name = "nxml-mux", editable = "packages/nxml-mux" },
-    { name = "nxrl", editable = "packages/nxrl" },
-    { name = "nxwm", editable = "packages/nxwm" },
-    { name = "opencv-python", specifier = ">=4.10" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
-]
-provides-extras = ["pokemon-za"]
 
 [[package]]
 name = "nxml-core"

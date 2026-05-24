@@ -5,6 +5,9 @@ latents/
 rollouts/*
 *.mkv
 *.png
+*.gif
+tools/*.py
+!tools/latents_parquet_to_npz.py
 !assets/dit_v1/*.png
 !packages/nxml-games/src/nxml_games/pokemon_za/assets/connection_lost.png
 !packages/nxml-games/src/nxml_games/pokemon_za/assets/end_screen.png

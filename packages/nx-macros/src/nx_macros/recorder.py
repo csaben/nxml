@@ -1,6 +1,6 @@
 """Thread-safe macro recorder.
 
-The producer (e.g. nxml-coplay's action loop) calls :meth:`MacroRecorder.append`
+The producer (e.g. nxml-autopilot's action loop) calls :meth:`MacroRecorder.append`
 once per tick with the action that was just dispatched and the timestamp the
 tick started. ``stop()`` returns the in-memory :class:`Macro`; persisting it
 is the caller's choice (see :class:`nx_macros.MacroStore`).

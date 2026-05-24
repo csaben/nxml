@@ -12,7 +12,7 @@ the same endpoint reproduces the original input stream.
 - The orchestrator stays dumb (it already accepts 26-dim vectors; no new
   endpoint needed for replay).
 - Recording is a tee on the action loop in whichever app produces actions
-  (`nxml-coplay` today, others later) — not orchestrator state.
+  (`nxml-autopilot` today, others later) — not orchestrator state.
 - Macros are JSON, in a directory, with no DB. `MacroStore(root)` is the
   whole index.
 
@@ -36,7 +36,7 @@ store = MacroStore(root="./data/macros/pokemon-za")
 store.save(macro)
 loaded = store.load("walk-and-jump")
 
-# Replay through whatever poster you have (e.g. coplay's `_post_action`).
+# Replay through whatever poster you have (e.g. autopilot's `_post_action`).
 def poster(action: np.ndarray) -> None:
     ...  # POST to /action, or call a mux source, or whatever
 

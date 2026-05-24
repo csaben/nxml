@@ -1,4 +1,4 @@
-# nxml-coplay
+# nxml-autopilot
 
 Hybrid human/AI play. A human drives a PC controller (xbox / dualshock /
 etc.) via evdev while a trained `nxrl` policy proposes actions on its own
@@ -7,26 +7,26 @@ wins per-index, AI fills everything else — and the merged 26-dim action is
 POSTed to `nxbt-orchestrator`'s `/action` endpoint.
 
 Optionally records the session as a video+parquet episode (same format as
-`nxml-collect`) so coplay sessions can feed offline training.
+`nxml-collect`) so autopilot sessions can feed offline training.
 
 ## Install
 
-From a workspace checkout, just `uv sync` and use `uv run nxml-coplay …`.
+From a workspace checkout, just `uv sync` and use `uv run nxml-autopilot …`.
 
 Standalone (no clone), as a `uv tool`:
 
 ```bash
 uv tool install \
-    "git+https://github.com/csaben/nxml.git#subdirectory=apps/nxml-coplay"
+    "git+https://github.com/csaben/nxml.git#subdirectory=apps/nxml-autopilot"
 
 # Pin to a commit or tag for reproducibility:
-#   "git+https://github.com/csaben/nxml.git@<sha>#subdirectory=apps/nxml-coplay"
+#   "git+https://github.com/csaben/nxml.git@<sha>#subdirectory=apps/nxml-autopilot"
 ```
 
 pokemon-za
 ```bash
 uv tool install \
-    "nxml-coplay[pokemon-za] @ git+https://github.com/csaben/nxml.git#subdirectory=apps/nxml-coplay"
+    "nxml-autopilot[pokemon-za] @ git+https://github.com/csaben/nxml.git#subdirectory=apps/nxml-autopilot"
 ```
 
 uv clones the whole repo so the workspace siblings (`nxml-mux`, `nxrl`,
@@ -52,10 +52,10 @@ sudo -E env "PYTHONDONTWRITEBYTECODE=1" PATH=$PATH \
     nxbt-orchestrator serve --reconnect-address "AA:BB:CC:DD:EE:FF"
 ```
 
-Verify the camera in OBS/VLC on `/dev/video10`, then run coplay:
+Verify the camera in OBS/VLC on `/dev/video10`, then run autopilot:
 
 ```bash
-nxml-coplay --game pokemon-za \
+nxml-autopilot --game pokemon-za \
     --policy hf:csaben/za-ppo-v1.pt \
     --controller http://localhost:7777 \
     --controller-input auto \
@@ -77,13 +77,13 @@ If auto-detection of your gamepad fails, pass `--device-path /dev/input/eventNN`
 
 ### Remote browser play (`--input-source=web`)
 
-Run coplay on the box with the capture card and orchestrator, but drive it
+Run autopilot on the box with the capture card and orchestrator, but drive it
 from a controller plugged into a phone or laptop on your network:
 
 simple:
 
 ```bash
-nxml-coplay --game pokemon-za \
+nxml-autopilot --game pokemon-za \
     --policy hf:arelius/nxwm-pokemon-za-rl/ppo_run_062_update_0002.pt \
     --controller http://localhost:7777 \
     --camera 0 \
@@ -94,7 +94,7 @@ nxml-coplay --game pokemon-za \
 with access token:
 
 ```bash
-nxml-coplay --game pokemon-za \
+nxml-autopilot --game pokemon-za \
     --policy arelius/nxwm-pokemon-za-rl/ppo_run_062_update_0002.pt \
     --controller http://localhost:7777 \
     --camera 0 \
@@ -128,7 +128,7 @@ uv run nxrl serve \
     --port 5557
 
 # on the play box
-nxml-coplay --game pokemon-za \
+nxml-autopilot --game pokemon-za \
     --policy zmq://gpu-box:5557 \
     --controller http://localhost:7777 \
     --camera 0 --input-source web --web-port 8081 \
@@ -150,7 +150,7 @@ uv run nxrl serve \
     --enable-frame-mode
 
 # on the play box (no GPU required)
-nxml-coplay --game pokemon-za \
+nxml-autopilot --game pokemon-za \
     --policy zmq+frames://gpu-box:5557 \
     --controller http://localhost:7777 \
     --camera 0 --input-source web --web-port 8081 \
@@ -164,7 +164,7 @@ via Tailscale/WireGuard.
 ### Live runtime controls (web UI)
 
 When `--input-source=web`, the page exposes two strips of buttons that
-operate on the *running* coplay process — no restart needed:
+operate on the *running* autopilot process — no restart needed:
 
 - **AI: on / off** — flips `CachedAiSource.enabled`. Off → only your
   human input drives the Switch (the inference thread keeps running, so
@@ -180,7 +180,7 @@ Pass `--macro-dir DIR` to override where macros live. The default is
 in the web UI is enabled automatically.
 
 ```bash
-nxml-coplay --game pokemon-za \
+nxml-autopilot --game pokemon-za \
     --policy hf:csaben/za-ppo-v1.pt \
     --controller http://localhost:7777 \
     --camera 0 --input-source web --web-port 8081 \
@@ -203,14 +203,14 @@ record-toggle. Run with `--input-source=web` to use macros, or use the
 
 ### Triggers (visual-detect → run macro)
 
-The **Triggers** panel turns coplay into a "watch for a screen state, then
+The **Triggers** panel turns autopilot into a "watch for a screen state, then
 synthesize an A-mash for N seconds" loop. For Pokémon ZA the two defaults
 (`end_screen` and `connection_lost`) are seeded on first boot, both bound
 to the in-memory `MashController` — autobattling is just "tick both
 checkboxes".
 
 ```bash
-nxml-coplay --game pokemon-za \
+nxml-autopilot --game pokemon-za \
     --policy zmq+frames://gpu-box:5557 \
     --controller http://localhost:7777 \
     --camera 0 --input-source web --web-port 8081 \
@@ -255,7 +255,7 @@ retune thresholds — the seeder is idempotent and won't clobber your edits.
 ## CLI
 
 ```
-nxml-coplay --game GAME --policy URI --controller URL
+nxml-autopilot --game GAME --policy URI --controller URL
             [--controller-input MAPPER] [--device-path PATH]   # local pad selection
             [--camera N] [--capture-width PX] [--capture-height PX]
             [--input-source evdev|web]                         # default: evdev

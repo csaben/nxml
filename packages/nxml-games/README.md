@@ -17,4 +17,4 @@ dependency graph stays one-way.
   curriculum + preset. The live-inference client logic (end-screen detector,
   connection-lost detector, death state machine) lives under
   ``pokemon_za/client/``; live trigger-driven autobattling ships inside
-  ``nxml-coplay`` (Triggers + MashController).
+  ``nxml-autopilot`` (Triggers + MashController).

@@ -44,7 +44,7 @@ with mux:
         post_to_orchestrator(action)
 ```
 
-`nxml-coplay`'s runner does exactly this with a `CachedAiSource` (background
+`nxml-autopilot`'s runner does exactly this with a `CachedAiSource` (background
 inference loop) in place of `my_ai_source`.
 
 ## Platform support

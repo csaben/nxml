@@ -1,4 +1,4 @@
-"""Toggle-able recording controller for nxml-coplay.
+"""Toggle-able recording controller for nxml-autopilot.
 
 Wraps a :class:`VideoParquetEpisodeWriter` so the action loop can call
 ``append()`` every tick without caring whether recording is currently

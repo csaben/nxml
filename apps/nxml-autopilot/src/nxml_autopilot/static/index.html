@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>nxml-coplay</title>
+<title>nxml-autopilot</title>
 <style>
   :root { color-scheme: dark; }
   body {
@@ -188,7 +188,7 @@
 </style>
 </head>
 <body>
-  <header><h1>nxml-coplay</h1></header>
+  <header><h1>nxml-autopilot</h1></header>
   <img id="stream" alt="capture stream" />
   <div id="controls">
     <button id="recordBtn" type="button">Record</button>
@@ -300,7 +300,7 @@ function gamepadToAction(gp) {
 async function postAction(action) {
   try {
     const headers = { "Content-Type": "application/json" };
-    if (token) headers["X-Coplay-Token"] = token;
+    if (token) headers["X-Autopilot-Token"] = token;
     const r = await fetch("/action", {
       method: "POST",
       headers,
@@ -368,7 +368,7 @@ let recordingConfigured = true;
 
 function authHeaders(extra) {
   const h = Object.assign({}, extra || {});
-  if (token) h["X-Coplay-Token"] = token;
+  if (token) h["X-Autopilot-Token"] = token;
   return h;
 }
 

@@ -1,4 +1,4 @@
-"""Browser teleop UI for ``nxml-coplay``.
+"""Browser teleop UI for ``nxml-autopilot``.
 
 Mirrors ``nxml-collect.ui`` but routes the gamepad action into the
 :class:`WebGamepadReader` (so the mux can merge it with the AI source)
@@ -7,7 +7,7 @@ instead of POSTing straight to the orchestrator. MJPEG comes off the same
 
 Token gate: if a non-empty token is set, every request to ``/action`` and
 ``/mjpeg`` must carry it. The browser picks it up from the URL query
-``?token=…`` on first load and forwards it as ``X-Coplay-Token``.
+``?token=…`` on first load and forwards it as ``X-Autopilot-Token``.
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ from nx_macros import MacroPlayer, MacroRecorder, MacroStore, sanitize_name
 from nxml_capture.source import CaptureSource
 from nxml_mux.input_devices.readers import WebGamepadReader
 
-from nxml_coplay.recording import RecordingController, fresh_episode_path
-from nxml_coplay.triggers import TriggerStore, TriggerWatcher
+from nxml_autopilot.recording import RecordingController, fresh_episode_path
+from nxml_autopilot.triggers import TriggerStore, TriggerWatcher
 
 _MJPEG_BOUNDARY = "frame"
 _JPEG_QUALITY = 70
@@ -40,13 +40,13 @@ _MJPEG_INTERVAL = 1 / 60
 def _check_token(request: Request, expected: str) -> None:
     if not expected:
         return
-    supplied = request.headers.get("x-coplay-token") or request.query_params.get("token")
+    supplied = request.headers.get("x-autopilot-token") or request.query_params.get("token")
     if not supplied or not secrets.compare_digest(supplied, expected):
         raise HTTPException(status_code=401, detail="bad or missing token")
 
 
 def create_app(reader: WebGamepadReader, source: CaptureSource, *, token: str = "") -> FastAPI:
-    app = FastAPI(title="nxml-coplay teleop", version="0.1.0")
+    app = FastAPI(title="nxml-autopilot teleop", version="0.1.0")
     app.state.recorder = None
     app.state.record_root = None
     app.state.macro_recorder = None
@@ -56,11 +56,11 @@ def create_app(reader: WebGamepadReader, source: CaptureSource, *, token: str = 
     app.state.macro_loop = False
     app.state.trigger_store = None
     app.state.trigger_watcher = None
-    app.state.runtime = None  # CoplayRunner; set via attach_runtime
+    app.state.runtime = None  # AutopilotRunner; set via attach_runtime
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> HTMLResponse:
-        html = files("nxml_coplay").joinpath("static/index.html").read_text(encoding="utf-8")
+        html = files("nxml_autopilot").joinpath("static/index.html").read_text(encoding="utf-8")
         return HTMLResponse(html)
 
     @app.get("/mjpeg")
@@ -452,7 +452,7 @@ def create_app(reader: WebGamepadReader, source: CaptureSource, *, token: str = 
     return app
 
 
-class CoplayWebServer:
+class AutopilotWebServer:
     """uvicorn server bound to a daemon thread."""
 
     def __init__(
@@ -510,7 +510,7 @@ class CoplayWebServer:
 
         ``runtime`` must expose ``runtime_status() -> dict``,
         ``set_ai_enabled(bool)``, and ``set_mode(str)``. The concrete type is
-        ``CoplayRunner`` but kept ``Any`` here to avoid the import cycle.
+        ``AutopilotRunner`` but kept ``Any`` here to avoid the import cycle.
         """
         self.app.state.runtime = runtime
 
@@ -520,7 +520,7 @@ class CoplayWebServer:
         self._thread = threading.Thread(
             target=self._server.run,
             daemon=True,
-            name="nxml-coplay-web",
+            name="nxml-autopilot-web",
         )
         self._thread.start()
 

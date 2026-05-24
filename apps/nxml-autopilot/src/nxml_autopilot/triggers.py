@@ -7,7 +7,7 @@ through :class:`nx_macros.MacroPlayer` (or the :class:`MashController`
 for ``action_kind="mash_a"`` triggers).
 
 The action loop already yields the orchestrator POST while
-``macro_player.is_playing`` is True (see ``CoplayRunner.run``), so a
+``macro_player.is_playing`` is True (see ``AutopilotRunner.run``), so a
 fired macro automatically displaces the AI without any mux-strategy
 plumbing.
 
@@ -29,7 +29,7 @@ import numpy as np
 from nx_macros import MacroPlayer, MacroStore, sanitize_name
 from pydantic import BaseModel, Field
 
-from nxml_coplay.mash import (
+from nxml_autopilot.mash import (
     DEFAULT_MASH_DURATION_SEC,
     DEFAULT_MASH_FRAMES_PER_PHASE,
     MashController,
@@ -460,7 +460,7 @@ class TriggerWatcher:
             return
         self._stop.clear()
         self._thread = threading.Thread(
-            target=self._loop, daemon=True, name="coplay-trigger-watcher"
+            target=self._loop, daemon=True, name="autopilot-trigger-watcher"
         )
         self._thread.start()
 

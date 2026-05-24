@@ -12,7 +12,7 @@ CLIs you run directly. Each ships its own README with install + usage.
 | -------------------- | ---------------------------------------------------------------------------- | ------ |
 | `nxbt-orchestrator`  | HTTP/WS server that drives a real Switch as a Pro Controller over BlueZ.     | [`packages/nxbt-orchestrator`](packages/nxbt-orchestrator/README.md) |
 | `nxml-collect`       | Records paired `(frame, action)` episodes from a live session.               | [`apps/nxml-collect`](apps/nxml-collect/README.md) |
-| `nxml-coplay`        | Hybrid play: human drives a PC controller while a policy fills in alongside. | [`apps/nxml-coplay`](apps/nxml-coplay/README.md) |
+| `nxml-autopilot`        | Hybrid play: human drives a PC controller while a policy fills in alongside. | [`apps/nxml-autopilot`](apps/nxml-autopilot/README.md) |
 | `nxwm`               | World-model training, encoding, inference, ZMQ/HTTP serve, web UI.           | [`packages/nxwm`](packages/nxwm/README.md) |
 | `nxrl`               | BC + PPO training, policy serve (ZMQ), eval GIF.                             | [`packages/nxrl`](packages/nxrl/README.md) |
 
@@ -41,7 +41,7 @@ Workspace packages with no CLI — consumed by the tools above.
   capture card  ──▶  nxml-collect  ──▶  .mkv + .parquet
 ```
 
-**nxml-coplay** — hybrid human/AI play:
+**nxml-autopilot** — hybrid human/AI play:
 
 ```
                        ┌──▶  VAE  ──▶  policy (local or zmq://)  ─┐

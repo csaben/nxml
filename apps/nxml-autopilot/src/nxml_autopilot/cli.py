@@ -1,12 +1,12 @@
-"""nxml-coplay CLI — hybrid human/AI play.
+"""nxml-autopilot CLI — hybrid human/AI play.
 
 Usage:
 
-    nxml-coplay --game pokemon-za \\
+    nxml-autopilot --game pokemon-za \\
                 --policy hf:csaben/za-ppo-v1.pt \\
                 --controller http://localhost:7777 \\
                 --controller-input auto \\
-                --record ./data/coplay/
+                --record ./data/autopilot/
 
 Pre-requisite: ``nxbt-orchestrator`` running and connected to the target
 controller; the human's PC controller plugged in (xbox / dualshock / etc.,
@@ -22,7 +22,7 @@ from types import FrameType
 
 import click
 
-from nxml_coplay import __version__
+from nxml_autopilot import __version__
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
@@ -61,9 +61,9 @@ from nxml_coplay import __version__
 @click.option("--web-port", default=8080, type=int, show_default=True, help="Bind port for --input-source=web.")
 @click.option(
     "--web-token",
-    envvar="COPLAY_WEB_TOKEN",
+    envvar="AUTOPILOT_WEB_TOKEN",
     default=None,
-    help="Shared secret required on the WS UI. Empty = no auth (LAN-only). Env: COPLAY_WEB_TOKEN.",
+    help="Shared secret required on the WS UI. Empty = no auth (LAN-only). Env: AUTOPILOT_WEB_TOKEN.",
 )
 @click.option(
     "--web-stick-deadzone",
@@ -137,15 +137,15 @@ def main(
     device: str | None,
     tick_hz: float,
 ) -> None:
-    """Run a hybrid human/AI coplay session."""
-    from nxml_coplay.runner import CoplayConfig, CoplayRunner
+    """Run a hybrid human/AI autopilot session."""
+    from nxml_autopilot.runner import AutopilotConfig, AutopilotRunner
 
     if macro_dir is None:
         macro_dir = Path("./data/macros") / game
     if trigger_dir is None:
         trigger_dir = Path("./data/triggers") / game
 
-    config = CoplayConfig(
+    config = AutopilotConfig(
         game=game,
         policy_uri=policy_uri,
         controller_url=controller_url,
@@ -168,10 +168,10 @@ def main(
         tick_hz=tick_hz,
     )
 
-    runner = CoplayRunner(config)
+    runner = AutopilotRunner(config)
 
     def _on_signal(signum: int, _frame: FrameType | None) -> None:
-        print(f"\n[coplay] received signal {signum}, shutting down…", flush=True)
+        print(f"\n[autopilot] received signal {signum}, shutting down…", flush=True)
         runner.request_stop()
 
     signal.signal(signal.SIGINT, _on_signal)
@@ -185,4 +185,4 @@ def main(
 
 
 if __name__ == "__main__":
-    main(prog_name="nxml-coplay")
+    main(prog_name="nxml-autopilot")

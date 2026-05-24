@@ -2,7 +2,7 @@ name: pokemon_za
 version: 0.1.0
 display_name: "Pokémon ZA — Battle Shaping"
 
-# Default world-model checkpoint to suggest in nxwm UI / nxml-coplay when
+# Default world-model checkpoint to suggest in nxwm UI / nxml-autopilot when
 # this game is selected. Override per-run via CLI / config.
 default_wm: hf:csaben/za-wm-v3.pt
 
@@ -15,7 +15,7 @@ attack_buttons: [Y, X, B, A]   # action indices 22, 23, 24, 25
 presets:
   - escape_stuck
 
-# Bundled assets — resolved via importlib.resources by callers (nxml-coplay
+# Bundled assets — resolved via importlib.resources by callers (nxml-autopilot
 # seeds the two default Triggers from these PNGs on first launch).
 assets:
   end_screen: end_screen.png

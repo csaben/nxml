@@ -1,4 +1,4 @@
-"""Coplay runner: capture + AI inference + mux + POST + record.
+"""Autopilot runner: capture + AI inference + mux + POST + record.
 
 Runs two threads:
 
@@ -45,7 +45,7 @@ from nx_packets import ACTION_DIM
 
 
 @dataclass
-class CoplayConfig:
+class AutopilotConfig:
     game: str
     policy_uri: str
     controller_url: str  # http://host:port (orchestrator)
@@ -114,7 +114,7 @@ class _AiInference:
         if self._thread is not None:
             return
         self._stop.clear()
-        self._thread = threading.Thread(target=self._loop, daemon=True, name="coplay-ai")
+        self._thread = threading.Thread(target=self._loop, daemon=True, name="autopilot-ai")
         self._thread.start()
 
     def stop(self) -> None:
@@ -172,7 +172,7 @@ class _AiInference:
             except Exception as e:
                 # Log and continue so a transient server hiccup or VAE OOM
                 # doesn't silently kill the daemon thread.
-                print(f"[coplay-ai] iteration failed: {type(e).__name__}: {e}", flush=True)
+                print(f"[autopilot-ai] iteration failed: {type(e).__name__}: {e}", flush=True)
                 time.sleep(0.05)
 
 
@@ -263,7 +263,7 @@ class _RemoteFrameAiInference:
             return
         self._stop.clear()
         self._thread = threading.Thread(
-            target=self._loop, daemon=True, name="coplay-ai-frame"
+            target=self._loop, daemon=True, name="autopilot-ai-frame"
         )
         self._thread.start()
 
@@ -321,7 +321,7 @@ class _RemoteFrameAiInference:
                     time.sleep(self._min_period_s - elapsed)
             except Exception as e:
                 print(
-                    f"[coplay-ai-frame] iteration failed: {type(e).__name__}: {e}",
+                    f"[autopilot-ai-frame] iteration failed: {type(e).__name__}: {e}",
                     flush=True,
                 )
                 time.sleep(0.05)
@@ -376,12 +376,12 @@ def _pick_device_and_mapper(
 
 
 # ---------------------------------------------------------------------------
-# CoplayRunner
+# AutopilotRunner
 # ---------------------------------------------------------------------------
 
 
-class CoplayRunner:
-    def __init__(self, config: CoplayConfig) -> None:
+class AutopilotRunner:
+    def __init__(self, config: AutopilotConfig) -> None:
         from nxrl.serve import build_client
 
         self.config = config
@@ -419,7 +419,7 @@ class CoplayRunner:
         self._sequence_length = int(info["sequence_length"])
         self._latent_shape = tuple(info["latent_shape"])
         print(
-            f"[coplay] policy {info['architecture']} seq_len={self._sequence_length} "
+            f"[autopilot] policy {info['architecture']} seq_len={self._sequence_length} "
             f"latent={self._latent_shape} algo={info.get('algorithm')}"
             f"{' (frame mode — remote VAE)' if self._frame_mode else ''}"
         )
@@ -453,9 +453,9 @@ class CoplayRunner:
         self._web_server = None
         if config.input_source == "web":
             self._human = WebGamepadReader(stick_deadzone=config.web_stick_deadzone)
-            from nxml_coplay.web import CoplayWebServer
+            from nxml_autopilot.web import AutopilotWebServer
 
-            self._web_server = CoplayWebServer(
+            self._web_server = AutopilotWebServer(
                 self._human,
                 self._source,
                 host=config.web_host,
@@ -466,17 +466,17 @@ class CoplayRunner:
             url = f"http://{display_host}:{config.web_port}/"
             if config.web_token:
                 url += f"?token={config.web_token}"
-            print(f"[coplay] human input: web — open {url}")
+            print(f"[autopilot] human input: web — open {url}")
             if config.web_host in ("0.0.0.0", "::"):
                 print(
-                    f"[coplay]   (also reachable from LAN at http://<this-host-ip>:{config.web_port}/"
+                    f"[autopilot]   (also reachable from LAN at http://<this-host-ip>:{config.web_port}/"
                     f"{'?token=' + config.web_token if config.web_token else ''})"
                 )
         elif config.input_source == "evdev":
             device_path, mapper = _pick_device_and_mapper(
                 controller_input=config.controller_input, device_path=config.device_path
             )
-            print(f"[coplay] human input: {device_path} ({mapper.id})")
+            print(f"[autopilot] human input: {device_path} ({mapper.id})")
             self._human = EvdevReader(device_path, mapper)
         else:
             raise ValueError(f"unknown input_source {config.input_source!r}")
@@ -495,16 +495,16 @@ class CoplayRunner:
         self._http = httpx.Client(timeout=2.0)
 
         # Recorder controller (toggle-able from web UI; auto-start in evdev mode).
-        from nxml_coplay.recording import RecordingController
+        from nxml_autopilot.recording import RecordingController
 
         self._recorder_ctl = RecordingController(fps=config.tick_hz)
         if config.input_source == "evdev" and config.record_dir is not None:
             config.record_dir.mkdir(parents=True, exist_ok=True)
             self._recorder_ctl.start(config.record_dir)
-            print(f"[coplay] recording → {config.record_dir}")
+            print(f"[autopilot] recording → {config.record_dir}")
         elif config.input_source == "web" and config.record_dir is not None:
             config.record_dir.mkdir(parents=True, exist_ok=True)
-            print(f"[coplay] recording root: {config.record_dir} (use the toggle in the web UI)")
+            print(f"[autopilot] recording root: {config.record_dir} (use the toggle in the web UI)")
 
         # Macro recorder + player + store (always present; store is None when
         # --macro-dir wasn't passed). Recording into a no-op recorder is safe,
@@ -522,13 +522,13 @@ class CoplayRunner:
         # Synthetic A-mash controller for trigger-driven death-screen handling.
         # The action loop drives it (one ``next_action()`` per tick) so cadence
         # is ``tick_hz`` × ``frames_per_phase``.
-        from nxml_coplay.mash import MashController
+        from nxml_autopilot.mash import MashController
 
         self._mash_controller = MashController()
 
         # Trigger store + watcher. The watcher's daemon thread idles when
         # nothing is armed, so it's cheap to always-on.
-        from nxml_coplay.triggers import TriggerStore, TriggerWatcher
+        from nxml_autopilot.triggers import TriggerStore, TriggerWatcher
 
         self._trigger_store: TriggerStore | None = (
             TriggerStore(config.trigger_dir) if config.trigger_dir is not None else None
@@ -569,7 +569,7 @@ class CoplayRunner:
             payload = {"vector": action.tolist(), "source": "inference"}
             self._http.post(self._post_url, json=payload)
         except httpx.HTTPError as e:
-            print(f"[coplay] orchestrator POST failed: {e}")
+            print(f"[autopilot] orchestrator POST failed: {e}")
 
     SUPPORTED_MODES = ("human-priority", "human-takeover")
 
@@ -602,7 +602,7 @@ class CoplayRunner:
             frames.append(MacroFrame(dt=phase_dt, action=neutral))
         store.save(Macro(name="mash_a", tick_hz=1.0 / phase_dt, frames=frames))
         print(
-            f"[coplay] seeded default macro 'mash_a' "
+            f"[autopilot] seeded default macro 'mash_a' "
             f"({len(frames)} frames, ~{cycles * 2 * phase_dt:.0f}s)",
             flush=True,
         )
@@ -616,7 +616,7 @@ class CoplayRunner:
         bundled reference image is copied into ``store.images_dir`` only
         when missing.
         """
-        from nxml_coplay.triggers import TriggerSpec
+        from nxml_autopilot.triggers import TriggerSpec
 
         # CLI accepts "pokemon-za" or "pokemon_za"; normalize to the
         # importable package name.
@@ -628,12 +628,12 @@ class CoplayRunner:
             from nxml_games.pokemon_za.assets import default_triggers
         except ImportError:
             print(
-                "[coplay] --game=pokemon-za but `nxml-games` is not installed; "
+                "[autopilot] --game=pokemon-za but `nxml-games` is not installed; "
                 "skipping default-trigger seeding (`end_screen`, `connection_lost`).\n"
                 "         To enable, reinstall with the `pokemon-za` extra:\n"
                 "           uv tool install --reinstall "
-                '"nxml-coplay[pokemon-za] @ '
-                'git+https://github.com/csaben/nxml.git#subdirectory=apps/nxml-coplay"',
+                '"nxml-autopilot[pokemon-za] @ '
+                'git+https://github.com/csaben/nxml.git#subdirectory=apps/nxml-autopilot"',
                 flush=True,
             )
             return
@@ -675,7 +675,7 @@ class CoplayRunner:
                     continue
                 store.save(spec)
                 print(
-                    f"[coplay] migrated stale trigger {seed['name']!r} "
+                    f"[autopilot] migrated stale trigger {seed['name']!r} "
                     f"→ detector={spec.detector_kind} action={spec.action_kind} "
                     f"threshold={spec.similarity_threshold:.2f}",
                     flush=True,
@@ -683,7 +683,7 @@ class CoplayRunner:
                 continue
             store.save(spec)
             print(
-                f"[coplay] seeded default trigger {seed['name']!r} "
+                f"[autopilot] seeded default trigger {seed['name']!r} "
                 f"(detector={spec.detector_kind} action={spec.action_kind} "
                 f"threshold={seed['similarity_threshold']:.2f} "
                 f"cooldown={seed['cooldown_sec']:.0f}s)",
@@ -739,7 +739,7 @@ class CoplayRunner:
             self._web_server.start()
             self._web_server.wait_ready(timeout=5.0)
 
-        print(f"[coplay] running (tick={config.tick_hz}Hz, post={self._post_url})")
+        print(f"[autopilot] running (tick={config.tick_hz}Hz, post={self._post_url})")
         ticks = 0
         try:
             while not self._stop_flag.is_set():
@@ -790,7 +790,7 @@ class CoplayRunner:
 
                 ticks += 1
                 if ticks % int(config.tick_hz * 5) == 0:
-                    print(f"[coplay] ticks={ticks} ai_inferences={self._ai.inference_count}")
+                    print(f"[autopilot] ticks={ticks} ai_inferences={self._ai.inference_count}")
 
                 elapsed = time.time() - t_start
                 if elapsed < period:
@@ -819,6 +819,6 @@ class CoplayRunner:
                 self._source.stop()
                 out = self._recorder_ctl.close()
                 if out is not None:
-                    print(f"[coplay] wrote {out}")
+                    print(f"[autopilot] wrote {out}")
                 with contextlib.suppress(Exception):
                     self._http.close()
