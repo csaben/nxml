@@ -4,6 +4,9 @@ Workspace for training and deploying ML policies for Nintendo Switch games —
 from data collection (real Switch over Bluetooth) through world-model and
 RL training to live hybrid human/AI play.
 
+
+[Youtube Video](https://www.youtube.com/watch?v=okqDXIIWhPI&t=2s)
+
 ## Tools
 
 CLIs you run directly. Each ships its own README with install + usage.
