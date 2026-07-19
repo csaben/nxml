@@ -86,8 +86,17 @@ def dagger_action_parquet(*, count=80, eligible=True):
                 "ownership_source": "human",
                 "mode": "human",
                 "takeover": False,
+                "takeover_reason": None,
+                "takeover_release_remaining_ns": 0,
                 "proposal_valid": False,
                 "proposal_fresh": False,
+                "proposal_sequence": None,
+                "proposal_age_ns": None,
+                "gap_state": "none",
+                "gap_reason": None,
+                "gap_duration_ns": 0,
+                "boundary_sequence": None,
+                "boundary_acknowledged": False,
                 "bc_training_eligible": eligible,
                 "valid": True,
                 "invalid_reasons": [],
@@ -95,6 +104,19 @@ def dagger_action_parquet(*, count=80, eligible=True):
         )
     pq.write_table(pa.Table.from_pylist(rows), sink)
     return sink.getvalue()
+
+
+def test_actual_edge_physical_parquet_round_trips_strictly() -> None:
+    from nxml_core.contracts import DaggerActionRecordV2
+
+    rows = pq.read_table(io.BytesIO(dagger_action_parquet(count=3))).to_pylist()
+    assert len(rows) == 3
+    for row in rows:
+        parsed = DaggerActionRecordV2.model_validate(row)
+        assert parsed.model_dump(mode="json", exclude_unset=True) == row
+        assert parsed.bc_training_eligible is True
+        assert parsed.gap_state.value == "none"
+        assert parsed.boundary_sequence is None
 
 
 def raw_shard(episode_id="human", *, noncausal_at=None):
@@ -202,6 +224,26 @@ def test_action_decoder_accepts_dagger_rows_and_uses_applied_action_only(tmp_pat
     pq.write_table(deployed, parquet)
     with pytest.raises(ValueError, match="no eligible action rows"):
         decode_action_rows(parquet, control_source="human")
+
+
+def test_action_decoder_excludes_valid_neutral_boundary_rows(tmp_path):
+    rows = pq.read_table(io.BytesIO(dagger_action_parquet(count=8))).to_pylist()
+    zero = [0.0] * 26
+    rows[0].update(
+        {
+            "action": zero,
+            "applied_action": zero,
+            "ownership": [0] * 26,
+            "bc_training_eligible": False,
+            "boundary_sequence": 1,
+            "boundary_acknowledged": True,
+        }
+    )
+    parquet = tmp_path / "boundary.parquet"
+    pq.write_table(pa.Table.from_pylist(rows), parquet)
+    indices, _actions, total = decode_action_rows(parquet, control_source="human")
+    assert indices == list(range(1, 8))
+    assert total == 8
 
 
 def test_action_decoder_accepts_invalid_neutral_dagger_row_with_null_action_time(tmp_path):

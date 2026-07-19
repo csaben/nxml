@@ -136,6 +136,8 @@ def _dagger_row(**changes) -> dict:
         "ownership_source": "human",
         "mode": "hybrid",
         "takeover": True,
+        "takeover_reason": "stick_motion",
+        "takeover_release_remaining_ns": 125_000_000,
         "policy_id": "bc_transformer_v1",
         "policy_revision": "2f772838-2179-4739-a53c-aa95dcea35a0",
         "policy_digest": "336036bbf2d35ce7ffc303a242c9f561ba537093f85ed4e1b4ce63a4dbc9c038",
@@ -144,6 +146,13 @@ def _dagger_row(**changes) -> dict:
         "policy_observation_monotonic_ns": 4_980_000_000,
         "proposal_valid": True,
         "proposal_fresh": True,
+        "proposal_sequence": 41,
+        "proposal_age_ns": 2_000_000,
+        "gap_state": "none",
+        "gap_reason": None,
+        "gap_duration_ns": 0,
+        "boundary_sequence": None,
+        "boundary_acknowledged": False,
         "bc_training_eligible": True,
         "valid": True,
         "invalid_reasons": [],
@@ -178,6 +187,8 @@ def test_deployed_edge_row_without_eligibility_round_trips_fail_closed() -> None
                 "bc_training_eligible": True,
                 "ownership": [2] * 26,
                 "takeover": False,
+                "takeover_reason": None,
+                "takeover_release_remaining_ns": 0,
                 "applied_action": [0.25, 0.0, *([0.25] * 24)],
                 "action": [0.25, 0.0, *([0.25] * 24)],
             },
@@ -186,6 +197,24 @@ def test_deployed_edge_row_without_eligibility_round_trips_fail_closed() -> None
     ],
 )
 def test_dagger_row_rejects_unfaithful_provenance(change, message) -> None:
+    with pytest.raises(ValidationError, match=message):
+        DaggerActionRecordV2.model_validate(_dagger_row(**change))
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"takeover_reason": None}, "takeover requires a reason"),
+        ({"takeover": False}, "inactive takeover"),
+        ({"proposal_sequence": None}, "present together"),
+        ({"proposal_age_ns": 1}, "proposal_age_ns must equal"),
+        ({"gap_state": "transient_gap", "gap_reason": "policy_transient_gap"}, "active policy gaps"),
+        ({"gap_state": "disarmed", "gap_reason": "policy_transient_gap"}, "gap_reason does not match"),
+        ({"boundary_acknowledged": True}, "requires boundary_sequence"),
+        ({"boundary_sequence": 1}, "boundary rows must be neutral"),
+    ],
+)
+def test_edge_state_fields_reject_cross_field_drift(change, message) -> None:
     with pytest.raises(ValidationError, match=message):
         DaggerActionRecordV2.model_validate(_dagger_row(**change))
 
@@ -212,6 +241,8 @@ def test_invalid_neutral_edge_row_allows_null_action_time_and_fails_closed() -> 
         ownership_source=None,
         mode=None,
         takeover=False,
+        takeover_reason=None,
+        takeover_release_remaining_ns=0,
         policy_id=None,
         policy_revision=None,
         policy_digest=None,
@@ -220,6 +251,8 @@ def test_invalid_neutral_edge_row_allows_null_action_time_and_fails_closed() -> 
         policy_observation_monotonic_ns=None,
         proposal_valid=False,
         proposal_fresh=False,
+        proposal_sequence=None,
+        proposal_age_ns=None,
         bc_training_eligible=False,
         valid=False,
         invalid_reasons=["no_prior_arbitration_record"],

@@ -45,6 +45,24 @@ class DaggerModeV2(StrEnum):
     HYBRID = "hybrid"
 
 
+class TakeoverReasonV2(StrEnum):
+    STICK_MOTION = "stick_motion"
+    TRIGGER_PRESS = "trigger_press"
+    BUTTON_PRESS = "button_press"
+
+
+class GapStateV2(StrEnum):
+    NONE = "none"
+    TRANSIENT_GAP = "transient_gap"
+    RECOVERED = "recovered"
+    DISARMED = "disarmed"
+
+
+class GapReasonV2(StrEnum):
+    POLICY_TRANSIENT_GAP = "policy_transient_gap"
+    POLICY_STALL = "policy_stall"
+
+
 class OwnershipSourceV2(StrEnum):
     NONE = "none"
     HUMAN = "human"
@@ -123,6 +141,8 @@ class ActionRecordV2(ContractModel):
     ownership_source: str | None = None
     mode: str | None = None
     takeover: bool = False
+    takeover_reason: TakeoverReasonV2 | None = None
+    takeover_release_remaining_ns: NonNegativeNs = 0
     policy_id: str | None = None
     policy_revision: str | None = None
     policy_digest: str | None = None
@@ -131,6 +151,13 @@ class ActionRecordV2(ContractModel):
     policy_observation_monotonic_ns: NonNegativeNs | None = None
     proposal_valid: bool = False
     proposal_fresh: bool = False
+    proposal_sequence: int | None = Field(default=None, ge=0)
+    proposal_age_ns: NonNegativeNs | None = None
+    gap_state: GapStateV2 = GapStateV2.NONE
+    gap_reason: GapReasonV2 | None = None
+    gap_duration_ns: NonNegativeNs = 0
+    boundary_sequence: int | None = Field(default=None, ge=1)
+    boundary_acknowledged: bool = False
     applied_action_valid: bool | None = None
     bc_training_eligible: bool = False
     valid: bool
@@ -206,6 +233,45 @@ class ActionRecordV2(ContractModel):
             raise ValueError("policy_revision requires policy_id")
         if self.proposal_fresh and not self.proposal_valid:
             raise ValueError("fresh policy proposal must be valid")
+        if (self.proposal_sequence is None) != (self.proposal_age_ns is None):
+            raise ValueError("proposal_sequence and proposal_age_ns must be present together")
+        if self.proposal_sequence is not None:
+            if self.policy_monotonic_ns is None or self.effective_action_ns is None:
+                raise ValueError("proposal metadata requires action and policy timestamps")
+            if self.proposal_age_ns != self.effective_action_ns - self.policy_monotonic_ns:
+                raise ValueError("proposal_age_ns must equal action timestamp minus policy timestamp")
+        if self.proposal_valid and self.proposal_sequence is None:
+            raise ValueError("valid policy proposal requires sequence and age")
+
+        if self.takeover:
+            if self.takeover_reason is None:
+                raise ValueError("takeover requires a reason")
+        elif self.takeover_reason is not None or self.takeover_release_remaining_ns != 0:
+            raise ValueError("inactive takeover cannot retain reason or release time")
+
+        expected_gap_reason = {
+            GapStateV2.NONE: None,
+            GapStateV2.TRANSIENT_GAP: GapReasonV2.POLICY_TRANSIENT_GAP,
+            GapStateV2.RECOVERED: GapReasonV2.POLICY_TRANSIENT_GAP,
+            GapStateV2.DISARMED: GapReasonV2.POLICY_STALL,
+        }[self.gap_state]
+        if self.gap_reason != expected_gap_reason:
+            raise ValueError("gap_reason does not match gap_state")
+        if self.gap_state == GapStateV2.NONE and self.gap_duration_ns != 0:
+            raise ValueError("non-gap rows require zero gap_duration_ns")
+        if self.gap_state in {GapStateV2.TRANSIENT_GAP, GapStateV2.DISARMED} and self.valid:
+            raise ValueError("active policy gaps must be invalid neutral rows")
+        if self.gap_state == GapStateV2.RECOVERED and not (
+            self.valid and self.proposal_valid and self.proposal_fresh
+        ):
+            raise ValueError("recovered gaps require a fresh valid policy proposal")
+        if self.boundary_acknowledged and self.boundary_sequence is None:
+            raise ValueError("boundary acknowledgment requires boundary_sequence")
+        if self.boundary_sequence is not None:
+            if any(owner != OwnershipCodeV2.UNOWNED for owner in self.ownership) or any(
+                float(value) != 0.0 for value in self.applied_action
+            ):
+                raise ValueError("boundary rows must be neutral and unowned")
 
         frame_ns, action_ns = self.effective_frame_ns, self.effective_action_ns
         physical_dagger = self.frame_idx is not None
@@ -289,7 +355,11 @@ class ActionRecordV2(ContractModel):
                 raise ValueError("invalid records cannot be BC training eligible")
 
         if self.bc_training_eligible and not (
-            self.valid and applied_valid and OwnershipCodeV2.HUMAN in self.ownership
+            self.valid
+            and applied_valid
+            and OwnershipCodeV2.HUMAN in self.ownership
+            and self.gap_state == GapStateV2.NONE
+            and self.boundary_sequence is None
         ):
             raise ValueError("BC eligibility requires a valid human-owned applied action")
         return self

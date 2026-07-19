@@ -1,7 +1,7 @@
 # DAgger action and provenance contract v2
 
 This contract matches the physical Parquet writer deployed by dagger-ui at
-`19db93f`. It is additive to `nxml.episode.v2`; existing human-only rows remain
+`9b570c2`. It is additive to `nxml.episode.v2`; existing human-only rows remain
 accepted unchanged. Unknown Parquet fields are rejected by the shared strict
 validator.
 
@@ -58,8 +58,17 @@ fixed-size uint8 list using `0=unowned/neutral`, `1=human`, `2=policy`.
 | `ownership_source` | nullable string | `human`, `policy`, or `none` |
 | `mode` | nullable string | `human`, `pure_ai`, or `hybrid` |
 | `takeover` | bool | Full human takeover state |
+| `takeover_reason` | nullable string | `stick_motion`, `trigger_press`, or `button_press`; required only during takeover |
+| `takeover_release_remaining_ns` | int64 | Nonnegative grace time; zero outside takeover |
 | `proposal_valid` | bool | Policy response identity/shape/finite validation |
 | `proposal_fresh` | bool | Edge-clock freshness decision |
+| `proposal_sequence` | nullable int64 | Nonnegative immutable proposal sequence; paired with age |
+| `proposal_age_ns` | nullable int64 | Nonnegative applied time minus policy time; paired with sequence |
+| `gap_state` | string | `none`, `transient_gap`, `recovered`, or `disarmed` |
+| `gap_reason` | nullable string | State-bound `policy_transient_gap` or `policy_stall` |
+| `gap_duration_ns` | int64 | Nonnegative; zero when `gap_state=none` |
+| `boundary_sequence` | nullable int64 | Positive neutral-boundary persistence sequence |
+| `boundary_acknowledged` | bool | True only after recorder claims that boundary sequence |
 | `applied_action_valid` | nullable bool | Optional explicit applied-packet validity; absent means the value of `valid` |
 | `bc_training_eligible` | bool | Explicit row-level training permission |
 
@@ -83,7 +92,14 @@ An invalid no-prior-action row may use null action timestamps and null
 - `bc_training_eligible=false`.
 
 Invalid rows are retained for frame/media alignment and provenance but never
-train. Unknown fields remain forbidden.
+train. Transient and disarmed gaps are invalid neutral rows with state-matched
+reasons; recovered gaps require a valid, fresh policy proposal. Proposal sequence
+and age are nullable as a pair and, when present, age exactly matches applied time
+minus policy time. Acknowledged boundaries require a positive sequence, and every
+boundary row is neutral, unowned, and training-ineligible. Takeover requires hybrid
+mode, full human ownership, a typed activity reason, and a nonnegative release
+grace; inactive takeover carries neither reason nor grace. Unknown fields remain
+forbidden.
 
 ## Snapshot and BC rules
 
