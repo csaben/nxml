@@ -5,6 +5,13 @@ It does not install services, change system configuration, pair Bluetooth, or
 contain credentials. Copy the examples into place only after reviewing the
 physical-interaction and privileged steps below.
 
+`apps/nxml-edge` is the always-on supervisor. Its UI listens on port 8090,
+stores its token separately with mode `0600`, discovers capture through the
+configured `/dev/v4l/by-id` identity, and consumes autopilot's authenticated
+U4 health/eject/re-arm contract. It never accepts a command name or unit name
+from the browser: only the predefined `nxml-bt.service` and
+`nxml-autopilot.service` operations exist.
+
 ## Service and data flow
 
 ```text
@@ -31,11 +38,14 @@ uv sync --all-packages --all-extras
 install -d -m 700 ~/.config/nxml
 install -d ~/.config/systemd/user
 cp deploy/cradle-ns/cradle.env.example ~/.config/nxml/cradle.env
+cp deploy/cradle-ns/edge.json.example ~/.config/nxml/edge.json
 chmod 600 ~/.config/nxml/cradle.env
+chmod 600 ~/.config/nxml/edge.json
 ```
 
-Edit the environment file. Generate `AUTOPILOT_WEB_TOKEN` locally with
-`openssl rand -hex 32`; never commit it. Prefer a stable
+Edit the environment file. Do not put the web token in it: the supervisor
+provisions `~/.config/nxml/autopilot.token` with mode `0600`, and the static
+autopilot launcher reads that file so the two services cannot drift. Prefer a stable
 `/dev/v4l/by-id/...` path, but the current autopilot CLI accepts a numeric
 camera index, so `NXML_CAMERA_ID=0` remains the compatibility setting.
 
@@ -50,6 +60,16 @@ systemctl --user enable nxml-spool.service nxml-edge-health.timer
 
 Autopilot is intentionally not enabled until the Switch/capture preflight
 passes. Start it with `systemctl --user start nxml-autopilot.service`.
+
+The root Bluetooth unit and optional PolicyKit rule are review artifacts, not
+automatic installers. Enabling edge control of Bluetooth requires Clark to
+approve copying them to `/etc/systemd/system/nxml-bt.service` and
+`/etc/polkit-1/rules.d/49-nxml-edge.rules`, followed by daemon reload. The
+PolicyKit rule grants only start/stop/restart of `nxml-bt.service` to
+`arelius`; it does not grant arbitrary systemd or shell access.
+
+Boot persistence without a graphical login additionally requires the one-time
+administrator-approved command `sudo loginctl enable-linger arelius`.
 
 ## Privileged/physical checklist (never automate silently)
 
@@ -147,4 +167,3 @@ python deploy/cradle-ns/nxml_edge_smoke.py
 python deploy/cradle-ns/nxml_edge_smoke.py --inject autopilot-down
 python deploy/cradle-ns/nxml_edge_smoke.py --inject stale-spool
 ```
-

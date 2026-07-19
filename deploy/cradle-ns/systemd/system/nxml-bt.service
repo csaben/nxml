@@ -1,0 +1,17 @@
+[Unit]
+Description=NXML narrowly scoped Bluetooth controller service
+After=bluetooth.service
+Requires=bluetooth.service
+
+[Service]
+Type=simple
+User=root
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/arelius/.local/bin/nxbt-orchestrator serve --host 127.0.0.1 --port 7777 --reconnect-address 58:2F:40:23:3C:CA
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=90
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

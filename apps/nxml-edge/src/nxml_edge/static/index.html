@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>NXML Edge</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    body { max-width: 980px; margin: 2rem auto; padding: 0 1rem; background:#101318; color:#edf1f7; }
+    header { display:flex; justify-content:space-between; align-items:center; gap:1rem; }
+    #driver { padding:.6rem 1rem; border-radius:999px; font-weight:800; background:#394150; }
+    #driver.human { background:#087f5b } #driver.policy { background:#7048e8 }
+    #driver.human\+policy { background:#1971c2 } #driver.macro { background:#d9480f }
+    #driver.ejected, #driver.disconnected { background:#c92a2a }
+    button { padding:.7rem 1rem; margin:.3rem; border:0; border-radius:.4rem; font-weight:700; cursor:pointer; }
+    .danger { background:#e03131; color:white } .card { background:#1b2029; margin:.7rem 0; padding:1rem; border-radius:.6rem; }
+    .ok { border-left:5px solid #2f9e44 } .bad { border-left:5px solid #e03131 }
+    pre { white-space:pre-wrap; max-height:16rem; overflow:auto; color:#adb5bd; }
+  </style>
+</head>
+<body>
+  <header><div><h1>NXML Edge</h1><div id="state">Loading…</div></div><div id="driver">unknown</div></header>
+  <p><button onclick="act('start')">Start session</button><button onclick="act('retry')">Retry</button><button onclick="act('stop')">Stop</button><button class="danger" onclick="act('eject')">EMERGENCY EJECT</button><button onclick="act('rearm')">Re-arm</button></p>
+  <main id="checks"></main><h2>Recent supervisor actions</h2><pre id="logs"></pre>
+  <script>
+    const queryToken = new URLSearchParams(location.search).get('token');
+    if (queryToken) localStorage.setItem('nxmlEdgeToken', queryToken);
+    const token = queryToken || localStorage.getItem('nxmlEdgeToken') || '';
+    const options = method => ({method, headers:{'X-NXML-Edge-Token': token}});
+    async function refresh() {
+      const response = await fetch('/api/status', options('GET'));
+      if (!response.ok) { document.querySelector('#state').textContent='Authentication required'; return; }
+      const s = await response.json();
+      document.querySelector('#state').textContent = `${s.state}${s.blocked_on ? ' — blocked on '+s.blocked_on : ''}`;
+      const d = document.querySelector('#driver'); d.textContent=s.driver.toUpperCase(); d.className=s.driver;
+      document.querySelector('#checks').innerHTML=s.checks.map(c=>`<section class="card ${c.ready?'ok':'bad'}"><b>${c.dependency}: ${c.summary}</b>${(c.operator_steps||[]).map(x=>`<div>→ ${x}</div>`).join('')}</section>`).join('');
+      document.querySelector('#logs').textContent=(s.logs||[]).join('\n');
+    }
+    async function act(name) { await fetch(`/api/session/${name}`, options('POST')); await refresh(); }
+    refresh(); setInterval(refresh, 2000);
+  </script>
+</body>
+</html>

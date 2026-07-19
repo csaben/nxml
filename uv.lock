@@ -11,6 +11,7 @@ members = [
     "nxml-capture",
     "nxml-collect",
     "nxml-core",
+    "nxml-edge",
     "nxml-games",
     "nxml-mux",
     "nxml-spool",
@@ -1002,6 +1003,25 @@ dependencies = [
 requires-dist = [
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pyyaml", specifier = ">=6" },
+]
+
+[[package]]
+name = "nxml-edge"
+version = "0.1.0"
+source = { editable = "apps/nxml-edge" }
+dependencies = [
+    { name = "click" },
+    { name = "fastapi" },
+    { name = "pydantic" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "click", specifier = ">=8.1" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "pydantic", specifier = ">=2.10" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 
 [[package]]

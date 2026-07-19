@@ -1,0 +1,17 @@
+{
+  "game": "pokemon-za",
+  "switch_mac": "58:2F:40:23:3C:CA",
+  "policy_uri": "hf:arelius/nxwm-pokemon-za-rl/ppo_run_062_update_0002.pt",
+  "capture_identity": "/dev/v4l/by-id/usb-MACROSILICON_Hagibis_20210623-video-index0",
+  "capture_device_index": 0,
+  "tailnet_host": "cradle-ns",
+  "bind_host": "0.0.0.0",
+  "edge_port": 8090,
+  "autopilot_port": 8080,
+  "orchestrator_port": 7777,
+  "capture_path": "/home/arelius/captures/pokemon-za",
+  "spool_state_path": "/home/arelius/.local/state/nxml-spool",
+  "initial_driver": "human-takeover",
+  "bt_unit": "nxml-bt.service",
+  "autopilot_unit": "nxml-autopilot.service"
+}
