@@ -19,10 +19,27 @@ MODE_INFO = 0x04
 MODE_FRAME_V2 = 0x11
 MODE_RESET_V2 = 0x12
 MAX_MESSAGE_BYTES = 2 * 1024 * 1024
+INFERENCE_WIDTH = 256
+INFERENCE_HEIGHT = 128
+INFERENCE_JPEG_QUALITY = 85
 
 
 class InferenceV2Error(RuntimeError):
     pass
+
+
+def prepare_inference_jpeg(jpeg: bytes) -> bytes:
+    """Downscale off-path to the server's canonical VAE input resolution."""
+    import cv2
+
+    image = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise InferenceV2Error("capture JPEG could not be decoded")
+    resized = cv2.resize(image, (INFERENCE_WIDTH, INFERENCE_HEIGHT), interpolation=cv2.INTER_AREA)
+    ok, encoded = cv2.imencode(".jpg", resized, [cv2.IMWRITE_JPEG_QUALITY, INFERENCE_JPEG_QUALITY])
+    if not ok:
+        raise InferenceV2Error("inference JPEG could not be encoded")
+    return encoded.tobytes()
 
 
 @dataclass(frozen=True)
@@ -384,7 +401,8 @@ class RemoteInferenceWorker:
                 if observation_age < 0 or observation_age > self.stale_ns:
                     self._clear("stale observation", health="stale")
                     continue
-                result = self.client.predict_frame(frame.monotonic_ns, frame.jpeg)
+                inference_jpeg = prepare_inference_jpeg(frame.jpeg)
+                result = self.client.predict_frame(frame.monotonic_ns, inference_jpeg)
                 if result.received_monotonic_ns - frame.monotonic_ns > self.stale_ns:
                     if result.action is None:
                         with self._lock:

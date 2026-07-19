@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
+import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "deploy/cradle-ns"))
@@ -18,6 +19,7 @@ from dagger_inference_v2 import (
     InferenceV2Error,
     RemoteInferenceWorker,
     RemoteResult,
+    prepare_inference_jpeg,
 )
 
 
@@ -109,6 +111,17 @@ def test_wait_until_fresh_survives_stale_to_healthy_arm_gate_race():
     thread.join()
 
 
+def test_inference_transport_uses_server_canonical_resize_off_fast_paths():
+    source = np.zeros((1080, 1920, 3), np.uint8)
+    source[:, :, 1] = 180
+    ok, native = cv2.imencode(".jpg", source, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    assert ok
+    wire = prepare_inference_jpeg(native.tobytes())
+    decoded = cv2.imdecode(np.frombuffer(wire, np.uint8), cv2.IMREAD_COLOR)
+    assert decoded.shape == (128, 256, 3)
+    assert len(wire) < len(native)
+
+
 def proposal(timestamp=10, state="proposal", **updates):
     value = {
         "schema_id": "nxml.policy-proposal.v2",
@@ -195,11 +208,14 @@ def test_warming_is_neutral_and_bad_info_or_timeout_invalidates():
     assert failed.closed
 
 
+_TEST_JPEG = cv2.imencode(".jpg", np.zeros((16, 16, 3), np.uint8))[1].tobytes()
+
+
 @dataclass
 class Frame:
     sequence: int
     monotonic_ns: int
-    jpeg: bytes = b"jpeg"
+    jpeg: bytes = _TEST_JPEG
 
 
 class Source:
