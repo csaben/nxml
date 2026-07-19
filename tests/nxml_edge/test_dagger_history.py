@@ -1,4 +1,5 @@
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -82,3 +83,68 @@ def test_hybrid_takeover_and_release_boundary_are_complete_records():
     boundary = history.pair(frame(13))
     assert not boundary.action.any() and boundary.ownership_source == "none"
     assert boundary.human_mask.all()
+
+
+def test_human_mode_records_observed_policy_identity_and_muted_proposal():
+    history = ArbitratorHistory()
+    arb = Arbitrator(stale_ns=100)
+    arb.transition(mute=MuteMask((True,) + (False,) * 25))
+    human = proposal(10, 24)
+    policy = proposal(10, 0, 25, revision="immutable-r1")
+    applied = arb.apply(11, human, policy)
+    history.append(
+        ArbitrationRecord(
+            applied,
+            human,
+            policy,
+            "sha256:checkpoint",
+            Mode.HUMAN,
+            False,
+            True,
+            True,
+        )
+    )
+    row = history.pair(frame(12))
+    assert row.ownership_source == "human" and set(row.ownership) == {1}
+    np.testing.assert_array_equal(row.applied_action, human.action)
+    np.testing.assert_array_equal(row.policy_action, policy.action)
+    assert row.policy_revision == "immutable-r1"
+    assert row.policy_digest == "sha256:checkpoint"
+    assert row.muted_policy_action[0] == 0 and row.muted_policy_action[25] == 1
+
+
+def test_neutral_boundary_keeps_observed_policy_provenance_without_ownership():
+    history = ArbitratorHistory()
+    arb = Arbitrator(stale_ns=100)
+    human = proposal(10)
+    policy = proposal(10, 25, revision="immutable-r1")
+    boundary = arb.transition(mode=Mode.PURE_AI)
+    boundary = replace(boundary, monotonic_ns=11)
+    history.append(
+        ArbitrationRecord(
+            boundary,
+            human,
+            policy,
+            "sha256:checkpoint",
+            Mode.PURE_AI,
+            False,
+            True,
+            True,
+        )
+    )
+    row = history.pair(frame(12))
+    assert row.ownership_source == "none" and not row.applied_action.any()
+    assert row.policy_revision == "immutable-r1"
+    np.testing.assert_array_equal(row.muted_policy_action, policy.action)
+
+
+def test_stale_history_row_is_invalid_unowned_and_has_no_fabricated_identity():
+    history = ArbitratorHistory(max_age_ns=1)
+    arb = Arbitrator(stale_ns=100)
+    human = proposal(10)
+    policy = proposal(10, 25, revision="immutable-r1")
+    history.append(record(arb.apply(10, human, None), human, policy))
+    row = history.pair(frame(12))
+    assert not row.valid and row.invalid_reasons == ("stale_arbitration_record",)
+    assert row.policy_revision is None and row.policy_digest is None
+    assert not row.ownership.any() and not row.applied_action.any()
