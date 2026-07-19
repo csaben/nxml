@@ -1,6 +1,7 @@
 import hashlib
 import importlib.util
 import io
+import json
 import tarfile
 from pathlib import Path
 
@@ -108,6 +109,47 @@ def dagger_action_parquet(*, count=80, eligible=True):
     return sink.getvalue()
 
 
+
+def rolling_segment_tar(episode_id, index, start_ns, end_ns, *, eligible=True):
+    members = {
+        f"{episode_id}.{index:06d}.mkv": b"test-video-not-decoded",
+        f"{episode_id}.{index:06d}.parquet": dagger_action_parquet(count=40, eligible=eligible),
+        f"{episode_id}.{index:06d}.events.parquet": action_parquet(count=1),
+    }
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w") as archive:
+        for name, content in members.items():
+            info = tarfile.TarInfo(name); info.size = len(content); archive.addfile(info, io.BytesIO(content))
+    content = stream.getvalue(); digest = hashlib.sha256(content).hexdigest()
+    manifest = {
+        "schema_id": "nxml.segment-bundle.v1", "dataset_id": "rolling",
+        "episode_id": episode_id, "segment_id": "sha256:" + digest,
+        "sequence_index": index, "clock_id": "linux-monotonic",
+        "timeline_start_ns": start_ns, "timeline_end_ns": end_ns,
+        "object_size_bytes": len(content), "object_sha256": digest,
+        "members": [{"role": "events" if name.endswith(".events.parquet") else ("actions" if name.endswith(".parquet") else "video"), "path": name, "size_bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()} for name, data in members.items()],
+    }
+    return content, manifest
+
+
+def committed_segment_snapshot(tmp_path, *, eligible=True):
+    episode_id = "11111111-1111-4111-8111-111111111111"
+    client = TestClient(create_app(state_dir=tmp_path))
+    manifests = []
+    for index in range(2):
+        content, manifest = rolling_segment_tar(episode_id, index, index * 100, (index + 1) * 100, eligible=eligible)
+        upload = client.post("/v1/uploads", headers={"Idempotency-Key": f"rolling-{index}"}, json={"object_key": f"uploads/segments/{episode_id}/{index:06d}-{manifest['object_sha256']}.tar", "size_bytes": len(content), "sha256": manifest["object_sha256"]}).json()
+        assert client.put(upload["upload_url"], content=content).status_code == 200
+        assert client.post(f"/v1/segment-bundles/{upload['id']}/commit", json=manifest).status_code == 200
+        assert client.post(f"/v1/segments/{manifest['segment_id']}/quality-dispositions", headers={"Idempotency-Key": f"quality-{index}"}, json={"training_eligible": True, "reason": "fixture_passed", "validator": "fixture", "validator_version": "1", "validator_state": "passed"}).status_code == 201
+        manifests.append(manifest)
+    close = {"schema_id": "nxml.episode-close.v1", "dataset_id": "rolling", "episode_id": episode_id, "clock_id": "linux-monotonic", "timeline_start_ns": 0, "timeline_end_ns": 200, "segments": [{"segment_id": item["segment_id"], "sequence_index": item["sequence_index"], "timeline_start_ns": item["timeline_start_ns"], "timeline_end_ns": item["timeline_end_ns"], "object_sha256": item["object_sha256"]} for item in manifests]}
+    assert client.post(f"/v1/datasets/rolling/episodes/{episode_id}/close", headers={"Idempotency-Key": "rolling-close"}, json=close).status_code == 201
+    assert client.post(f"/v1/datasets/rolling/episodes/{episode_id}/quality-dispositions", headers={"Idempotency-Key": "episode-quality"}, json={"training_eligible": True, "reason": "fixture_passed", "validator": "fixture", "validator_version": "1"}).status_code == 201
+    snapshot = client.post("/v1/datasets/rolling/segment-snapshots").json()
+    return client, snapshot, manifests
+
+
 def test_actual_edge_physical_parquet_round_trips_strictly() -> None:
     from nxml_core.contracts import DaggerActionRecordV2
 
@@ -173,6 +215,49 @@ def committed_human_snapshot(tmp_path):
 
 def fake_encoder(_video, indices, **_kwargs):
     return np.stack([np.full((4, 16, 32), index, dtype=np.float16) for index in indices])
+
+
+
+def test_prepare_segment_snapshot_reconstructs_ordered_trainable_episode(tmp_path):
+    client, snapshot, manifests = committed_segment_snapshot(tmp_path)
+    prepared = prepare_snapshot(state_dir=tmp_path, snapshot_id=snapshot["snapshot_id"], workspace=tmp_path / "rolling-worker", config=BootstrapConfig(sequence_length=8, validation_fraction=0.2), encode_fn=fake_encoder, device="cpu")
+    assert prepared.episodes == ["11111111-1111-4111-8111-111111111111"]
+    assert (prepared.train_frames, prepared.val_frames) == (64, 16)
+    assert [item["segment_id"] for item in prepared.source_members[::2]] == snapshot["episodes"][0]["segment_ids"]
+    submitted = client.post("/v1/training/jobs", headers={"Idempotency-Key": "rolling-job-lookup"}, json={"snapshot_id": snapshot["snapshot_id"], "config": {}})
+    assert submitted.status_code == 201
+
+
+def test_prepare_segment_snapshot_rejects_missing_or_corrupt_object(tmp_path):
+    _client, snapshot, manifests = committed_segment_snapshot(tmp_path)
+    catalog = _client.app.state.catalog
+    with catalog.connect() as db:
+        row = db.execute("SELECT storage_key FROM segment_bundles WHERE segment_id=?", (manifests[0]["segment_id"],)).fetchone()
+    object_path = tmp_path / "objects" / row["storage_key"]
+    original = object_path.read_bytes(); object_path.write_bytes(b"corrupt")
+    with pytest.raises(ValueError, match="cluster segment verification failed"):
+        prepare_snapshot(state_dir=tmp_path, snapshot_id=snapshot["snapshot_id"], workspace=tmp_path / "corrupt-worker", config=BootstrapConfig(sequence_length=8), encode_fn=fake_encoder, device="cpu")
+    object_path.write_bytes(original); object_path.unlink()
+    with pytest.raises(ValueError, match="cluster segment verification failed"):
+        prepare_snapshot(state_dir=tmp_path, snapshot_id=snapshot["snapshot_id"], workspace=tmp_path / "missing-worker", config=BootstrapConfig(sequence_length=8), encode_fn=fake_encoder, device="cpu")
+
+
+def test_prepare_segment_snapshot_rejects_order_drift_and_exclusions(tmp_path):
+    client, snapshot, _manifests = committed_segment_snapshot(tmp_path)
+    with client.app.state.catalog.connect() as db:
+        body = json.loads(db.execute("SELECT manifest_json FROM segment_snapshots WHERE snapshot_id=?", (snapshot["snapshot_id"],)).fetchone()[0])
+        body["episodes"][0]["segment_ids"].reverse()
+        db.execute("UPDATE segment_snapshots SET manifest_json=? WHERE snapshot_id=?", (json.dumps(body), snapshot["snapshot_id"]))
+    with pytest.raises(ValueError, match="ordering/identity mismatch"):
+        prepare_snapshot(state_dir=tmp_path, snapshot_id=snapshot["snapshot_id"], workspace=tmp_path / "order-worker", config=BootstrapConfig(sequence_length=8), encode_fn=fake_encoder, device="cpu")
+
+    other = tmp_path / "excluded"; client, _snapshot, _ = committed_segment_snapshot(other)
+    episode_id = "11111111-1111-4111-8111-111111111111"
+    assert client.post(f"/v1/datasets/rolling/episodes/{episode_id}/quality-dispositions", headers={"Idempotency-Key": "episode-veto"}, json={"training_eligible": False, "reason": "fixture_veto", "validator": "fixture", "validator_version": "1"}).status_code == 201
+    excluded = client.post("/v1/datasets/rolling/segment-snapshots").json()
+    assert excluded["episodes"] == [] and excluded["excluded_episodes"][0]["episode_id"] == episode_id
+    with pytest.raises(ValueError, match="no materializable eligible episodes"):
+        prepare_snapshot(state_dir=other, snapshot_id=excluded["snapshot_id"], workspace=other / "worker", config=BootstrapConfig(sequence_length=8), encode_fn=fake_encoder, device="cpu")
 
 
 def test_prepare_snapshot_verifies_and_materializes_edge_compatible_data(tmp_path):

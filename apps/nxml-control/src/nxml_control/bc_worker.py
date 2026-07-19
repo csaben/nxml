@@ -244,6 +244,52 @@ def _split_episode(
     return (latents[:split], actions[:split]), (latents[split:], actions[split:])
 
 
+
+def _prepare_segment_snapshot(*, catalog, storage, snapshot_id, workspace, config, encode_fn, device):
+    with catalog.connect() as db:
+        row = db.execute("SELECT manifest_json FROM segment_snapshots WHERE snapshot_id=?", (snapshot_id,)).fetchone()
+    if row is None:
+        raise KeyError(snapshot_id)
+    snapshot = json.loads(row["manifest_json"])
+    raw_dir, latent_dir = workspace / "raw", workspace / "latents"
+    raw_dir.mkdir(parents=True); latent_dir.mkdir(parents=True)
+    train_files, val_files, episodes, source_members = [], [], [], []
+    train_frames = val_frames = 0
+    for episode in snapshot["episodes"]:
+        episode_id = episode["episode_id"]
+        episode_latents, episode_actions = [], []
+        for ordinal, segment_id in enumerate(episode["segment_ids"]):
+            with catalog.connect() as db:
+                segment = db.execute("SELECT * FROM segment_bundles WHERE segment_id=?", (segment_id,)).fetchone()
+            if segment is None:
+                raise ValueError(f"snapshot segment missing: {segment_id}")
+            manifest = json.loads(segment["manifest_json"])
+            if manifest["episode_id"] != episode_id or manifest["sequence_index"] != ordinal:
+                raise ValueError("segment snapshot ordering/identity mismatch")
+            info = storage.inspect(segment["storage_key"])
+            if info is None or (info.size_bytes, info.sha256) != (segment["size_bytes"], segment["sha256"]):
+                raise ValueError(f"cluster segment verification failed: {segment_id}")
+            segment_dir = raw_dir / hashlib.sha256(segment_id.encode()).hexdigest()[:16]
+            segment_dir.mkdir()
+            members = {item["role"]: item for item in manifest["members"]}
+            with storage.open(segment["storage_key"]) as stream, tarfile.open(fileobj=stream, mode="r:*") as archive:
+                video_path = _extract_verified(archive, members["video"], segment_dir)
+                action_path = _extract_verified(archive, members["actions"], segment_dir)
+            indices, actions, row_count = decode_action_rows(action_path, control_source="human")
+            latents = encode_fn(video_path, indices, vae_path=config.vae_path, device=device, batch_size=config.encode_batch_size, expected_frame_count=row_count)
+            if len(latents) != len(actions) or tuple(latents.shape[1:]) != (4, 16, 32):
+                raise ValueError("encoder output must align actions with latent shape (4,16,32)")
+            episode_latents.append(latents); episode_actions.append(actions)
+            source_members.extend([{**members[role], "segment_id": segment_id} for role in ("video", "actions")])
+        latents, actions = np.concatenate(episode_latents), np.concatenate(episode_actions)
+        train, val = _split_episode(latents, actions, sequence_length=config.sequence_length, val_fraction=config.validation_fraction)
+        train_path = latent_dir / f"{episode_id}.train.npz"; val_path = latent_dir / f"{episode_id}.val.npz"
+        np.savez(train_path, latents=train[0], actions=train[1].astype(np.float16)); np.savez(val_path, latents=val[0], actions=val[1].astype(np.float16))
+        train_files.append(str(train_path)); val_files.append(str(val_path)); train_frames += len(train[0]); val_frames += len(val[0]); episodes.append(episode_id)
+    if not train_files:
+        raise ValueError("segment snapshot has no materializable eligible episodes")
+    return PreparedData(train_files, val_files, train_frames, val_frames, episodes, source_members)
+
 def prepare_snapshot(
     *,
     state_dir: Path,
@@ -254,7 +300,10 @@ def prepare_snapshot(
     device: str = "cuda:0",
 ) -> PreparedData:
     catalog = Catalog(state_dir / "catalog.sqlite3")
-    snapshot = catalog.get_snapshot(snapshot_id)
+    try:
+        snapshot = catalog.get_snapshot(snapshot_id)
+    except KeyError:
+        return _prepare_segment_snapshot(catalog=catalog, storage=LocalObjectStorage(state_dir / "objects"), snapshot_id=snapshot_id, workspace=workspace, config=config, encode_fn=encode_fn, device=device)
     if snapshot.control_source != "human":
         raise ValueError("pokemon-za-bootstrap-v1 requires a human-filtered snapshot")
     storage = LocalObjectStorage(state_dir / "objects")

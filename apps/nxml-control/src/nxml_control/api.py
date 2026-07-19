@@ -717,9 +717,12 @@ def create_app(
         if not training.available:
             raise HTTPException(503, "training executor is not configured")
         try:
-            catalog.get_snapshot(body.snapshot_id)
+            try:
+                catalog.get_snapshot(body.snapshot_id)
+            except KeyError:
+                segments.get_snapshot(body.snapshot_id)
             return training.submit(TrainingSpec(body.snapshot_id, body.config, idempotency_key))
-        except KeyError as error:
+        except (KeyError, SegmentNotFoundError) as error:
             raise HTTPException(404, "snapshot not found") from error
         except ValueError as error:
             raise HTTPException(409, str(error)) from error
