@@ -51,8 +51,15 @@ class LocalObjectStorage:
                     output.write(chunk)
                     digest.update(chunk)
                     size += len(chunk)
+                output.flush()
+                os.fsync(output.fileno())
             os.link(temporary, target)
             temporary.unlink()
+            directory_fd = os.open(target.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
         except FileExistsError:
             temporary.unlink(missing_ok=True)
             existing = self.inspect(key)
