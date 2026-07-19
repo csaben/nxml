@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from nxml_control.catalog import Catalog, IdentityConflictError, InvalidManifestError, Upload
 from nxml_control.service import IngestService
 from nxml_control.storage import LocalObjectStorage
+from nxml_control.training import FakeTrainingExecutor, TrainingExecutor, TrainingJobs, TrainingSpec
 
 
 class CreateUploadRequest(BaseModel):
@@ -17,6 +18,12 @@ class CreateUploadRequest(BaseModel):
     object_key: str = Field(pattern=r"^uploads/[A-Za-z0-9._/-]+\.tar$")
     size_bytes: int = Field(gt=0)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class TrainingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    snapshot_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    config: dict[str, Any]
 
 
 class SnapshotRequest(BaseModel):
@@ -35,10 +42,13 @@ def _view(item: Upload) -> dict[str, Any]:
     return {**item.__dict__, "upload_url": f"/v1/uploads/{item.id}/content"}
 
 
-def create_app(*, state_dir: str | Path) -> FastAPI:
+def create_app(
+    *, state_dir: str | Path, training_executor: TrainingExecutor | None = None
+) -> FastAPI:
     state = Path(state_dir)
     catalog = Catalog(state / "catalog.sqlite3")
     service = IngestService(catalog, LocalObjectStorage(state / "objects"))
+    training = TrainingJobs(state / "catalog.sqlite3", training_executor or FakeTrainingExecutor())
     app = FastAPI(title="NXML ML Control Plane", version="1.0.0")
 
     @app.get("/healthz")
@@ -123,6 +133,40 @@ def create_app(*, state_dir: str | Path) -> FastAPI:
             return catalog.get_snapshot(snapshot_id).__dict__
         except KeyError as error:
             raise HTTPException(404, "snapshot not found") from error
+
+    @app.post("/v1/training/jobs", status_code=201)
+    def submit_training(
+        body: TrainingRequest,
+        idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1)],
+    ):
+        try:
+            catalog.get_snapshot(body.snapshot_id)
+            return training.submit(TrainingSpec(body.snapshot_id, body.config, idempotency_key))
+        except KeyError as error:
+            raise HTTPException(404, "snapshot not found") from error
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+
+    @app.get("/v1/training/jobs/{job_id}")
+    def training_job(job_id: str):
+        try:
+            return training.get(job_id)
+        except KeyError as error:
+            raise HTTPException(404, "training job not found") from error
+
+    @app.get("/v1/training/jobs/{job_id}/logs")
+    def training_logs(job_id: str):
+        try:
+            return {"logs": training.logs(job_id)}
+        except KeyError as error:
+            raise HTTPException(404, "training job not found") from error
+
+    @app.get("/v1/training/jobs/{job_id}/metrics")
+    def training_metrics(job_id: str):
+        try:
+            return {"metrics": training.metrics(job_id)}
+        except KeyError as error:
+            raise HTTPException(404, "training job not found") from error
 
     app.state.catalog = catalog
     app.state.ingest = service
