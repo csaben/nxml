@@ -10,14 +10,12 @@ REPO=/opt/nxml
 CONTROL_URL=http://100.80.98.4:8787
 INFERENCE_ENDPOINT=tcp://100.80.98.4:5557
 DATASET=nxml-pokemon-za-v2
-PAUSE_STATE=/run/nxml-stack-paused-vllm-qwen
+GPU0_MIN_FREE_MIB=${NXML_INFERENCE_MIN_FREE_MIB:-4096}
 ACTION=${1:-status}
 shift || true
-STOP_MANAGED_VLLM=0
 
 for arg in "$@"; do
   case "$arg" in
-    --stop-managed-vllm) STOP_MANAGED_VLLM=1 ;;
     *) printf '[nxml-stack] ERROR: unknown option: %s\n' "$arg" >&2; exit 2 ;;
   esac
 done
@@ -80,6 +78,30 @@ gpu0_conflicts() {
   nvidia-smi --query-compute-apps=pid,gpu_uuid,name --format=csv,noheader,nounits |
     awk -F', *' -v gpu="$gpu_uuid" -v keep="$inference_pid" '$2==gpu && $1!=keep {print $1 " " $3}'
 }
+gpu0_free_mib() {
+  local free
+  [[ $GPU0_MIN_FREE_MIB =~ ^[1-9][0-9]*$ ]] || die "NXML_INFERENCE_MIN_FREE_MIB must be a positive integer"
+  command -v nvidia-smi >/dev/null || die "GPU telemetry unavailable: nvidia-smi not found"
+  free=$(nvidia-smi --query-gpu=index,memory.free --format=csv,noheader,nounits |
+    awk -F', *' '$1==0 {print $2}')
+  [[ $free =~ ^[0-9]+$ ]] || die "GPU0 free-VRAM telemetry is unavailable or invalid"
+  printf '%s\n' "$free"
+}
+
+check_inference_capacity() {
+  local free conflicts
+  free=$(gpu0_free_mib)
+  conflicts=$(gpu0_conflicts) || die "GPU0 process telemetry is unavailable"
+  if [[ -n $conflicts ]]; then
+    log "GPU0 existing processes (reported only; none will be stopped):"
+    printf '%s\n' "$conflicts"
+  else
+    log "GPU0 existing compute processes: none besides managed inference"
+  fi
+  log "GPU0 inference admission: free=${free}MiB required=${GPU0_MIN_FREE_MIB}MiB"
+  (( free >= GPU0_MIN_FREE_MIB )) || die "insufficient GPU0 free VRAM for inference reserve"
+}
+
 
 verify() {
   active "$CONTROL" || die "$CONTROL is not active"
@@ -92,7 +114,7 @@ verify() {
   info=$(inference_info) || die "inference is not digest-bound ready"
   log "control=$CONTROL_URL health=ready"
   log "storage=$CONTROL_URL/v1/datasets/$DATASET/segment-status admission=admitting"
-  log "training=enabled worker=nxml-bc-worker (no job submitted)"
+  log "training_worker=configured; training GPU capacity was not assessed or reserved (no job submitted)"
   log "inference=$INFERENCE_ENDPOINT identity=$info"
   log "AI arm was not changed"
 }
@@ -130,20 +152,7 @@ start_stack() {
     verify
     return
   fi
-  local conflicts vllm_running=0
-  conflicts=$(gpu0_conflicts || true)
-  if docker inspect -f '{{.State.Running}}' vllm-qwen 2>/dev/null | grep -qx true; then
-    vllm_running=1
-  fi
-  if [[ -n $conflicts ]]; then
-    if [[ $STOP_MANAGED_VLLM -eq 1 && $vllm_running -eq 1 ]]; then
-      log "stopping explicitly selected managed GPU0 conflict docker/vllm-qwen"
-      docker stop vllm-qwen >/dev/null
-      install -m 0600 /dev/null "$PAUSE_STATE"
-      conflicts=$(gpu0_conflicts || true)
-    fi
-    [[ -z $conflicts ]] || die "unmanaged GPU0 processes remain; refusing to stop them: $conflicts"
-  fi
+  check_inference_capacity
   local control_was=0 inference_was=0 success=0
   active "$CONTROL" && control_was=1
   active "$INFERENCE" && inference_was=1
@@ -153,7 +162,6 @@ start_stack() {
     log "start failed; restoring prior service state"
     [[ $inference_was -eq 1 ]] || systemctl stop "$INFERENCE" >/dev/null 2>&1 || true
     [[ $control_was -eq 1 ]] || systemctl stop "$CONTROL" >/dev/null 2>&1 || true
-    if [[ -f $PAUSE_STATE ]]; then docker start vllm-qwen >/dev/null 2>&1 || true; rm -f "$PAUSE_STATE"; fi
     exit "$rc"
   }
   trap rollback ERR INT TERM
@@ -168,11 +176,6 @@ stop_stack() {
   need_root
   systemctl stop "$INFERENCE"
   systemctl stop "$CONTROL"
-  if [[ -f $PAUSE_STATE ]]; then
-    log "restoring managed GPU0 workload docker/vllm-qwen"
-    docker start vllm-qwen >/dev/null
-    rm -f "$PAUSE_STATE"
-  fi
   log "NXML endpoints stopped; GPU1 and unrelated workloads were untouched"
 }
 
@@ -180,13 +183,13 @@ case "$ACTION" in
   status) status ;;
   dry-run)
     log "would start $CONTROL then $INFERENCE; verify storage admission, BC worker, and digest-bound INFO"
-    log "GPU0 conflicts:"
-    gpu0_conflicts || true
+    check_inference_capacity
+    log "training GPU capacity is separate and was not assessed or reserved"
     log "no process, service, model deployment, training job, or AI arm changed"
     ;;
   start) start_stack ;;
   restart) need_root; systemctl restart "$CONTROL"; systemctl restart "$INFERENCE"; verify ;;
   stop) stop_stack ;;
   verify) verify ;;
-  *) die "usage: $0 {status|dry-run|start|verify|restart|stop} [--stop-managed-vllm]" ;;
+  *) die "usage: $0 {status|dry-run|start|verify|restart|stop}" ;;
 esac

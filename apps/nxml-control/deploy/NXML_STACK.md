@@ -13,12 +13,16 @@ sudo ~/deploy/nxml/nxml-stack restart
 sudo ~/deploy/nxml/nxml-stack stop
 ```
 
-`start` fails closed if GPU 0 contains any process other than an already-running
-NXML inference process. To stop the specifically managed `docker/vllm-qwen`
-container, pass `--stop-managed-vllm`; no other process is ever stopped. The wrapper
-records that action and restores the container if startup fails or when `stop` is
-run. GPU 1 is never selected or modified.
+`start` reports every existing GPU 0 compute process but never stops one. It admits
+the immutable inference endpoint only when `nvidia-smi` reports at least 4096 MiB
+free on physical GPU 0. Override that conservative model-load-plus-margin floor with
+the positive integer `NXML_INFERENCE_MIN_FREE_MIB`; missing, malformed, or insufficient
+telemetry fails closed. GPU 1 is never selected or modified.
 
 Successful verification prints the Tailnet control and inference endpoints, storage
 admission, BC worker capability, and immutable revision/checkpoint identity. It never
 prints the bearer token or submits a frame/action request.
+
+Inference admission does not imply training capacity. Status and verification report
+only that the real BC worker is configured; they do not claim, reserve, or occupy a
+GPU for training.
