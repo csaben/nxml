@@ -27,9 +27,7 @@ class Shard:
     api_manifest: dict[str, object]
 
 
-def pack_shard(
-    episodes: list[Episode], staging_dir: Path, shard_index: int
-) -> Shard:
+def pack_shard(episodes: list[Episode], staging_dir: Path, shard_index: int) -> Shard:
     """Write ``shard-{index:06d}.tar`` + sidecar from the given episodes."""
     staging_dir.mkdir(parents=True, exist_ok=True)
     shard_path = staging_dir / f"shard-{shard_index:06d}.tar"
@@ -85,6 +83,7 @@ def pack_shard(
                 "first_frame_timestamp_ns": raw_manifest.get("first_frame_timestamp_ns"),
                 "last_frame_timestamp_ns": raw_manifest.get("last_frame_timestamp_ns"),
                 "clock_mapping": raw_manifest.get("clock_mapping"),
+                "action_rows_schema_id": raw_manifest.get("action_rows_schema_id"),
                 "temporal_resolution": (
                     "episode_monotonic_ns"
                     if raw_manifest.get("first_frame_timestamp_ns") is not None

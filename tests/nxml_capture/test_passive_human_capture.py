@@ -172,6 +172,7 @@ def test_human_capture_roundtrip_has_temporal_bounds_events_and_checksums(
     assert all(row["applied_action"] == row["human_action"] for row in rows)
     assert all(all(row["human_mask"]) for row in rows)
     assert all(set(row["ownership"]) == {1} for row in rows)
+    assert all(row["bc_training_eligible"] is True for row in rows)
     assert all(row["invalid_reasons"] == [] for row in rows)
     assert all(row["action_monotonic_ns"] <= row["frame_monotonic_ns"] for row in rows)
     assert all(
@@ -211,6 +212,7 @@ def test_exact_equal_sample_is_causally_valid() -> None:
 def test_future_sample_from_legacy_source_is_invariant_violation() -> None:
     class LegacyController:
         is_connected = True
+
         def latest(self):
             return _snapshot(timestamp=10.2, monotonic_ns=1_200_000_000)
 

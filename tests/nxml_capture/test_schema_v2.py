@@ -81,6 +81,7 @@ def test_schema_v2_preserves_proposals_ownership_and_checksums(tmp_path: Path) -
     assert row["policy_digest"] == "sha256:abc"
     assert row["mode"] == "hybrid" and row["takeover"] is True
     assert row["proposal_valid"] is True and row["proposal_fresh"] is True
+    assert row["bc_training_eligible"] is False  # blended ownership is not BC ground truth.
 
     events = pq.read_table(tmp_path / "episode.events.parquet").to_pylist()
     assert events[0]["kind"] == "driver_changed"
@@ -92,6 +93,7 @@ def test_schema_v2_preserves_proposals_ownership_and_checksums(tmp_path: Path) -
     assert manifest["action_spec_id"] == "switch_packets.v1"
     assert manifest["action_schema_id"] == "nxml.dagger-actions.v2"
     assert manifest["action_schema_version"] == 2
+    assert manifest["action_rows_schema_id"] == "nxml.dagger-actions.v2"
     assert manifest["lineage"]["parent_policy_revision"] == "rev-6"
     assert manifest["first_frame_timestamp_ns"] == 5_000_000_000
     assert manifest["last_frame_timestamp_ns"] == 5_000_000_000

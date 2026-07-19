@@ -63,8 +63,14 @@ def test_real_writer_episode_spools_and_decodes(tmp_path: Path) -> None:
 
     uploader = FakeUploader()
     run_spooler(
-        [watch], repo_id="fake/repo", state_dir=tmp_path / "state", shard_size_mb=1,
-        settle_seconds=30, uploader=uploader, once=True, delete_after_upload=False,
+        [watch],
+        repo_id="fake/repo",
+        state_dir=tmp_path / "state",
+        shard_size_mb=1,
+        settle_seconds=30,
+        uploader=uploader,
+        once=True,
+        delete_after_upload=False,
     )
 
     # Extract the shard and decode the video member end-to-end.
@@ -81,6 +87,7 @@ def test_real_writer_episode_spools_and_decodes(tmp_path: Path) -> None:
     assert episode_entry["temporal_resolution"] == "episode_monotonic_ns"
     assert episode_entry["first_frame_timestamp_ns"] == 1_000_000_000
     assert episode_entry["last_frame_timestamp_ns"] > episode_entry["first_frame_timestamp_ns"]
+    assert episode_entry["action_rows_schema_id"] == "nxml.dagger-actions.v2"
     extract_dir = tmp_path / "extract"
     with tarfile.open(shard.path) as tar:
         tar.extractall(extract_dir, filter="data")
@@ -89,6 +96,7 @@ def test_real_writer_episode_spools_and_decodes(tmp_path: Path) -> None:
     assert manifest["schema_version"] == 2
     assert manifest["schema_id"] == "nxml.episode.v2"
     assert manifest["action_spec"] == "switch_packets.v1"
+    assert manifest["action_rows_schema_id"] == "nxml.dagger-actions.v2"
     assert manifest["episode_id"]
     assert manifest["frame_count"] == 20
     assert manifest["action_dim"] == 26
@@ -104,6 +112,7 @@ def test_real_writer_episode_spools_and_decodes(tmp_path: Path) -> None:
     assert abs(actions[10, 0] - 0.5) < 1e-5  # stick value survived the round trip
     assert table["applied_action"].equals(table["action"])
     assert table["valid"].to_pylist() == [True] * 20
+    assert table["bc_training_eligible"].to_pylist() == [False] * 20
     events = pq.read_table(extract_dir / "20260710_010101.events.parquet")
     assert events.num_rows == 0
 

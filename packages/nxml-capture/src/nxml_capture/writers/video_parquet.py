@@ -133,6 +133,7 @@ _PARQUET_SCHEMA = pa.schema(
         ("takeover", pa.bool_()),
         ("proposal_valid", pa.bool_()),
         ("proposal_fresh", pa.bool_()),
+        ("bc_training_eligible", pa.bool_()),
     ]
 )
 
@@ -360,6 +361,12 @@ class VideoParquetEpisodeWriter:
                     "takeover": synced.takeover,
                     "proposal_valid": synced.proposal_valid,
                     "proposal_fresh": synced.proposal_fresh,
+                    "bc_training_eligible": bool(
+                        synced.valid
+                        and np.isfinite(synced.applied_action).all()
+                        and synced.ownership is not None
+                        and np.all(synced.ownership == 1)
+                    ),
                 }
             )
         table = pa.Table.from_pylist(rows, schema=_PARQUET_SCHEMA)
@@ -389,6 +396,7 @@ class VideoParquetEpisodeWriter:
             "action_spec_id": ACTION_SPEC_NAME,
             "action_schema_id": ACTION_SCHEMA_ID,
             "action_schema_version": 2,
+            "action_rows_schema_id": ACTION_SCHEMA_ID,
             "action_dim": ACTION_DIM,
             "frame_count": int(frame_count),
             "fps_estimate": float(fps_est),
