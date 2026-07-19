@@ -1,15 +1,18 @@
 // Optional narrowly-scoped authorization for the unprivileged edge service.
 // Installing this file is an explicit administrator action.
 polkit.addRule(function(action, subject) {
+    if (action.id === "org.freedesktop.systemd1.manage-units") {
+        polkit.log("nxml-edge authorization action=" + action.id +
+                   " unit=" + action.lookup("unit") +
+                   " verb=" + action.lookup("verb") +
+                   " user=" + subject.user + " pid=" + subject.pid +
+                   " local=" + subject.local + " active=" + subject.active);
+    }
     if (action.id !== "org.freedesktop.systemd1.manage-units" || subject.user !== "arelius") {
         return polkit.Result.NOT_HANDLED;
     }
     var unit = action.lookup("unit");
     var verb = action.lookup("verb");
-    polkit.log("nxml-edge authorization action=" + action.id +
-               " unit=" + unit + " verb=" + verb +
-               " user=" + subject.user + " pid=" + subject.pid +
-               " local=" + subject.local + " active=" + subject.active);
     if (unit === "nxml-bt.service" &&
         (verb === "start" || verb === "stop" || verb === "restart")) {
         return polkit.Result.YES;

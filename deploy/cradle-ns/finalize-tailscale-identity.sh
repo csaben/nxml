@@ -8,8 +8,6 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 rule_source=${script_dir}/polkit/49-nxml-edge.rules
 rule_etc=/etc/polkit-1/rules.d/49-nxml-edge.rules
 rule_vendor=/usr/share/polkit-1/rules.d/49-nxml-edge.rules
-denial_log=$(mktemp /tmp/nxml-polkit-denial.XXXXXX)
-trap 'rm -f "$denial_log"' EXIT
 
 if [[ ${EUID} -ne 0 ]]; then
     echo "run this finalizer once with sudo" >&2
@@ -36,21 +34,26 @@ install -m 0644 -o root -g root "$rule_source" "$rule_vendor"
 systemctl restart polkit.service
 systemctl is-active --quiet polkit.service
 
-# Starting an already-active unit is non-mutating but still exercises the
-# exact systemd D-Bus/PolicyKit authorization path as arelius.
-runuser -u "$expected_user" -- \
-    systemctl --no-ask-password start nxml-bt.service
-systemctl is-active --quiet nxml-bt.service
-
-# Prove that the same caller cannot manage a different unit. Require ssh to be
-# active first so even an unexpected authorization could not start it.
-systemctl is-active --quiet ssh.service
-if runuser -u "$expected_user" -- \
-    systemctl --no-ask-password start ssh.service 2>"$denial_log"; then
+# Use the real unprivileged edge process as the PolicyKit subject. pkcheck is
+# run by root so it may supply the exact systemd unit/verb details, but it does
+# not call systemd or change any service state.
+edge_pid=$(pgrep -u "$(id -u "$expected_user")" -x nxml-edge | head -n 1)
+test -n "$edge_pid"
+edge_uid=$(stat -c %u "/proc/${edge_pid}")
+edge_start=$(awk '{print $22}' "/proc/${edge_pid}/stat")
+test "$edge_uid" = "$(id -u "$expected_user")"
+edge_subject=${edge_pid},${edge_start},${edge_uid}
+pkcheck --action-id org.freedesktop.systemd1.manage-units \
+    --process "$edge_subject" \
+    --detail unit nxml-bt.service \
+    --detail verb start
+if pkcheck --action-id org.freedesktop.systemd1.manage-units \
+    --process "$edge_subject" \
+    --detail unit ssh.service \
+    --detail verb start; then
     echo "narrow PolicyKit proof failed: ssh.service was authorized" >&2
     exit 1
 fi
-grep -Fq 'Interactive authentication required' "$denial_log"
 
 # Delegate only Tailscale CLI configuration to the logged-in operator, then
 # install a private Tailnet Serve proxy. This never enables Funnel.
