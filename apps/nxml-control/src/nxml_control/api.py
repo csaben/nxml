@@ -15,6 +15,8 @@ from nxml_control.models import (
     FakePolicyRuntime,
     ModelRegistry,
 )
+from nxml_control.search import SearchCatalog
+from nxml_control.search_api import create_search_router
 from nxml_control.service import IngestService
 from nxml_control.storage import LocalObjectStorage
 from nxml_control.training import FakeTrainingExecutor, TrainingExecutor, TrainingJobs, TrainingSpec
@@ -178,7 +180,9 @@ def create_app(
     service = IngestService(catalog, LocalObjectStorage(state / "objects"))
     training = TrainingJobs(state / "catalog.sqlite3", training_executor or FakeTrainingExecutor())
     models = ModelRegistry(state / "catalog.sqlite3", deployment_runtime or FakePolicyRuntime())
+    search = SearchCatalog(state / "catalog.sqlite3")
     app = FastAPI(title="NXML ML Control Plane", version="1.0.0")
+    app.include_router(create_search_router(search))
 
     @app.get("/healthz", response_model=HealthResponse)
     def health():
@@ -363,5 +367,6 @@ def create_app(
     app.state.ingest = service
     app.state.training = training
     app.state.models = models
+    app.state.search = search
     app.state.ingest = service
     return app

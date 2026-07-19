@@ -28,3 +28,9 @@ Commit accepts only this field mapping; unknown fields are rejected:
 Parquet action rows use `frame_index`, `frame_timestamp_ns`, `action_timestamp_ns`, `action_age_ns`, `applied_action`, `human_action`, `human_action_mask`, `policy_action`, `controller`, integer `ownership`, `policy_id`, `policy_revision`, `valid`, and `invalid_reasons`. Nanosecond timestamps use the manifest monotonic clock mapping; never substitute wall-clock seconds. Ownership is 0 unowned, 1 human, 2 policy. Human demonstration selection is `any(human_action_mask) OR 1 in ownership`; invalid rows are always excluded.
 
 A successful commit returns and persists `commit_id`, `upload_id`, `checksum`, `size_bytes`, `storage_key`, `state`, `committed_at`, `dataset_id`, and `shard_id`. Read it later at `GET /v1/commits/{commit_id}`. Exact retries return that original receipt. Schema failures are 422; immutable identity conflicts are 409.
+
+## Search metadata foundation
+
+Search indexing is strictly asynchronous and downstream of committed episodes. `index_versions`, `derived_artifacts`, and `annotations` are never consulted by upload commit/receipt acknowledgement, edge source deletion, inference, snapshot training, model promotion, or rollback. No embedding compute or vector database is included.
+
+Canonical clip references are `{dataset_id, episode_id, window_start_ns, window_end_ns}` with a half-open `[start_ns, end_ns)` window. Artifact episode-level references omit both window fields; annotations require both. Indexes and artifacts use explicit `pending -> running -> complete|failed` transitions and exact idempotency keys. Reserved artifact metadata includes `artifact_type`, `embedding_model`, `embedding_version`, `labels`, `derived_features`, `source_snapshot_id`, `index_version`, and `status`.
