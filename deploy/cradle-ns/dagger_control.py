@@ -10,6 +10,7 @@ import numpy as np
 DIM = 26
 SPEC = "switch_packets.v1"
 L_STICK, R_STICK = 4, 5
+STICK_DEADZONE = 0.15
 
 
 class Mode(StrEnum):
@@ -51,6 +52,8 @@ class Applied:
     disarmed: bool = False
     boundary: str | None = None
     takeover: bool = False
+    takeover_reason: str | None = None
+    takeover_release_remaining_ns: int = 0
     policy_monotonic_ns: int | None = None
     policy_observation_monotonic_ns: int | None = None
     gap_state: str = "none"
@@ -66,13 +69,17 @@ class Arbitrator:
         stale_ns: int = 55_000_000,
         hard_stall_ns: int = 250_000_000,
         max_gaps_per_window: int = 16,
+        takeover_release_grace_ns: int = 200_000_000,
     ):
         self.mode = Mode.HUMAN
         self.mute = MuteMask()
         self.stale_ns = stale_ns
         self.hard_stall_ns = hard_stall_ns
         self.max_gaps_per_window = max_gaps_per_window
+        self.takeover_release_grace_ns = takeover_release_grace_ns
         self._takeover = False
+        self._takeover_reason: str | None = None
+        self._last_human_activity_ns: int | None = None
         self._neutral_boundary: str | None = None
         self._gap_started_ns: int | None = None
         self._recent_gaps: list[int] = []
@@ -90,6 +97,8 @@ class Arbitrator:
         if mute is not None:
             self.mute = mute
         self._takeover = False
+        self._takeover_reason = None
+        self._last_human_activity_ns = None
         self._gap_started_ns = None
         return self._neutral(0, "configuration_changed")
 
@@ -99,6 +108,8 @@ class Arbitrator:
         if eject:
             self.mode = Mode.HUMAN
             self._takeover = False
+            self._takeover_reason = None
+            self._last_human_activity_ns = None
             return self._neutral(now_ns, "emergency_eject", disarmed=True)
         if self._neutral_boundary:
             reason, self._neutral_boundary = self._neutral_boundary, None
@@ -111,19 +122,21 @@ class Arbitrator:
                 if fresh_h
                 else self._neutral(now_ns, "stale_human")
             )
-        gesture = (
-            self.mode is Mode.HYBRID
-            and fresh_h
-            and human is not None
-            and human.action[L_STICK] > 0.5
-            and human.action[R_STICK] > 0.5
-        )
-        if gesture:
+        activity_reason = self._human_activity_reason(human) if fresh_h else None
+        if self.mode is Mode.HYBRID and activity_reason is not None:
+            if not self._takeover:
+                self._takeover_reason = activity_reason
             self._takeover = True
+            self._last_human_activity_ns = now_ns
         elif self.mode is Mode.HYBRID and self._takeover and fresh_h:
-            self._takeover = False
-            self._neutral_boundary = None
-            return self._neutral(now_ns, "takeover_released")
+            assert self._last_human_activity_ns is not None
+            quiet_ns = now_ns - self._last_human_activity_ns
+            if quiet_ns >= self.takeover_release_grace_ns:
+                self._takeover = False
+                self._takeover_reason = None
+                self._last_human_activity_ns = None
+                self._neutral_boundary = None
+                return self._neutral(now_ns, "takeover_released")
 
         # Explicit full-packet human takeover is independent of policy health.
         # Eject was handled above and remains the highest-priority transition.
@@ -149,8 +162,18 @@ class Arbitrator:
                     policy=policy,
                     original_policy=original_policy,
                     takeover=True,
+                    takeover_reason=self._takeover_reason,
+                    takeover_release_remaining_ns=self._takeover_remaining(now_ns),
                 )
-            return self._owned(now_ns, human, "human", 1, takeover=True)
+            return self._owned(
+                now_ns,
+                human,
+                "human",
+                1,
+                takeover=True,
+                takeover_reason=self._takeover_reason,
+                takeover_release_remaining_ns=self._takeover_remaining(now_ns),
+            )
 
         if not fresh_p:
             state, reason, duration, hard = self.observe_policy(now_ns, policy)
@@ -252,6 +275,8 @@ class Arbitrator:
         policy=None,
         original_policy=None,
         takeover=False,
+        takeover_reason=None,
+        takeover_release_remaining_ns=0,
     ):
         assert proposal is not None
         if source == "human":
@@ -271,11 +296,32 @@ class Arbitrator:
             self.mute,
             now,
             takeover=takeover,
+            takeover_reason=takeover_reason,
+            takeover_release_remaining_ns=takeover_release_remaining_ns,
             policy_monotonic_ns=original_policy.monotonic_ns if original_policy else None,
             policy_observation_monotonic_ns=(
                 original_policy.observation_monotonic_ns if original_policy else None
             ),
         )
+
+    @staticmethod
+    def _human_activity_reason(human: Proposal | None) -> str | None:
+        if human is None:
+            return None
+        action = human.action
+        if np.any(np.abs(action[:4]) > STICK_DEADZONE):
+            return "stick_motion"
+        pressed = np.flatnonzero(action[4:] > 0.5)
+        if pressed.size:
+            dimension = int(pressed[0] + 4)
+            return "trigger_press" if dimension in {11, 13} else "button_press"
+        return None
+
+    def _takeover_remaining(self, now_ns: int) -> int:
+        if self._last_human_activity_ns is None:
+            return 0
+        quiet_ns = max(0, now_ns - self._last_human_activity_ns)
+        return max(0, self.takeover_release_grace_ns - quiet_ns)
 
     def _neutral(self, now, reason, disarmed=False, gap_state="none", gap_duration_ns=0):
         z = np.zeros(DIM, np.float32)

@@ -54,6 +54,8 @@ def test_schema_v2_preserves_proposals_ownership_and_checksums(tmp_path: Path) -
             ownership_source="human",
             mode="hybrid",
             takeover=True,
+            takeover_reason="button_press",
+            takeover_release_remaining_ns=200_000_000,
             proposal_valid=True,
             proposal_fresh=True,
         )
@@ -80,6 +82,8 @@ def test_schema_v2_preserves_proposals_ownership_and_checksums(tmp_path: Path) -
     assert row["action_age_ns"] == 12_000_000
     assert row["policy_digest"] == "sha256:abc"
     assert row["mode"] == "hybrid" and row["takeover"] is True
+    assert row["takeover_reason"] == "button_press"
+    assert row["takeover_release_remaining_ns"] == 200_000_000
     assert row["proposal_valid"] is True and row["proposal_fresh"] is True
     assert row["bc_training_eligible"] is False  # blended ownership is not BC ground truth.
 

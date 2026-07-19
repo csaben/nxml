@@ -151,6 +151,22 @@ class ActionPlane:
                     if self._last_applied is not None
                     else inference.get("gap_duration_ms", 0.0)
                 ),
+                "authority": (
+                    self._last_applied.source if self._last_applied is not None else "none"
+                ),
+                "takeover": bool(
+                    self._last_applied.takeover if self._last_applied is not None else False
+                ),
+                "takeover_reason": (
+                    self._last_applied.takeover_reason
+                    if self._last_applied is not None
+                    else None
+                ),
+                "takeover_release_remaining_ms": (
+                    self._last_applied.takeover_release_remaining_ns / 1e6
+                    if self._last_applied is not None
+                    else 0.0
+                ),
                 **self.arbitrator.gap_status(),
             }
 

@@ -51,6 +51,7 @@ def test_mute_takeover_release_and_eject_records_complete_history():
     plane.arm()
     plane.set_mute(MuteMask((True,) + (False,) * 25))
     plane.set_mode(Mode.HYBRID)
+    plane.arbitrator.takeover_release_grace_ns = 1
 
     takeover = np.zeros(26, np.float32)
     takeover[[4, 5, 24]] = 1

@@ -15,16 +15,20 @@ def p(*, at=100, revision=None, dims=()):
 
 
 def test_modes_mute_and_full_packet_takeover_release_boundary():
-    a = Arbitrator()
+    a = Arbitrator(takeover_release_grace_ns=200)
     a.transition(mode=Mode.HYBRID, mute=MuteMask((True,) + (False,) * 25))
     policy = p(revision="immutable-r1", dims=(0, 25))
     out = a.apply(110, p(dims=()), policy)
     assert out.source == "policy" and out.action[0] == 0 and out.action[25] == 1
     out = a.apply(111, p(dims=(4, 5)), policy)
     assert out.source == "human" and set(out.ownership) == {1}
-    out = a.apply(112, p(dims=()), policy)
+    out = a.apply(112, p(at=112, dims=()), p(at=112, revision="immutable-r1"))
+    assert out.source == "human" and out.takeover and not out.action.any()
+    out = a.apply(310, p(at=310, dims=()), p(at=310, revision="immutable-r1"))
+    assert out.source == "human" and out.takeover
+    out = a.apply(311, p(at=311, dims=()), p(at=311, revision="immutable-r1"))
     assert out.source == "none" and out.boundary == "takeover_released"
-    assert a.apply(113, p(), policy).source == "policy"
+    assert a.apply(312, p(at=312), p(at=312, revision="immutable-r1")).source == "policy"
 
 
 def test_eject_and_stale_policy_neutral_disarm():
@@ -73,6 +77,37 @@ def test_hybrid_takeover_remains_immediate_during_policy_gap():
     a.transition(mode=Mode.HYBRID)
     out = a.apply(100, p(at=100, dims=(4, 5, 25)), None)
     assert out.source == "human" and out.takeover and out.action[25] == 1
+
+
+def test_hybrid_any_deliberate_activity_takes_full_packet_with_noise_rejected():
+    a = Arbitrator(stale_ns=1_000, takeover_release_grace_ns=200)
+    a.transition(mode=Mode.HYBRID)
+    policy = p(at=100, revision="r1", dims=(25,))
+    noise = p(at=100)
+    noise.action[0] = 0.15
+    assert a.apply(100, noise, policy).source == "policy"
+    stick = p(at=101)
+    stick.action[0] = 0.16
+    out = a.apply(101, stick, policy)
+    assert out.source == "human" and out.takeover_reason == "stick_motion"
+    assert set(out.ownership) == {1}
+    trigger = p(at=102, dims=(11,))
+    out = a.apply(102, trigger, policy)
+    assert out.source == "human" and out.action[11] == 1
+    neutral = a.apply(250, p(at=250), p(at=250, revision="r1"))
+    assert neutral.source == "human" and neutral.takeover
+    boundary = a.apply(302, p(at=302), p(at=302, revision="r1"))
+    assert boundary.source == "none" and boundary.boundary == "takeover_released"
+
+
+def test_hybrid_button_tap_latches_and_eject_remains_immediate():
+    a = Arbitrator(stale_ns=1_000, takeover_release_grace_ns=200)
+    a.transition(mode=Mode.HYBRID)
+    out = a.apply(10, p(at=10, dims=(24,)), p(at=10, revision="r1"))
+    assert out.source == "human" and out.takeover_reason == "button_press"
+    assert a.apply(11, p(at=11), p(at=11, revision="r1")).source == "human"
+    eject = a.apply(12, p(at=12), p(at=12, revision="r1"), eject=True)
+    assert eject.disarmed and eject.source == "none" and not eject.action.any()
 
 
 def test_human_mode_observes_gap_and_hard_stall_without_policy_ownership():

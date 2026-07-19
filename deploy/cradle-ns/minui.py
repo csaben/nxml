@@ -76,6 +76,7 @@ PAGE = """<!doctype html>
 <div id="bar">
   <span id="ws" class="off">input: disconnected</span>
   <span id="pad">pad: press any gamepad button</span>
+  <span id="gamepad-telemetry">L3 up · R3 up · override neutral</span>
   <span id="seq"></span>
 </div>
 <section id="ops">
@@ -103,6 +104,8 @@ PAGE = """<!doctype html>
     if(!ws||ws.readyState!==1)return;
     const g=pad(); if(!g){teardown('gamepad lost');return}
     if(ws.bufferedAmount<4096){ ws.send(JSON.stringify({vector:vec(g)})); seq++; }
+    const v=vec(g),l3=!!(g.buttons[10]&&g.buttons[10].pressed),r3=!!(g.buttons[11]&&g.buttons[11].pressed),active=v.some((x,i)=>i<4?Math.abs(x)>DEADZONE:x>0.5);
+    $('gamepad-telemetry').textContent=`L3 ${l3?'DOWN':'up'} · R3 ${r3?'DOWN':'up'} · ${active?'takeover trigger READY':'override neutral'}`;
     $('seq').textContent='seq '+seq;
     timer=setTimeout(loop,1000/HZ);
   }
@@ -115,6 +118,7 @@ PAGE = """<!doctype html>
   async function pollOps(){
     try { const s=await fetch('/api/ops/status',{cache:'no-store'}).then(r=>r.json());
       const a=s.action_plane||{}; const r=s.recording||{}; $('session').textContent=`${a.mode||'human'} · ${a.armed?'armed':'unarmed'} · ${r.state||'idle'} · ${r.frames||0} frames · ${(r.duration_seconds||0).toFixed(1)}s`;
+      $('gamepad-telemetry').className=a.takeover?'on':''; if(a.mode==='hybrid') $('gamepad-telemetry').textContent+=a.takeover?` · HUMAN OVERRIDE (${a.takeover_reason||'activity'})${a.takeover_release_remaining_ms?` · release in ${a.takeover_release_remaining_ms.toFixed(0)}ms`:''}`:' · AI authority';
       $('record').textContent=['recording','stopping'].includes(r.state)?'Stop episode':'Start episode';
       $('mode').value=a.mode||'human'; [...$('mode').options].forEach(o=>o.disabled=o.value!=='human'&&!a.armed); $('arm').disabled=!!a.armed; $('disarm').disabled=!a.armed; $('mute-set').disabled=!a.armed;
       const p=s.spool; $('spool').textContent=p?`${p.pending_episodes||0} pending · ${p.episodes_shipped||0} shipped · ${((p.local_buffered_bytes||0)/1e9).toFixed(2)} GB buffered · ${p.disk_free_gb||'?'} GB free · ${p.receipt_state||'unknown'}${p.blocked_reason?' · blocked: '+p.blocked_reason:''}`:`unavailable: ${s.errors.spool||'unknown'}`;

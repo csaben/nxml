@@ -35,7 +35,7 @@ def record(applied, human=None, policy=None, mode=Mode.HUMAN):
 
 def test_history_selects_exact_or_newest_prior_never_future():
     history = ArbitratorHistory(max_age_ns=100)
-    arb = Arbitrator(stale_ns=100)
+    arb = Arbitrator(stale_ns=100, takeover_release_grace_ns=1)
     human1, human2 = proposal(10, 25), proposal(20, 24)
     history.append(record(arb.apply(10, human1, None), human1))
     history.append(record(arb.apply(20, human2, None), human2))
@@ -70,7 +70,7 @@ def test_history_stale_is_invalid_neutral_and_mute_keeps_both_policy_packets():
 
 def test_hybrid_takeover_and_release_boundary_are_complete_records():
     history = ArbitratorHistory()
-    arb = Arbitrator(stale_ns=100)
+    arb = Arbitrator(stale_ns=100, takeover_release_grace_ns=1)
     arb.transition(mode=Mode.HYBRID)
     policy = proposal(10, 25, revision="rev")
     takeover = proposal(11, 4, 5)

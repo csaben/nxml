@@ -102,6 +102,8 @@ class ArbitratorHistory:
             ownership_source=applied.source,
             mode=record.mode.value,
             takeover=applied.takeover,
+            takeover_reason=applied.takeover_reason,
+            takeover_release_remaining_ns=applied.takeover_release_remaining_ns,
             proposal_valid=record.proposal_valid,
             proposal_fresh=record.proposal_fresh,
             proposal_sequence=policy.sequence if policy is not None else None,

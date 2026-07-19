@@ -69,6 +69,8 @@ class SyncedFrame:
     ownership_source: str | None = None
     mode: str | None = None
     takeover: bool = False
+    takeover_reason: str | None = None
+    takeover_release_remaining_ns: int = 0
     proposal_valid: bool = False
     proposal_fresh: bool = False
     proposal_sequence: int | None = None

@@ -157,7 +157,13 @@ class HumanRecordingSession:
                         timestamp=synced.timestamp,
                         monotonic_ns=synced.action_monotonic_ns,
                         source="dagger-arbitrator",
-                        payload={"mode": synced.mode},
+                        payload={
+                            "mode": synced.mode,
+                            "reason": getattr(synced, "takeover_reason", None),
+                            "release_remaining_ns": getattr(
+                                synced, "takeover_release_remaining_ns", 0
+                            ),
+                        },
                     )
                 last_takeover = synced.takeover
                 gap_state = getattr(synced, "gap_state", "none")
