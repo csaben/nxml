@@ -88,7 +88,7 @@ PAGE = """<!doctype html>
 <script>
   const HZ=60, DEADZONE=0.15, DIM=26;
   const MAP={10:4,11:5,12:6,14:7,15:8,13:9,4:10,6:11,5:12,7:13,9:18,8:19,16:20,2:22,3:23,0:24,1:25};
-  let ws=null, seq=0, timer=null;
+  let ws=null, seq=0, timer=null, controlsBusy=false;
   const $=id=>document.getElementById(id);
   function pad(){const l=navigator.getGamepads?navigator.getGamepads():[];for(const g of l)if(g&&g.mapping==='standard')return g;return null}
   function dz(v){v=Number(v)||0;return Math.abs(v)<DEADZONE?0:Math.max(-1,Math.min(1,v))}
@@ -120,7 +120,7 @@ PAGE = """<!doctype html>
       const a=s.action_plane||{}; const r=s.recording||{}; $('session').textContent=`${a.mode||'human'} · ${a.armed?'armed':'unarmed'} · ${r.state||'idle'} · ${r.frames||0} frames · ${(r.duration_seconds||0).toFixed(1)}s`;
       $('gamepad-telemetry').className=a.takeover?'on':''; if(a.mode==='hybrid') $('gamepad-telemetry').textContent+=a.takeover?` · HUMAN OVERRIDE (${a.takeover_reason||'activity'})${a.takeover_release_remaining_ms?` · release in ${a.takeover_release_remaining_ms.toFixed(0)}ms`:''}`:' · AI authority';
       $('record').textContent=['recording','stopping'].includes(r.state)?'Stop episode':'Start episode';
-      $('mode').value=a.mode||'human'; [...$('mode').options].forEach(o=>o.disabled=o.value!=='human'&&!a.armed); $('arm').disabled=!!a.armed; $('disarm').disabled=!a.armed; $('mute-set').disabled=!a.armed;
+      $('mode').value=a.mode||'human'; [...$('mode').options].forEach(o=>o.disabled=controlsBusy||(o.value!=='human'&&!a.armed)); $('arm').disabled=controlsBusy||!!a.armed; $('disarm').disabled=controlsBusy||!a.armed; $('mute-set').disabled=controlsBusy||!a.armed; $('record').disabled=controlsBusy;
       const p=s.spool; $('spool').textContent=p?`${p.pending_episodes||0} pending · ${p.episodes_shipped||0} shipped · ${((p.local_buffered_bytes||0)/1e9).toFixed(2)} GB buffered · ${p.disk_free_gb||'?'} GB free · ${p.receipt_state||'unknown'}${p.blocked_reason?' · blocked: '+p.blocked_reason:''}`:`unavailable: ${s.errors.spool||'unknown'}`;
       const c=s.cluster; $('cluster').textContent=c?`${(c.datasets.datasets||[]).length} datasets · ${(c.snapshots.snapshots||[]).length} snapshots`:`unavailable: ${s.errors.cluster||'unknown'}`;
       const d=c&&c.deployment; $('model').textContent=d&&d.active_revision?`active ${d.active_revision.slice(0,8)} · gen ${d.generation}`:'none active';
@@ -131,9 +131,9 @@ PAGE = """<!doctype html>
     } catch(e) { $('cluster').textContent='operations status unavailable'; }
   }
   pollOps(); setInterval(pollOps,5000);
-  $('record').onclick=async()=>{const stop=$('record').textContent.startsWith('Stop'); $('record').disabled=true; try{await fetch(stop?'/api/recording/stop':'/api/recording/start',{method:'POST'}); await pollOps()}finally{$('record').disabled=false}};
+  $('record').onclick=async()=>{const stop=$('record').textContent.startsWith('Stop');controlsBusy=true;await pollOps();try{await fetch(stop?'/api/recording/stop':'/api/recording/start',{method:'POST'});await pollOps()}finally{controlsBusy=false;await pollOps()}};
   $('model-load').onclick=async()=>{const revision=$('model-select').value;if(!revision)return;$('model-load').disabled=true;try{const response=await fetch('/api/models/load/'+encodeURIComponent(revision),{method:'POST'});if(!response.ok)throw new Error((await response.json()).detail||'load rejected');await pollOps()}catch(e){$('readiness').textContent='local model: rejected · '+e.message}finally{setTimeout(pollOps,500)}};
-  async function control(path,body){const response=await fetch(path,{method:'POST',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):null});if(!response.ok)throw new Error((await response.json()).detail||'control rejected');await pollOps()}
+  async function control(path,body){controlsBusy=true;await pollOps();try{const response=await fetch(path,{method:'POST',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):null});if(!response.ok)throw new Error((await response.json()).detail||'control rejected');await pollOps()}finally{controlsBusy=false;await pollOps()}}
   $('arm').onclick=()=>control('/api/control/arm').catch(e=>alert(e.message));
   $('disarm').onclick=()=>control('/api/control/disarm').catch(e=>alert(e.message));
   $('eject').onclick=()=>control('/api/control/eject').catch(e=>alert(e.message));
@@ -248,6 +248,7 @@ def create_app(
     app = FastAPI(title="nxml-minui", lifespan=lifespan)
     stream_state: dict[str, subprocess.Popen | None] = {"proc": None}
     stream_lock = threading.Lock()
+    recording_transition_lock = threading.Lock()
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
@@ -296,14 +297,18 @@ def create_app(
         return wire
 
     def recording_boundary(operation, *, kind="configuration_changed", payload=None):
-        active = recorder is not None and recorder.status()["state"] in {"recording", "stopping"}
-        if active:
-            recorder.append_boundary(kind, payload)
-            recorder.stop()
-        result = operation()
-        if active:
-            recorder.start()
-        return result
+        with recording_transition_lock:
+            active = recorder is not None and recorder.status()["state"] in {
+                "recording",
+                "stopping",
+            }
+            if active:
+                recorder.append_boundary(kind, payload)
+                recorder.stop()
+            result = operation()
+            if active:
+                recorder.start()
+            return result
 
     def arm_readiness(*, wait: bool) -> dict:
         if action_plane is None or remote_inference is None or operations is None:
@@ -443,7 +448,8 @@ def create_app(
                 reason = spool.get("blocked_reason") or "local spool admission is closed"
                 raise HTTPException(409, str(reason))
         try:
-            return recorder.start()
+            with recording_transition_lock:
+                return recorder.start()
         except RuntimeError as error:
             raise HTTPException(409, str(error)) from error
 
@@ -452,7 +458,8 @@ def create_app(
         if recorder is None:
             raise HTTPException(503, "recording is not configured")
         try:
-            return recorder.stop()
+            with recording_transition_lock:
+                return recorder.stop()
         except RuntimeError as error:
             raise HTTPException(409, str(error)) from error
 

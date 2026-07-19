@@ -137,10 +137,13 @@ class HumanRecordingSession:
                 if self._stop.is_set():
                     break
                 boundary_sequence = getattr(synced, "boundary_sequence", None)
-                if boundary_sequence is not None:
+                claim_ack = boundary_sequence is not None and self.history.claim_boundary_ack(
+                    boundary_sequence
+                )
+                if claim_ack:
                     synced = replace(synced, boundary_acknowledged=True)
                 writer.append(synced)
-                if boundary_sequence is not None:
+                if claim_ack:
                     self.history.acknowledge_boundary(boundary_sequence)
                     writer.append_event(
                         "neutral_boundary_acknowledged",

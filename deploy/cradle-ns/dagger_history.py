@@ -33,6 +33,7 @@ class ArbitratorHistory:
         # Single-writer integer handoff: recorder writes acknowledgments and
         # the 60 Hz action owner only reads. No lock or wait enters the fast path.
         self.recording_active = False
+        self.boundary_ack_claim_sequence = 0
         self.boundary_ack_sequence = 0
 
     @property
@@ -54,6 +55,13 @@ class ArbitratorHistory:
     def acknowledge_boundary(self, sequence: int) -> None:
         if sequence > self.boundary_ack_sequence:
             self.boundary_ack_sequence = sequence
+
+    def claim_boundary_ack(self, sequence: int) -> bool:
+        """Atomically claim a sequence once; recorder is the sole writer."""
+        if sequence <= self.boundary_ack_claim_sequence:
+            return False
+        self.boundary_ack_claim_sequence = sequence
+        return True
 
     def wait_for_first(self, timeout: float = 5.0) -> bool:
         return self._first.wait(timeout)

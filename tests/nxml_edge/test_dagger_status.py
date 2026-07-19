@@ -3,10 +3,12 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
@@ -268,6 +270,107 @@ def test_recording_controls_are_explicit_and_do_not_add_auth():
     with TestClient(app) as client:
         assert client.post("/api/recording/start").json()["state"] == "recording"
         assert client.post("/api/recording/stop").json()["state"] == "finalized"
+
+
+def test_stop_serializes_later_mode_change_without_episode_restart():
+    entered, release = threading.Event(), threading.Event()
+
+    class Recorder:
+        state = "recording"
+        starts = 0
+
+        def status(self):
+            return {"state": self.state, "frames": 0, "duration_seconds": 0}
+
+        def append_boundary(self, *_args, **_kwargs):
+            pass
+
+        def start(self):
+            self.starts += 1
+            self.state = "recording"
+            return self.status()
+
+        def stop(self):
+            entered.set()
+            release.wait(1)
+            self.state = "finalized"
+            return self.status()
+
+    class Plane:
+        def start(self): pass
+        def stop(self): pass
+        def status(self): return {"armed": True, "mode": "hybrid"}
+        def set_mode(self, _mode): pass
+
+    recorder = Recorder()
+    app = minui.create_app(Orchestrator(), "/dev/null", recorder=recorder, action_plane=Plane())
+    with TestClient(app) as client:
+        stop_thread = threading.Thread(target=lambda: client.post("/api/recording/stop"))
+        stop_thread.start()
+        assert entered.wait(1)
+        mode_thread = threading.Thread(
+            target=lambda: client.post("/api/control/mode/human")
+        )
+        mode_thread.start()
+        release.set()
+        stop_thread.join(2)
+        mode_thread.join(2)
+    assert recorder.state == "finalized"
+    assert recorder.starts == 0
+
+
+def test_boundary_ack_claim_and_event_are_exactly_once(monkeypatch, tmp_path):
+    from dagger_history import ArbitratorHistory
+    from nxml_capture import SyncedFrame
+
+    rows = [
+        SyncedFrame(
+            frame=np.zeros((2, 2, 3), np.uint8),
+            action=np.zeros(26, np.float32),
+            action_age=0.0,
+            valid=True,
+            takeover=False,
+            boundary_sequence=7,
+            boundary_acknowledged=False,
+            timestamp=1.0,
+            action_monotonic_ns=10,
+        ),
+        SyncedFrame(
+            frame=np.zeros((2, 2, 3), np.uint8),
+            action=np.zeros(26, np.float32),
+            action_age=0.0,
+            valid=True,
+            takeover=False,
+            boundary_sequence=7,
+            boundary_acknowledged=False,
+            timestamp=2.0,
+            action_monotonic_ns=20,
+        ),
+    ]
+
+    class Sync:
+        invalid_samples = 0
+        def __init__(self, *_args, **_kwargs): pass
+        def frames(self): yield from rows
+
+    class Writer:
+        episode_name = "episode"
+        def __init__(self): self.rows, self.events, self.config = [], [], {}
+        def append(self, row): self.rows.append(row)
+        def append_event(self, kind, **kwargs): self.events.append((kind, kwargs))
+        def __len__(self): return len(self.rows)
+        def close(self): return None
+
+    monkeypatch.setattr(recording_mod, "ArbitrationSynchronizer", Sync)
+    history, writer = ArbitratorHistory(), Writer()
+    history.begin_recording()
+    session = recording_mod.HumanRecordingSession(
+        object(), output_dir=tmp_path, history=history
+    )
+    session._record(writer)
+    assert [row.boundary_acknowledged for row in writer.rows] == [True, False]
+    assert [kind for kind, _ in writer.events].count("neutral_boundary_acknowledged") == 1
+    assert history.boundary_ack_sequence == 7
 
 
 def test_disk_pressure_closes_recording_admission():
