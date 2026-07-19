@@ -653,9 +653,8 @@ def main() -> None:
         stat = os.statvfs(rolling_root)
         total_bytes = stat.f_frsize * stat.f_blocks
         used_bytes = total_bytes - stat.f_frsize * stat.f_bfree
-        disk_budget = max(
-            4 * 1024**3,
-            min(64 * 1024**3, int(max(0, total_bytes * 0.85 - used_bytes) * 0.5)),
+        disk_budget = min(
+            64 * 1024**3, int(max(0, total_bytes * 0.85 - used_bytes) * 0.5)
         )
         pending_budget = min(args.segment_max_pending_bytes, disk_budget)
         segment_worker = SegmentDeliveryWorker(
