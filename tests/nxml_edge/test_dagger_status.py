@@ -5,6 +5,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +25,7 @@ def load(name: str, path: Path):
 
 
 status_mod = load("dagger_status", DEPLOY / "dagger_status.py")
+recording_mod = load("dagger_recording", DEPLOY / "dagger_recording.py")
 minui = load("dagger_minui", DEPLOY / "minui.py")
 
 
@@ -85,3 +87,84 @@ def test_bind_rejects_non_tailnet_interfaces(host):
 
 def test_bind_accepts_cradle_ns_tailnet_ip():
     assert minui.validate_tailnet_bind("100.73.109.68") == "100.73.109.68"
+
+
+def test_recording_controls_are_explicit_and_do_not_add_auth():
+    class Recorder:
+        state = "idle"
+
+        def status(self):
+            return {"state": self.state, "frames": 0, "duration_seconds": 0}
+
+        def start(self):
+            self.state = "recording"
+            return self.status()
+
+        def stop(self):
+            self.state = "finalized"
+            return self.status()
+
+    recorder = Recorder()
+    app = minui.create_app(Orchestrator(), "/dev/null", recorder=recorder)
+    with TestClient(app) as client:
+        assert client.post("/api/recording/start").json()["state"] == "recording"
+        assert client.post("/api/recording/stop").json()["state"] == "finalized"
+
+
+def test_recording_session_finalizes_and_stamps_integrity(monkeypatch, tmp_path):
+    class Controller:
+        def __init__(self, **_kwargs): pass
+        def start(self): pass
+        def stop(self): pass
+
+    class Sync:
+        invalid_samples = 0
+        def __init__(self, *_args, **_kwargs): pass
+        def frames(self):
+            yield SimpleNamespace(valid=True)
+
+    class Writer:
+        episode_name = "episode"
+        def __init__(self):
+            self.count = 0
+            self.config = {}
+        def append(self, _synced): self.count += 1
+        def __len__(self): return self.count
+        def close(self): return None
+
+    monkeypatch.setattr(recording_mod, "ControllerSubscription", Controller)
+    monkeypatch.setattr(recording_mod, "Synchronizer", Sync)
+    session = recording_mod.HumanRecordingSession(object(), output_dir=tmp_path)
+    writer = Writer()
+    session._record(writer)
+    assert session.status()["state"] == "finalized"
+    assert session.status()["frames"] == 1
+    assert writer.config["capture_integrity"] == {"status": "complete", "error": None}
+
+
+def test_recording_loss_is_a_visible_failed_state(monkeypatch, tmp_path):
+    class Controller:
+        def __init__(self, **_kwargs): pass
+        def start(self): pass
+        def stop(self): pass
+
+    class Sync:
+        invalid_samples = 0
+        def __init__(self, *_args, **_kwargs): pass
+        def frames(self): raise recording_mod.CaptureFrameLossError("lost source frames")
+
+    class Writer:
+        episode_name = "episode"
+        def __init__(self):
+            self.config = {}
+        def append_event(self, *_args, **_kwargs): pass
+        def close(self): return None
+
+    monkeypatch.setattr(recording_mod, "ControllerSubscription", Controller)
+    monkeypatch.setattr(recording_mod, "Synchronizer", Sync)
+    session = recording_mod.HumanRecordingSession(object(), output_dir=tmp_path)
+    writer = Writer()
+    session._record(writer)
+    assert session.status()["state"] == "failed"
+    assert "lost source frames" in session.status()["error"]
+    assert writer.config["capture_integrity"]["status"] == "failed"

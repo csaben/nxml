@@ -27,12 +27,14 @@ import time
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, StreamingResponse
 from nxml_capture.backends.ffmpeg_v4l2 import v4l2_mjpeg_stream_command
 
 sys.path.insert(0, str(Path(__file__).parent))
+from dagger_recording import HumanRecordingSession
 from dagger_status import OperationsReader
+from nxml_capture.backends.mjpeg_fanout import MjpegFanoutSource
 
 ACTION_DIM = 26
 CAPTURE_DEVICE = "/dev/v4l/by-id/usb-MACROSILICON_Hagibis_20210623-video-index0"
@@ -61,6 +63,7 @@ PAGE = """<!doctype html>
   .label { color:#9aa7b5; font-size:.75rem; text-transform:uppercase; }
   .value { margin-top:.25rem; }
   .on { color:#51cf66 } .off { color:#ff6b6b }
+  button { background:#2b3440; color:#eef3f8; border:1px solid #465363; border-radius:.35rem; padding:.4rem .7rem; }
 </style></head><body>
 <img id="preview" src="/stream.mjpeg" alt="Switch capture">
 <div id="bar">
@@ -69,7 +72,7 @@ PAGE = """<!doctype html>
   <span id="seq"></span>
 </div>
 <section id="ops">
- <div class="card"><div class="label">Session</div><div class="value" id="session">human · idle</div></div>
+ <div class="card"><div class="label">Session</div><div class="value" id="session">human · idle</div><div class="value"><button id="record">Start episode</button></div></div>
  <div class="card"><div class="label">Local spool</div><div class="value" id="spool">loading…</div></div>
  <div class="card"><div class="label">Cluster</div><div class="value" id="cluster">loading…</div></div>
  <div class="card"><div class="label">Model</div><div class="value" id="model">loading…</div></div>
@@ -104,13 +107,15 @@ PAGE = """<!doctype html>
   setInterval(()=>{if(!ws)connect()},1000);
   async function pollOps(){
     try { const s=await fetch('/api/ops/status',{cache:'no-store'}).then(r=>r.json());
-      $('session').textContent=`${s.session.mode} · ${s.session.recording_state}`;
+      const r=s.recording||{}; $('session').textContent=`human · ${r.state||'idle'} · ${r.frames||0} frames · ${(r.duration_seconds||0).toFixed(1)}s`;
+      $('record').textContent=['recording','stopping'].includes(r.state)?'Stop episode':'Start episode';
       const p=s.spool; $('spool').textContent=p?`${p.pending_episodes||0} pending · ${p.episodes_uploaded||0} shipped`:`unavailable: ${s.errors.spool||'unknown'}`;
       const c=s.cluster; $('cluster').textContent=c?`${(c.datasets.datasets||[]).length} datasets · ${(c.snapshots.snapshots||[]).length} snapshots`:`unavailable: ${s.errors.cluster||'unknown'}`;
       const d=c&&c.deployment; $('model').textContent=d&&d.active_revision?`active ${d.active_revision.slice(0,8)} · gen ${d.generation}`:'none active';
     } catch(e) { $('cluster').textContent='operations status unavailable'; }
   }
   pollOps(); setInterval(pollOps,5000);
+  $('record').onclick=async()=>{const stop=$('record').textContent.startsWith('Stop'); $('record').disabled=true; try{await fetch(stop?'/api/recording/stop':'/api/recording/start',{method:'POST'}); await pollOps()}finally{$('record').disabled=false}};
 </script></body></html>"""
 
 
@@ -143,16 +148,22 @@ def create_app(
     orchestrator: OrchestratorClient,
     capture_device: str,
     operations: OperationsReader | None = None,
+    capture_source: MjpegFanoutSource | None = None,
+    recorder: HumanRecordingSession | None = None,
 ) -> FastAPI:
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
         if operations is not None:
             operations.start()
+        if capture_source is not None:
+            capture_source.start()
         try:
             yield
         finally:
             if operations is not None:
                 operations.stop()
+            if capture_source is not None:
+                capture_source.stop()
 
     app = FastAPI(title="nxml-minui", lifespan=lifespan)
     stream_state: dict[str, subprocess.Popen | None] = {"proc": None}
@@ -166,7 +177,27 @@ def create_app(
     def ops_status() -> dict:
         if operations is None:
             return {"schema_version": "nxml.dagger-operations-status.v1", "observed_at": time.time(), "session": {"schema_version": "nxml.dagger-session-status.v1", "mode": "human", "recording_state": "idle", "recording_available": False, "recording_blocked_reason": "Operations polling is not configured"}, "spool": None, "cluster": None, "errors": {"operations": "not configured"}}
-        return operations.snapshot().wire()
+        wire = operations.snapshot().wire()
+        wire["recording"] = recorder.status() if recorder is not None else {"state": "unavailable"}
+        return wire
+
+    @app.post("/api/recording/start")
+    def recording_start() -> dict:
+        if recorder is None:
+            raise HTTPException(503, "recording is not configured")
+        try:
+            return recorder.start()
+        except RuntimeError as error:
+            raise HTTPException(409, str(error)) from error
+
+    @app.post("/api/recording/stop")
+    def recording_stop() -> dict:
+        if recorder is None:
+            raise HTTPException(503, "recording is not configured")
+        try:
+            return recorder.stop()
+        except RuntimeError as error:
+            raise HTTPException(409, str(error)) from error
 
     @app.websocket("/ws")
     async def ws_input(ws: WebSocket) -> None:
@@ -194,6 +225,17 @@ def create_app(
 
     @app.get("/stream.mjpeg")
     def stream() -> StreamingResponse:
+        if capture_source is not None:
+            def shared_frames():
+                sequence = -1
+                while True:
+                    item = capture_source.latest_mjpeg(after_sequence=sequence)
+                    if item is None:
+                        continue
+                    sequence = item.sequence
+                    yield b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(item.jpeg)).encode() + b"\r\n\r\n" + item.jpeg + b"\r\n"
+            return StreamingResponse(shared_frames(), media_type="multipart/x-mixed-replace; boundary=frame", headers={"Cache-Control": "no-store, private"})
+
         def frames():
             with stream_lock:
                 old = stream_state["proc"]
@@ -247,6 +289,7 @@ def main() -> None:
     parser.add_argument("--spool-status", type=Path, default=Path("~/.local/state/nxml-spool/status.json").expanduser())
     parser.add_argument("--cluster-url", default="http://100.80.98.4:8787")
     parser.add_argument("--cluster-token", type=Path, default=Path("~/.config/nxml/cluster.token").expanduser())
+    parser.add_argument("--capture-output", type=Path, default=Path("~/captures/pokemon-za").expanduser())
     args = parser.parse_args()
     try:
         validate_tailnet_bind(args.host)
@@ -258,7 +301,9 @@ def main() -> None:
         cluster_url=args.cluster_url,
         cluster_token_path=args.cluster_token,
     )
-    uvicorn.run(create_app(client, args.capture, operations), host=args.host, port=args.port)
+    fanout = MjpegFanoutSource(args.capture)
+    recorder = HumanRecordingSession(fanout, output_dir=args.capture_output)
+    uvicorn.run(create_app(client, args.capture, operations, fanout, recorder), host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

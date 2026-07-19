@@ -12,6 +12,13 @@ it. Bind them only to the Tailnet (never Funnel/public/wider interfaces) and
 prioritize momentum. This does not automatically remove existing private
 machine-to-machine credentials such as the ml-stream cluster token.
 
+For E2E development, strict filesystem ownership of that machine token must
+not block operator tooling: it is acceptable for the deployed nxml-control
+token to be readable by the operator account and development processes. The
+token must still stay server-side and must never be echoed into user-facing
+browser responses or logs. This does not change the Tailnet UI no-auth
+preference above.
+
 ## What was wrong, and what changed
 
 ### 1. CPU burn / loud fans — root-caused
