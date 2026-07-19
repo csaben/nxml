@@ -366,6 +366,31 @@ class RemoteInferenceWorker:
                     continue
                 result = self.client.predict_frame(frame.monotonic_ns, frame.jpeg)
                 if result.received_monotonic_ns - frame.monotonic_ns > self.stale_ns:
+                    if result.action is None:
+                        with self._lock:
+                            old = self._status
+                            warming = old.warming + 1
+                            self._status = RemoteInferenceStatus(
+                                enabled=True,
+                                ready=True,
+                                health="warming",
+                                revision=self.client.revision["revision_id"],
+                                checkpoint_sha256=self.client.revision["checkpoint_sha256"],
+                                sequence_length=self.client.revision["compatibility"][
+                                    "sequence_length"
+                                ],
+                                warmup_frames=min(
+                                    warming,
+                                    self.client.revision["compatibility"]["sequence_length"] - 1,
+                                ),
+                                frames_sent=old.frames_sent + 1,
+                                proposals=old.proposals,
+                                warming=warming,
+                                reconnects=old.reconnects,
+                                observation_age_ms=observation_age / 1e6,
+                                transport_latency_ms=result.transport_latency_ns / 1e6,
+                                processing_latency_ms=(result.processing_latency_ns or 0) / 1e6,
+                            )
                     self._clear("stale remote proposal", health="stale")
                     continue
                 with self._lock:

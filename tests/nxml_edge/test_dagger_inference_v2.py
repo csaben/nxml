@@ -291,3 +291,20 @@ def test_33ms_freshness_budget_never_reuses_old_proposal():
     assert worker.latest_proposal() is None
     assert worker.status()["health"] == "stale"
     worker.stop()
+
+
+def test_late_warming_counts_history_but_never_becomes_proposal():
+    now = time.monotonic_ns()
+    result = RemoteResult(None, "warming", now, now + 40_000_000, 40_000_000, 39_000_000, 1)
+    worker = RemoteInferenceWorker(
+        source=Source([Frame(0, now)]),
+        client=Client([result]),
+        stale_ns=33_000_000,
+    )
+    worker.start()
+    worker.enable()
+    wait_for(lambda: worker.status()["warming"] == 1)
+    status = worker.status()
+    assert status["warmup_frames"] == 1
+    assert worker.latest_proposal() is None
+    worker.stop()
