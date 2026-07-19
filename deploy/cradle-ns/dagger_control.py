@@ -60,11 +60,18 @@ class Applied:
 
 
 class Arbitrator:
-    def __init__(self, *, stale_ns: int = 55_000_000, hard_stall_ns: int = 250_000_000):
+    def __init__(
+        self,
+        *,
+        stale_ns: int = 55_000_000,
+        hard_stall_ns: int = 250_000_000,
+        max_gaps_per_window: int = 8,
+    ):
         self.mode = Mode.HUMAN
         self.mute = MuteMask()
         self.stale_ns = stale_ns
         self.hard_stall_ns = hard_stall_ns
+        self.max_gaps_per_window = max_gaps_per_window
         self._takeover = False
         self._neutral_boundary: str | None = None
         self._gap_started_ns: int | None = None
@@ -193,7 +200,10 @@ class Arbitrator:
             self._recent_gaps = [x for x in self._recent_gaps if now_ns - x <= 10_000_000_000]
             self._recent_gaps.append(now_ns)
         duration = max(0, now_ns - self._gap_started_ns)
-        hard = duration >= self.hard_stall_ns or len(self._recent_gaps) >= 4
+        hard = (
+            duration >= self.hard_stall_ns
+            or len(self._recent_gaps) >= self.max_gaps_per_window
+        )
         return (
             "disarmed" if hard else "transient_gap",
             "policy_stall" if hard else "policy_transient_gap",

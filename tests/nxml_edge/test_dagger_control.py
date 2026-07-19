@@ -60,7 +60,7 @@ def test_policy_hard_stall_identity_independent_and_repeated_gap_budget():
     a.transition(mode=Mode.PURE_AI)
     assert not a.apply(100, None, None).disarmed
     assert a.apply(350, None, None).disarmed
-    b = Arbitrator(stale_ns=5, hard_stall_ns=1_000)
+    b = Arbitrator(stale_ns=5, hard_stall_ns=1_000, max_gaps_per_window=4)
     b.transition(mode=Mode.PURE_AI)
     for base in (100, 200, 300):
         assert not b.apply(base, None, None).disarmed
