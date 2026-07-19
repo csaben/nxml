@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import threading
 import time
+import uuid
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from dagger_history import ArbitrationSynchronizer, ArbitratorHistory
+from dagger_segments import SegmentDeliveryWorker, SegmentSource
 from nxml_capture import VideoParquetEpisodeWriter
 from nxml_capture.backends.mjpeg_fanout import CaptureFrameLossError, MjpegFanoutSource
 
@@ -24,6 +26,9 @@ class RecordingStatus:
     invalid_actions: int = 0
     error: str | None = None
     finalized_manifest: str | None = None
+    rolling: bool = False
+    current_segment: int | None = None
+    segment_count: int = 0
 
 
 class HumanRecordingSession:
@@ -38,6 +43,11 @@ class HumanRecordingSession:
         game: str = "pokemon-za",
         history: ArbitratorHistory | None = None,
         state_provider=None,
+        segment_worker: SegmentDeliveryWorker | None = None,
+        segment_staging_dir: Path | None = None,
+        segment_dataset_id: str = "nxml-pokemon-za-v2",
+        segment_duration_seconds: float = 30.0,
+        segment_max_bytes: int = 512 * 1024 * 1024,
     ) -> None:
         self.source = source
         self.output_dir = output_dir
@@ -47,6 +57,11 @@ class HumanRecordingSession:
         self.game = game
         self.history = history
         self.state_provider = state_provider or (lambda: {"mode": "human"})
+        self.segment_worker = segment_worker
+        self.segment_staging_dir = segment_staging_dir
+        self.segment_dataset_id = segment_dataset_id
+        self.segment_duration_ns = int(segment_duration_seconds * 1e9)
+        self.segment_max_bytes = segment_max_bytes
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -72,9 +87,12 @@ class HumanRecordingSession:
             state = self.state_provider()
             mode = state.get("mode", "human")
             name = time.strftime(f"dagger-{mode}-%Y%m%d-%H%M%S", time.gmtime())
+            episode_id = str(uuid.uuid4())
+            writer_name = f"{episode_id}.000000" if self.segment_worker else name
             writer = VideoParquetEpisodeWriter(
                 self.output_dir,
-                episode_name=name,
+                episode_name=writer_name,
+                episode_id=episode_id,
                 codec=self.codec,
                 fps=self.fps,
                 game=self.game,
@@ -86,9 +104,11 @@ class HumanRecordingSession:
             )
             self._status = RecordingStatus(
                 state="recording",
-                episode_id=writer.episode_id,
+                episode_id=episode_id,
                 episode_name=name,
                 started_monotonic_ns=started,
+                rolling=self.segment_worker is not None,
+                current_segment=0 if self.segment_worker else None,
             )
             self._thread = threading.Thread(
                 target=self._record, args=(writer,), daemon=True, name="dagger-human-recording"
@@ -132,10 +152,47 @@ class HumanRecordingSession:
         last_invalid_reasons: tuple[str, ...] | None = None
         last_takeover = False
         last_gap_state = "none"
+        segment_index = 0
+        segment_start_ns: int | None = None
+        last_frame_ns: int | None = None
         try:
             for synced in synchronizer.frames():
                 if self._stop.is_set():
                     break
+                frame_ns = getattr(synced, "frame_monotonic_ns", None)
+                if self.segment_worker is not None and segment_start_ns is None:
+                    segment_start_ns = frame_ns
+                video_path_now = getattr(writer, "_video_path", None)
+                video_bytes = (
+                    video_path_now.stat().st_size
+                    if video_path_now is not None and video_path_now.exists()
+                    else 0
+                )
+                cut = (
+                    self.segment_worker is not None
+                    and len(writer) > 0
+                    and frame_ns is not None
+                    and segment_start_ns is not None
+                    and (
+                        frame_ns - segment_start_ns >= self.segment_duration_ns
+                        or video_bytes >= self.segment_max_bytes
+                    )
+                )
+                if cut:
+                    assert frame_ns is not None and segment_start_ns is not None
+                    self._finalize_segment(writer, segment_index, segment_start_ns, frame_ns)
+                    segment_index += 1
+                    writer = self._new_segment_writer(writer, segment_index)
+                    with self._lock:
+                        self._writer = writer
+                        self._status = RecordingStatus(
+                            **{
+                                **asdict(self._status),
+                                "current_segment": segment_index,
+                                "segment_count": segment_index,
+                            }
+                        )
+                    segment_start_ns = frame_ns
                 boundary_sequence = getattr(synced, "boundary_sequence", None)
                 claim_ack = boundary_sequence is not None and self.history.claim_boundary_ack(
                     boundary_sequence
@@ -143,6 +200,8 @@ class HumanRecordingSession:
                 if claim_ack:
                     synced = replace(synced, boundary_acknowledged=True)
                 writer.append(synced)
+                if self.segment_worker is not None:
+                    last_frame_ns = frame_ns
                 if claim_ack:
                     self.history.acknowledge_boundary(boundary_sequence)
                     writer.append_event(
@@ -227,7 +286,22 @@ class HumanRecordingSession:
                 "status": "failed" if error else "complete",
                 "error": error,
             }
-            video_path = writer.close()
+            if (
+                self.segment_worker is not None
+                and len(writer) > 0
+                and not getattr(writer, "_closed", False)
+            ):
+                assert segment_start_ns is not None and last_frame_ns is not None
+                self._finalize_segment(
+                    writer,
+                    segment_index,
+                    segment_start_ns,
+                    last_frame_ns + max(1, int(1e9 / self.fps)),
+                )
+                self._close_rolling_episode(writer.episode_id, segment_index + 1, error)
+                video_path = None
+            else:
+                video_path = writer.close()
             manifest = None
             if video_path is not None:
                 manifest_path = video_path.with_name(f"{writer.episode_name}.manifest.json")
@@ -249,3 +323,55 @@ class HumanRecordingSession:
                 )
                 self._thread = None
                 self._writer = None
+
+    def _new_segment_writer(
+        self, prior: VideoParquetEpisodeWriter, index: int
+    ) -> VideoParquetEpisodeWriter:
+        return VideoParquetEpisodeWriter(
+            self.output_dir,
+            episode_name=f"{prior.episode_id}.{index:06d}",
+            episode_id=prior.episode_id,
+            codec=self.codec,
+            fps=self.fps,
+            game=self.game,
+            config=dict(prior.config),
+        )
+
+    def _finalize_segment(
+        self,
+        writer: VideoParquetEpisodeWriter,
+        index: int,
+        start_ns: int,
+        end_ns: int,
+    ) -> None:
+        video = writer.close()
+        if video is None or self.segment_worker is None or self.segment_staging_dir is None:
+            raise RuntimeError("rolling segment did not produce a complete triplet")
+        base = self.output_dir / f"{writer.episode_id}.{index:06d}"
+        source = SegmentSource(
+            episode_id=writer.episode_id,
+            sequence_index=index,
+            timeline_start_ns=start_ns,
+            timeline_end_ns=end_ns,
+            video=video,
+            actions=Path(f"{base}.parquet"),
+            events=Path(f"{base}.events.parquet"),
+            manifest=Path(f"{base}.manifest.json"),
+        )
+        if not self.segment_worker.submit_source(source):
+            raise RuntimeError("rolling segment delivery queue reached bounded capacity")
+
+    def _close_rolling_episode(self, episode_id: str, count: int, error: str | None) -> None:
+        if error or self.segment_worker is None:
+            return
+
+        def close() -> None:
+            try:
+                self.segment_worker.close_episode(episode_id, count)
+            except Exception as caught:
+                with self._lock:
+                    self._status = RecordingStatus(
+                        **{**asdict(self._status), "state": "failed", "error": str(caught)}
+                    )
+
+        threading.Thread(target=close, daemon=True, name="segment-episode-close").start()

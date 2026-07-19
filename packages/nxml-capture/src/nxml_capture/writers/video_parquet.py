@@ -166,6 +166,7 @@ class VideoParquetEpisodeWriter:
         output_dir: str | Path,
         *,
         episode_name: str | None = None,
+        episode_id: str | None = None,
         codec: Codec = "ffv1",
         fps: float = 30.0,
         game: str | None = None,
@@ -179,7 +180,7 @@ class VideoParquetEpisodeWriter:
         self._profile = _PROFILES[codec]
         self.codec = codec
         self.fps = fps
-        self.episode_id = str(uuid.uuid4())
+        self.episode_id = episode_id or str(uuid.uuid4())
         self.game = game
         self.config = dict(config or {})
         self.build = dict(build or {})

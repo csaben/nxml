@@ -133,9 +133,7 @@ class OperationsReader:
                     "blocked_reason": (
                         "disk pressure"
                         if value.get("disk_pressure")
-                        else next(
-                            (str(item.get("error")) for item in blocked.values()), None
-                        )
+                        else next((str(item.get("error")) for item in blocked.values()), None)
                     ),
                 }
             )
@@ -196,10 +194,31 @@ class OperationsReader:
                     request = urllib.request.Request(
                         self.cluster_url + self.cluster_storage_path, headers=headers
                     )
-                    with urllib.request.urlopen(
-                        request, timeout=self.request_timeout
-                    ) as response:
-                        result["storage"] = json.load(response)
+                    with urllib.request.urlopen(request, timeout=self.request_timeout) as response:
+                        raw_storage = json.load(response)
+                    filesystem = next(
+                        (
+                            item
+                            for item in raw_storage.get("filesystems", [])
+                            if item.get("role") == "authoritative_objects"
+                        ),
+                        None,
+                    )
+                    if filesystem is None or filesystem.get("status") != "available":
+                        raise ValueError("cluster authoritative storage is unavailable")
+                    total = int(filesystem["total_bytes"])
+                    used = int(filesystem["used_bytes"])
+                    result["storage"] = {
+                        **raw_storage,
+                        "state": "ready",
+                        "total_bytes": total,
+                        "used_bytes": used,
+                        "free_bytes": int(filesystem["free_bytes"]),
+                        "available_bytes": int(filesystem["available_bytes"]),
+                        "used_fraction": used / total if total else 1.0,
+                        "warning": raw_storage.get("ingest_admission", {}).get("state")
+                        != "admitting",
+                    }
                 except (OSError, ValueError, urllib.error.URLError) as error:
                     result["storage"] = {"state": "unavailable", "reason": str(error)}
                     errors["cluster_storage"] = str(error)

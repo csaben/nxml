@@ -39,6 +39,7 @@ from dagger_inference import InferenceStatus
 from dagger_inference_v2 import InferenceV2Client, RemoteInferenceWorker
 from dagger_models import AtomicModelRuntime
 from dagger_recording import HumanRecordingSession
+from dagger_segments import SegmentClient, SegmentDeliveryWorker, SegmentJournal
 from dagger_status import OperationsReader
 from nxml_capture.backends.mjpeg_fanout import MjpegFanoutSource
 
@@ -226,11 +227,14 @@ def create_app(
     model_runtime: AtomicModelRuntime | None = None,
     remote_inference: RemoteInferenceWorker | None = None,
     action_plane: ActionPlane | None = None,
+    segment_worker: SegmentDeliveryWorker | None = None,
 ) -> FastAPI:
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
         if operations is not None:
             operations.start()
+        if segment_worker is not None:
+            segment_worker.start()
         if capture_source is not None:
             capture_source.start()
         if inference is not None:
@@ -242,6 +246,8 @@ def create_app(
         finally:
             if operations is not None:
                 operations.stop()
+            if segment_worker is not None:
+                segment_worker.stop()
             if action_plane is not None:
                 action_plane.stop()
             if inference is not None:
@@ -298,6 +304,8 @@ def create_app(
             else disabled_model_readiness()
         )
         wire["action_plane"] = action_plane.status() if action_plane else None
+        if segment_worker is not None and wire.get("spool") is not None:
+            wire["spool"]["rolling_segments"] = segment_worker.status()
         return wire
 
     def recording_boundary(operation, *, kind="configuration_changed", payload=None):
@@ -578,6 +586,7 @@ def main() -> None:
     parser.add_argument("--cluster-url", default="http://100.80.98.4:8787")
     parser.add_argument(
         "--cluster-storage-path",
+        default="/v1/datasets/nxml-pokemon-za-v2/segment-status",
         help="published cluster storage telemetry path; omitted means explicitly unavailable",
     )
     parser.add_argument(
@@ -590,17 +599,23 @@ def main() -> None:
     parser.add_argument("--inference-revision")
     parser.add_argument("--inference-digest")
     parser.add_argument("--inference-timeout-ms", type=int, default=100)
+    parser.add_argument("--rolling-segments", action="store_true")
+    parser.add_argument("--segment-duration-seconds", type=float, default=30.0)
+    parser.add_argument("--segment-max-bytes", type=int, default=512 * 1024 * 1024)
+    parser.add_argument("--segment-max-pending", type=int, default=3)
     args = parser.parse_args()
     try:
         validate_tailnet_bind(args.host)
     except ValueError as error:
         parser.error(str(error))
     client = OrchestratorClient(args.orchestrator_host, args.orchestrator_port)
+    rolling_root = Path("~/.local/state/nxml-segments").expanduser()
+    capture_output = rolling_root / "source" if args.rolling_segments else args.capture_output
     operations = OperationsReader(
         spool_status_path=args.spool_status,
         cluster_url=args.cluster_url,
         cluster_token_path=args.cluster_token,
-        capture_dir=args.capture_output,
+        capture_dir=capture_output,
         cluster_storage_path=args.cluster_storage_path,
     )
     fanout = MjpegFanoutSource(args.capture)
@@ -629,11 +644,24 @@ def main() -> None:
     action_plane = ActionPlane(client, remote_inference)
     if remote_inference is not None:
         remote_inference.on_disarm = action_plane.inference_failure
+    segment_worker = None
+    if args.rolling_segments:
+        token = args.cluster_token.read_text().strip()
+        segment_worker = SegmentDeliveryWorker(
+            SegmentClient(args.cluster_url, token, "nxml-pokemon-za-v2"),
+            SegmentJournal(rolling_root / "journal.json"),
+            staging_dir=rolling_root / "staging",
+            max_pending=args.segment_max_pending,
+        )
     recorder = HumanRecordingSession(
         fanout,
-        output_dir=args.capture_output,
+        output_dir=capture_output,
         history=action_plane.history,
         state_provider=action_plane.recording_state,
+        segment_worker=segment_worker,
+        segment_staging_dir=rolling_root / "staging" if segment_worker else None,
+        segment_duration_seconds=args.segment_duration_seconds,
+        segment_max_bytes=args.segment_max_bytes,
     )
     uvicorn.run(
         create_app(
@@ -645,6 +673,7 @@ def main() -> None:
             inference=remote_inference,
             remote_inference=remote_inference,
             action_plane=action_plane,
+            segment_worker=segment_worker,
         ),
         host=args.host,
         port=args.port,
