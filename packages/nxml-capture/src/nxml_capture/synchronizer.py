@@ -59,6 +59,18 @@ class SyncedFrame:
     active_driver: str | None = None
     policy_id: str | None = None
     policy_revision: str | None = None
+    policy_digest: str | None = None
+    human_monotonic_ns: int | None = None
+    policy_monotonic_ns: int | None = None
+    policy_observation_monotonic_ns: int | None = None
+    muted_policy_action: np.ndarray | None = None
+    mute_mask: np.ndarray | None = None
+    mute_mask_version: str | None = None
+    ownership_source: str | None = None
+    mode: str | None = None
+    takeover: bool = False
+    proposal_valid: bool = False
+    proposal_fresh: bool = False
     valid: bool = True
     invalid_reasons: tuple[str, ...] = ()
 
@@ -110,9 +122,7 @@ class Synchronizer:
         else:
             age = frame.timestamp - snapshot.timestamp
         if age < 0:
-            return self._invalid(
-                frame, "future_controller_sample", snapshot=snapshot, age=age
-            )
+            return self._invalid(frame, "future_controller_sample", snapshot=snapshot, age=age)
         if not self.controller.is_connected:
             return self._invalid(frame, "controller_disconnected", snapshot=snapshot, age=age)
         if age > self.max_action_age:

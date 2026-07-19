@@ -7,7 +7,8 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from nxml_capture import ControllerSubscription, Synchronizer, VideoParquetEpisodeWriter
+from dagger_history import ArbitrationSynchronizer, ArbitratorHistory
+from nxml_capture import VideoParquetEpisodeWriter
 from nxml_capture.backends.mjpeg_fanout import CaptureFrameLossError, MjpegFanoutSource
 
 
@@ -35,6 +36,8 @@ class HumanRecordingSession:
         codec: str = "ffv1",
         fps: float = 30.0,
         game: str = "pokemon-za",
+        history: ArbitratorHistory | None = None,
+        state_provider=None,
     ) -> None:
         self.source = source
         self.output_dir = output_dir
@@ -42,9 +45,12 @@ class HumanRecordingSession:
         self.codec = codec
         self.fps = fps
         self.game = game
+        self.history = history
+        self.state_provider = state_provider or (lambda: {"mode": "human"})
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._writer: VideoParquetEpisodeWriter | None = None
         self._status = RecordingStatus()
 
     def status(self) -> dict:
@@ -63,14 +69,20 @@ class HumanRecordingSession:
                 raise RuntimeError("a recording session is already active")
             self._stop.clear()
             started = time.monotonic_ns()
-            name = time.strftime("dagger-human-%Y%m%d-%H%M%S", time.gmtime())
+            state = self.state_provider()
+            mode = state.get("mode", "human")
+            name = time.strftime(f"dagger-{mode}-%Y%m%d-%H%M%S", time.gmtime())
             writer = VideoParquetEpisodeWriter(
                 self.output_dir,
                 episode_name=name,
                 codec=self.codec,
                 fps=self.fps,
                 game=self.game,
-                config={"mode": "human", "capture_source": "native-mjpeg-fanout.v1"},
+                config={
+                    **state,
+                    "actions_schema_id": "nxml.dagger-actions.v2",
+                    "capture_source": "native-mjpeg-fanout.v1",
+                },
             )
             self._status = RecordingStatus(
                 state="recording",
@@ -81,8 +93,21 @@ class HumanRecordingSession:
             self._thread = threading.Thread(
                 target=self._record, args=(writer,), daemon=True, name="dagger-human-recording"
             )
+            self._writer = writer
             self._thread.start()
         return self.status()
+
+    def append_boundary(self, kind: str, payload: dict | None = None) -> None:
+        with self._lock:
+            writer = self._writer
+        if writer is not None:
+            writer.append_event(
+                kind,
+                timestamp=time.time(),
+                monotonic_ns=time.monotonic_ns(),
+                source="dagger-ui",
+                payload=payload,
+            )
 
     def stop(self, *, timeout: float = 15.0) -> dict:
         with self._lock:
@@ -97,12 +122,13 @@ class HumanRecordingSession:
         return self.status()
 
     def _record(self, writer: VideoParquetEpisodeWriter) -> None:
-        controller = ControllerSubscription(url=self.orchestrator_ws)
-        synchronizer = Synchronizer(self.source, controller, driver="human")
+        if self.history is None:
+            raise RuntimeError("DAgger recording requires arbitration history")
+        synchronizer = ArbitrationSynchronizer(self.source, self.history)
         error: str | None = None
         video_path: Path | None = None
-        controller.start()
         last_invalid_reasons: tuple[str, ...] | None = None
+        last_takeover = False
         try:
             for synced in synchronizer.frames():
                 if self._stop.is_set():
@@ -124,6 +150,15 @@ class HumanRecordingSession:
                         source="dagger-ui",
                     )
                 last_invalid_reasons = None if synced.valid else synced.invalid_reasons
+                if synced.takeover != last_takeover:
+                    writer.append_event(
+                        "takeover_started" if synced.takeover else "takeover_released",
+                        timestamp=synced.timestamp,
+                        monotonic_ns=synced.action_monotonic_ns,
+                        source="dagger-arbitrator",
+                        payload={"mode": synced.mode},
+                    )
+                last_takeover = synced.takeover
                 with self._lock:
                     self._status = RecordingStatus(
                         **{
@@ -142,7 +177,6 @@ class HumanRecordingSession:
                 payload={"error": error},
             )
         finally:
-            controller.stop()
             writer.config["capture_integrity"] = {
                 "status": "failed" if error else "complete",
                 "error": error,
@@ -168,3 +202,4 @@ class HumanRecordingSession:
                     }
                 )
                 self._thread = None
+                self._writer = None

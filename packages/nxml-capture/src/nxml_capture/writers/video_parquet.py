@@ -46,6 +46,7 @@ from nxml_capture.synchronizer import SyncedFrame
 
 SCHEMA_VERSION = 2
 SCHEMA_ID = "nxml.episode.v2"
+ACTION_SCHEMA_ID = "nxml.dagger-actions.v2"
 FORMAT_TAG = "video_parquet"
 ACTION_SPEC_NAME = "switch_packets.v1"
 
@@ -100,8 +101,11 @@ _PARQUET_SCHEMA = pa.schema(
         ("frame_idx", pa.int64()),
         ("timestamp", pa.float64()),
         ("frame_monotonic_ns", pa.int64()),
+        ("frame_timestamp_ns", pa.int64()),
         ("action_timestamp", pa.float64()),
         ("action_monotonic_ns", pa.int64()),
+        ("action_timestamp_ns", pa.int64()),
+        ("action_age_ns", pa.int64()),
         ("action_age", pa.float64()),
         ("valid", pa.bool_()),
         ("invalid_reasons", pa.list_(pa.string())),
@@ -114,8 +118,21 @@ _PARQUET_SCHEMA = pa.schema(
         ("ownership", pa.list_(pa.uint8(), ACTION_DIM)),
         ("controller_id", pa.string()),
         ("active_driver", pa.string()),
+        ("controller", pa.string()),
         ("policy_id", pa.string()),
         ("policy_revision", pa.string()),
+        ("policy_digest", pa.string()),
+        ("human_monotonic_ns", pa.int64()),
+        ("policy_monotonic_ns", pa.int64()),
+        ("policy_observation_monotonic_ns", pa.int64()),
+        ("muted_policy_action", _action_array_type()),
+        ("mute_mask", pa.list_(pa.bool_(), ACTION_DIM)),
+        ("mute_mask_version", pa.string()),
+        ("ownership_source", pa.string()),
+        ("mode", pa.string()),
+        ("takeover", pa.bool_()),
+        ("proposal_valid", pa.bool_()),
+        ("proposal_fresh", pa.bool_()),
     ]
 )
 
@@ -195,6 +212,26 @@ class VideoParquetEpisodeWriter:
             raise RuntimeError("writer already closed")
         if synced.action.shape != (ACTION_DIM,):
             raise ValueError(f"action shape {synced.action.shape} != ({ACTION_DIM},)")
+        for name in ("action", "human_action", "policy_action", "muted_policy_action"):
+            value = getattr(synced, name)
+            if value is not None and (value.shape != (ACTION_DIM,) or not np.isfinite(value).all()):
+                raise ValueError(f"{name} must be finite switch_packets.v1/{ACTION_DIM}-D")
+        for name in ("human_mask", "mute_mask", "ownership"):
+            value = getattr(synced, name)
+            if value is not None and value.shape != (ACTION_DIM,):
+                raise ValueError(f"{name} shape {value.shape} != ({ACTION_DIM},)")
+        if synced.ownership is not None and not np.isin(synced.ownership, (0, 1, 2)).all():
+            raise ValueError("ownership values must be 0=unowned, 1=human, or 2=policy")
+        if synced.valid:
+            if synced.frame_monotonic_ns is None or synced.action_monotonic_ns is None:
+                raise ValueError("valid DAgger rows require frame/action monotonic timestamps")
+            if synced.action_monotonic_ns > synced.frame_monotonic_ns:
+                raise ValueError("valid DAgger action timestamp cannot follow its frame")
+            expected_age = (synced.frame_monotonic_ns - synced.action_monotonic_ns) / 1e9
+            if abs(synced.action_age - expected_age) > 1e-9:
+                raise ValueError("action_age must exactly match causal monotonic timestamps")
+        elif not synced.invalid_reasons:
+            raise ValueError("invalid DAgger rows require a sparse invalid reason")
 
         bgr = synced.frame
         if bgr.dtype != np.uint8 or bgr.ndim != 3 or bgr.shape[2] != 3:
@@ -273,21 +310,56 @@ class VideoParquetEpisodeWriter:
                     "frame_idx": idx,
                     "timestamp": synced.timestamp,
                     "frame_monotonic_ns": synced.frame_monotonic_ns,
+                    "frame_timestamp_ns": synced.frame_monotonic_ns,
                     "action_timestamp": synced.action_timestamp,
                     "action_monotonic_ns": synced.action_monotonic_ns,
+                    "action_timestamp_ns": synced.action_monotonic_ns,
+                    "action_age_ns": (
+                        synced.frame_monotonic_ns - synced.action_monotonic_ns
+                        if synced.frame_monotonic_ns is not None
+                        and synced.action_monotonic_ns is not None
+                        else None
+                    ),
                     "action_age": synced.action_age,
                     "valid": synced.valid,
                     "invalid_reasons": list(synced.invalid_reasons),
                     "action": synced.action.tolist(),
                     "applied_action": synced.applied_action.tolist(),
-                    "human_action": (synced.human_action if synced.human_action is not None else zero_action).tolist(),
-                    "human_mask": (synced.human_mask if synced.human_mask is not None else zero_mask).tolist(),
-                    "policy_action": (synced.policy_action if synced.policy_action is not None else zero_action).tolist(),
-                    "ownership": (synced.ownership if synced.ownership is not None else zero_owner).tolist(),
+                    "human_action": (
+                        synced.human_action if synced.human_action is not None else zero_action
+                    ).tolist(),
+                    "human_mask": (
+                        synced.human_mask if synced.human_mask is not None else zero_mask
+                    ).tolist(),
+                    "policy_action": (
+                        synced.policy_action if synced.policy_action is not None else zero_action
+                    ).tolist(),
+                    "ownership": (
+                        synced.ownership if synced.ownership is not None else zero_owner
+                    ).tolist(),
                     "controller_id": synced.controller_id,
                     "active_driver": synced.active_driver,
+                    "controller": synced.ownership_source or synced.active_driver,
                     "policy_id": synced.policy_id,
                     "policy_revision": synced.policy_revision,
+                    "policy_digest": synced.policy_digest,
+                    "human_monotonic_ns": synced.human_monotonic_ns,
+                    "policy_monotonic_ns": synced.policy_monotonic_ns,
+                    "policy_observation_monotonic_ns": synced.policy_observation_monotonic_ns,
+                    "muted_policy_action": (
+                        synced.muted_policy_action
+                        if synced.muted_policy_action is not None
+                        else zero_action
+                    ).tolist(),
+                    "mute_mask": (
+                        synced.mute_mask if synced.mute_mask is not None else zero_mask
+                    ).tolist(),
+                    "mute_mask_version": synced.mute_mask_version,
+                    "ownership_source": synced.ownership_source,
+                    "mode": synced.mode,
+                    "takeover": synced.takeover,
+                    "proposal_valid": synced.proposal_valid,
+                    "proposal_fresh": synced.proposal_fresh,
                 }
             )
         table = pa.Table.from_pylist(rows, schema=_PARQUET_SCHEMA)
@@ -314,6 +386,9 @@ class VideoParquetEpisodeWriter:
             "episode_id": self.episode_id,
             "format": FORMAT_TAG,
             "action_spec": ACTION_SPEC_NAME,
+            "action_spec_id": ACTION_SPEC_NAME,
+            "action_schema_id": ACTION_SCHEMA_ID,
+            "action_schema_version": 2,
             "action_dim": ACTION_DIM,
             "frame_count": int(frame_count),
             "fps_estimate": float(fps_est),
@@ -334,12 +409,16 @@ class VideoParquetEpisodeWriter:
                 record.frame_monotonic_ns
                 for record in self._records
                 if record.frame_monotonic_ns is not None
-            ) if any(record.frame_monotonic_ns is not None for record in self._records) else 0,
+            )
+            if any(record.frame_monotonic_ns is not None for record in self._records)
+            else 0,
             "last_frame_timestamp_ns": max(
                 record.frame_monotonic_ns
                 for record in self._records
                 if record.frame_monotonic_ns is not None
-            ) if any(record.frame_monotonic_ns is not None for record in self._records) else 0,
+            )
+            if any(record.frame_monotonic_ns is not None for record in self._records)
+            else 0,
             "capture": {
                 "timestamps": "frame arrival",
                 "frame_color": "bgr24",

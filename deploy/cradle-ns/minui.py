@@ -33,6 +33,8 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from nxml_capture.backends.ffmpeg_v4l2 import v4l2_mjpeg_stream_command
 
 sys.path.insert(0, str(Path(__file__).parent))
+from dagger_action_plane import ActionPlane
+from dagger_control import Mode, MuteMask
 from dagger_inference import InferenceStatus
 from dagger_inference_v2 import InferenceV2Client, RemoteInferenceWorker
 from dagger_models import AtomicModelRuntime
@@ -77,7 +79,7 @@ PAGE = """<!doctype html>
   <span id="seq"></span>
 </div>
 <section id="ops">
- <div class="card"><div class="label">Session</div><div class="value" id="session">human · idle</div><div class="value"><select id="mode"><option value="human">Human</option><option disabled>Pure AI — policy runtime required</option><option disabled>Hybrid — policy runtime required</option></select> <button id="record">Start episode</button></div><div class="value label">Mute switch_packets.v1/mute.v1 · 0/26 (available when AI runtime is armed)</div></div>
+ <div class="card"><div class="label">Session</div><div class="value" id="session">human · idle</div><div class="value"><select id="mode"><option value="human">Human</option><option value="pure_ai" disabled>Pure AI</option><option value="hybrid" disabled>Hybrid</option></select> <button id="record">Start episode</button></div><div class="value"><button id="arm">Arm AI</button> <button id="disarm" disabled>Disarm</button> <button id="eject">Emergency eject</button></div><div class="value"><label>Muted dimensions <input id="mute" size="12" placeholder="e.g. 0,4,5"></label> <button id="mute-set" disabled>Apply mute</button></div><div class="value label">switch_packets.v1/mute.v1 · AI proposal pre-arbitration</div></div>
  <div class="card"><div class="label">Local spool</div><div class="value" id="spool">loading…</div></div>
  <div class="card"><div class="label">Cluster</div><div class="value" id="cluster">loading…</div></div>
  <div class="card"><div class="label">Models / training</div><div class="value" id="model">loading…</div><div class="value" id="readiness">local model: unloaded · unarmed</div><div class="value" id="inference">inference: unloaded · unarmed</div><select id="model-select"><option value="">No validated revisions</option></select> <button id="model-load" disabled>Load verified revision</button><div class="value" id="jobs"></div></div>
@@ -112,8 +114,9 @@ PAGE = """<!doctype html>
   setInterval(()=>{if(!ws)connect()},1000);
   async function pollOps(){
     try { const s=await fetch('/api/ops/status',{cache:'no-store'}).then(r=>r.json());
-      const r=s.recording||{}; $('session').textContent=`human · ${r.state||'idle'} · ${r.frames||0} frames · ${(r.duration_seconds||0).toFixed(1)}s`;
+      const a=s.action_plane||{}; const r=s.recording||{}; $('session').textContent=`${a.mode||'human'} · ${a.armed?'armed':'unarmed'} · ${r.state||'idle'} · ${r.frames||0} frames · ${(r.duration_seconds||0).toFixed(1)}s`;
       $('record').textContent=['recording','stopping'].includes(r.state)?'Stop episode':'Start episode';
+      $('mode').value=a.mode||'human'; [...$('mode').options].forEach(o=>o.disabled=o.value!=='human'&&!a.armed); $('arm').disabled=!!a.armed; $('disarm').disabled=!a.armed; $('mute-set').disabled=!a.armed;
       const p=s.spool; $('spool').textContent=p?`${p.pending_episodes||0} pending · ${p.episodes_shipped||0} shipped · ${((p.local_buffered_bytes||0)/1e9).toFixed(2)} GB buffered · ${p.disk_free_gb||'?'} GB free · ${p.receipt_state||'unknown'}${p.blocked_reason?' · blocked: '+p.blocked_reason:''}`:`unavailable: ${s.errors.spool||'unknown'}`;
       const c=s.cluster; $('cluster').textContent=c?`${(c.datasets.datasets||[]).length} datasets · ${(c.snapshots.snapshots||[]).length} snapshots`:`unavailable: ${s.errors.cluster||'unknown'}`;
       const d=c&&c.deployment; $('model').textContent=d&&d.active_revision?`active ${d.active_revision.slice(0,8)} · gen ${d.generation}`:'none active';
@@ -126,6 +129,12 @@ PAGE = """<!doctype html>
   pollOps(); setInterval(pollOps,5000);
   $('record').onclick=async()=>{const stop=$('record').textContent.startsWith('Stop'); $('record').disabled=true; try{await fetch(stop?'/api/recording/stop':'/api/recording/start',{method:'POST'}); await pollOps()}finally{$('record').disabled=false}};
   $('model-load').onclick=async()=>{const revision=$('model-select').value;if(!revision)return;$('model-load').disabled=true;try{const response=await fetch('/api/models/load/'+encodeURIComponent(revision),{method:'POST'});if(!response.ok)throw new Error((await response.json()).detail||'load rejected');await pollOps()}catch(e){$('readiness').textContent='local model: rejected · '+e.message}finally{setTimeout(pollOps,500)}};
+  async function control(path,body){const response=await fetch(path,{method:'POST',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):null});if(!response.ok)throw new Error((await response.json()).detail||'control rejected');await pollOps()}
+  $('arm').onclick=()=>control('/api/control/arm').catch(e=>alert(e.message));
+  $('disarm').onclick=()=>control('/api/control/disarm').catch(e=>alert(e.message));
+  $('eject').onclick=()=>control('/api/control/eject').catch(e=>alert(e.message));
+  $('mode').onchange=()=>control('/api/control/mode/'+$('mode').value).catch(e=>{alert(e.message);pollOps()});
+  $('mute-set').onclick=()=>{const mask=new Array(DIM).fill(false);for(const raw of $('mute').value.split(',')){if(!raw.trim())continue;const i=Number(raw);if(!Number.isInteger(i)||i<0||i>=DIM){alert('Mute dimensions must be 0-25');return}mask[i]=true}control('/api/control/mute',mask).catch(e=>alert(e.message))};
 </script></body></html>"""
 
 
@@ -152,6 +161,18 @@ class OrchestratorClient:
                     self._conn = None
                     if attempt == 2:
                         raise
+
+    def health(self) -> dict:
+        connection = http.client.HTTPConnection(self.host, self.port, timeout=self.timeout)
+        try:
+            connection.request("GET", "/health")
+            response = connection.getresponse()
+            payload = json.loads(response.read())
+            if response.status != 200 or not isinstance(payload, dict):
+                raise RuntimeError("orchestrator health unavailable")
+            return payload
+        finally:
+            connection.close()
 
 
 def disabled_model_readiness() -> dict:
@@ -196,6 +217,7 @@ def create_app(
     inference=None,
     model_runtime: AtomicModelRuntime | None = None,
     remote_inference: RemoteInferenceWorker | None = None,
+    action_plane: ActionPlane | None = None,
 ) -> FastAPI:
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -205,11 +227,15 @@ def create_app(
             capture_source.start()
         if inference is not None:
             inference.start()
+        if action_plane is not None:
+            action_plane.start()
         try:
             yield
         finally:
             if operations is not None:
                 operations.stop()
+            if action_plane is not None:
+                action_plane.stop()
             if inference is not None:
                 inference.stop()
             if capture_source is not None:
@@ -262,7 +288,91 @@ def create_app(
             if remote_inference is not None
             else disabled_model_readiness()
         )
+        wire["action_plane"] = action_plane.status() if action_plane else None
         return wire
+
+    def recording_boundary(operation, *, kind="configuration_changed", payload=None):
+        active = recorder is not None and recorder.status()["state"] in {"recording", "stopping"}
+        if active:
+            recorder.append_boundary(kind, payload)
+            recorder.stop()
+        result = operation()
+        if active:
+            recorder.start()
+        return result
+
+    def require_arm_ready():
+        if action_plane is None or remote_inference is None or operations is None:
+            raise HTTPException(503, "remote action plane is not configured")
+        status = remote_inference.status()
+        deployment = (operations.snapshot().cluster or {}).get("deployment") or {}
+        expected = remote_inference.client.revision
+        if deployment.get("active_revision") != expected["revision_id"]:
+            raise HTTPException(409, "control-plane active revision differs from selected revision")
+        if status.get("checkpoint_sha256") != expected["checkpoint_sha256"]:
+            raise HTTPException(409, "inference digest differs from selected revision")
+        if not status.get("ready") or status.get("health") != "healthy":
+            raise HTTPException(409, "inference is not healthy and warm")
+        if status.get("warmup_frames", 0) < status.get("sequence_length", 1) - 1:
+            raise HTTPException(409, "inference warmup is incomplete")
+        age = status.get("proposal_age_ms")
+        if age is None or age > 33:
+            raise HTTPException(409, "no finite policy proposal within 33 ms")
+        health = orchestrator.health()
+        if health.get("switch_state") != "connected":
+            raise HTTPException(409, "Switch is not connected")
+
+    @app.post("/api/control/arm")
+    def control_arm() -> dict:
+        require_arm_ready()
+        recording_boundary(action_plane.arm, kind="armed")
+        return action_plane.status()
+
+    @app.post("/api/control/disarm")
+    def control_disarm() -> dict:
+        if action_plane is None:
+            raise HTTPException(503, "action plane is not configured")
+        recording_boundary(action_plane.disarm, kind="disarmed")
+        return action_plane.status()
+
+    @app.post("/api/control/eject")
+    def control_eject() -> dict:
+        if action_plane is None:
+            raise HTTPException(503, "action plane is not configured")
+        recording_boundary(action_plane.eject, kind="emergency_eject")
+        return action_plane.status()
+
+    @app.post("/api/control/mode/{mode}")
+    def control_mode(mode: str) -> dict:
+        if action_plane is None:
+            raise HTTPException(503, "action plane is not configured")
+        try:
+            selected = Mode(mode)
+            recording_boundary(
+                lambda: action_plane.set_mode(selected),
+                kind="mode_changed",
+                payload={"mode": selected.value},
+            )
+        except ValueError as error:
+            raise HTTPException(400, "invalid DAgger mode") from error
+        except RuntimeError as error:
+            raise HTTPException(409, str(error)) from error
+        return action_plane.status()
+
+    @app.post("/api/control/mute")
+    def control_mute(mask: list[bool]) -> dict:
+        if action_plane is None:
+            raise HTTPException(503, "action plane is not configured")
+        try:
+            mute = MuteMask(tuple(mask))
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        recording_boundary(
+            lambda: action_plane.set_mute(mute),
+            kind="mute_changed",
+            payload={"version": mute.version, "mask": list(mute.values)},
+        )
+        return action_plane.status()
 
     @app.post("/api/models/load/{revision_id}", status_code=202)
     def model_load(revision_id: str) -> dict:
@@ -284,7 +394,14 @@ def create_app(
                 or revision.get("checkpoint_sha256") != configured["checkpoint_sha256"]
             ):
                 raise HTTPException(409, "revision does not match configured inference endpoint")
-            remote_inference.enable()
+            recording_boundary(
+                remote_inference.enable,
+                kind="model_changed",
+                payload={
+                    "revision": revision_id,
+                    "checkpoint_sha256": revision.get("checkpoint_sha256"),
+                },
+            )
             return remote_model_readiness(remote_inference)
         if model_runtime is None:
             raise HTTPException(503, "model runtime boundary is not configured")
@@ -333,13 +450,17 @@ def create_app(
                     or not all(isinstance(v, (int, float)) and -1 <= v <= 1 for v in vector)
                 ):
                     break
-                await asyncio.to_thread(orchestrator.post_action, [float(v) for v in vector])
+                target = action_plane.submit_human if action_plane else orchestrator.post_action
+                await asyncio.to_thread(target, [float(v) for v in vector])
         except WebSocketDisconnect:
             pass
         finally:
             # Synchronous on purpose: must run even under task cancellation.
             with contextlib.suppress(Exception):
-                orchestrator.post_action([0.0] * ACTION_DIM)
+                if action_plane is not None:
+                    action_plane.disarm("browser_disconnect")
+                else:
+                    orchestrator.post_action([0.0] * ACTION_DIM)
 
     @app.get("/stream.mjpeg")
     def stream() -> StreamingResponse:
@@ -445,7 +566,6 @@ def main() -> None:
         capture_dir=args.capture_output,
     )
     fanout = MjpegFanoutSource(args.capture)
-    recorder = HumanRecordingSession(fanout, output_dir=args.capture_output)
     remote_inference = None
     if any((args.inference_endpoint, args.inference_revision, args.inference_digest)):
         if not all((args.inference_endpoint, args.inference_revision, args.inference_digest)):
@@ -465,6 +585,15 @@ def main() -> None:
         remote_inference = RemoteInferenceWorker(
             source=fanout, client=inference_client, stale_ns=33_000_000
         )
+    action_plane = ActionPlane(client, remote_inference)
+    if remote_inference is not None:
+        remote_inference.on_disarm = action_plane.disarm
+    recorder = HumanRecordingSession(
+        fanout,
+        output_dir=args.capture_output,
+        history=action_plane.history,
+        state_provider=action_plane.recording_state,
+    )
     uvicorn.run(
         create_app(
             client,
@@ -474,6 +603,7 @@ def main() -> None:
             recorder,
             inference=remote_inference,
             remote_inference=remote_inference,
+            action_plane=action_plane,
         ),
         host=args.host,
         port=args.port,

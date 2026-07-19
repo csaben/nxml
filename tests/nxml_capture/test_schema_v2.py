@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pyarrow.parquet as pq
+import pytest
 from nxml_capture import SyncedFrame, VideoParquetEpisodeWriter
 
 
@@ -43,6 +44,18 @@ def test_schema_v2_preserves_proposals_ownership_and_checksums(tmp_path: Path) -
             active_driver="human+policy",
             policy_id="za-ppo",
             policy_revision="rev-7",
+            policy_digest="sha256:abc",
+            human_monotonic_ns=4_987_000_000,
+            policy_monotonic_ns=4_986_000_000,
+            policy_observation_monotonic_ns=4_980_000_000,
+            muted_policy_action=policy,
+            mute_mask=np.zeros(26, dtype=bool),
+            mute_mask_version="switch_packets.v1/mute.v1",
+            ownership_source="human",
+            mode="hybrid",
+            takeover=True,
+            proposal_valid=True,
+            proposal_fresh=True,
         )
     )
     writer.append_event(
@@ -62,6 +75,12 @@ def test_schema_v2_preserves_proposals_ownership_and_checksums(tmp_path: Path) -
     assert row["ownership"][0] == 2
     assert row["policy_revision"] == "rev-7"
     assert row["frame_monotonic_ns"] == 5_000_000_000
+    assert row["frame_timestamp_ns"] == 5_000_000_000
+    assert row["action_timestamp_ns"] == 4_988_000_000
+    assert row["action_age_ns"] == 12_000_000
+    assert row["policy_digest"] == "sha256:abc"
+    assert row["mode"] == "hybrid" and row["takeover"] is True
+    assert row["proposal_valid"] is True and row["proposal_fresh"] is True
 
     events = pq.read_table(tmp_path / "episode.events.parquet").to_pylist()
     assert events[0]["kind"] == "driver_changed"
@@ -70,6 +89,9 @@ def test_schema_v2_preserves_proposals_ownership_and_checksums(tmp_path: Path) -
     assert manifest["episode_id"] == writer.episode_id
     assert manifest["schema_id"] == "nxml.episode.v2"
     assert manifest["action_spec"] == "switch_packets.v1"
+    assert manifest["action_spec_id"] == "switch_packets.v1"
+    assert manifest["action_schema_id"] == "nxml.dagger-actions.v2"
+    assert manifest["action_schema_version"] == 2
     assert manifest["lineage"]["parent_policy_revision"] == "rev-6"
     assert manifest["first_frame_timestamp_ns"] == 5_000_000_000
     assert manifest["last_frame_timestamp_ns"] == 5_000_000_000
@@ -79,3 +101,19 @@ def test_schema_v2_preserves_proposals_ownership_and_checksums(tmp_path: Path) -
         payload = (tmp_path / name).read_bytes()
         assert metadata["bytes"] == len(payload)
         assert metadata["sha256"] == hashlib.sha256(payload).hexdigest()
+
+
+def test_schema_v2_rejects_future_or_inconsistent_valid_action(tmp_path: Path) -> None:
+    writer = VideoParquetEpisodeWriter(tmp_path, episode_name="bad", codec="h264", fps=30)
+    base = dict(
+        timestamp=1.0,
+        frame=np.zeros((4, 4, 3), np.uint8),
+        action=np.zeros(26, np.float32),
+        frame_monotonic_ns=100,
+        action_monotonic_ns=101,
+        action_age=-1e-9,
+    )
+    with pytest.raises(ValueError, match="cannot follow"):
+        writer.append(SyncedFrame(**base))
+    with pytest.raises(ValueError, match="sparse invalid reason"):
+        writer.append(SyncedFrame(**{**base, "valid": False}))

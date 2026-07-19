@@ -303,16 +303,6 @@ def test_disk_pressure_closes_recording_admission():
 
 
 def test_recording_session_finalizes_and_stamps_integrity(monkeypatch, tmp_path):
-    class Controller:
-        def __init__(self, **_kwargs):
-            pass
-
-        def start(self):
-            pass
-
-        def stop(self):
-            pass
-
     class Sync:
         invalid_samples = 0
 
@@ -320,7 +310,7 @@ def test_recording_session_finalizes_and_stamps_integrity(monkeypatch, tmp_path)
             pass
 
         def frames(self):
-            yield SimpleNamespace(valid=True)
+            yield SimpleNamespace(valid=True, takeover=False)
 
     class Writer:
         episode_name = "episode"
@@ -338,9 +328,8 @@ def test_recording_session_finalizes_and_stamps_integrity(monkeypatch, tmp_path)
         def close(self):
             return None
 
-    monkeypatch.setattr(recording_mod, "ControllerSubscription", Controller)
-    monkeypatch.setattr(recording_mod, "Synchronizer", Sync)
-    session = recording_mod.HumanRecordingSession(object(), output_dir=tmp_path)
+    monkeypatch.setattr(recording_mod, "ArbitrationSynchronizer", Sync)
+    session = recording_mod.HumanRecordingSession(object(), output_dir=tmp_path, history=object())
     writer = Writer()
     session._record(writer)
     assert session.status()["state"] == "finalized"
@@ -354,16 +343,6 @@ def test_recording_defaults_to_canonical_ffv1_mkv(tmp_path):
 
 
 def test_recording_loss_is_a_visible_failed_state(monkeypatch, tmp_path):
-    class Controller:
-        def __init__(self, **_kwargs):
-            pass
-
-        def start(self):
-            pass
-
-        def stop(self):
-            pass
-
     class Sync:
         invalid_samples = 0
 
@@ -385,9 +364,8 @@ def test_recording_loss_is_a_visible_failed_state(monkeypatch, tmp_path):
         def close(self):
             return None
 
-    monkeypatch.setattr(recording_mod, "ControllerSubscription", Controller)
-    monkeypatch.setattr(recording_mod, "Synchronizer", Sync)
-    session = recording_mod.HumanRecordingSession(object(), output_dir=tmp_path)
+    monkeypatch.setattr(recording_mod, "ArbitrationSynchronizer", Sync)
+    session = recording_mod.HumanRecordingSession(object(), output_dir=tmp_path, history=object())
     writer = Writer()
     session._record(writer)
     assert session.status()["state"] == "failed"
