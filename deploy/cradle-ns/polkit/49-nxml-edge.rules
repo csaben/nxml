@@ -6,6 +6,10 @@ polkit.addRule(function(action, subject) {
     }
     var unit = action.lookup("unit");
     var verb = action.lookup("verb");
+    polkit.log("nxml-edge authorization action=" + action.id +
+               " unit=" + unit + " verb=" + verb +
+               " user=" + subject.user + " pid=" + subject.pid +
+               " local=" + subject.local + " active=" + subject.active);
     if (unit === "nxml-bt.service" &&
         (verb === "start" || verb === "stop" || verb === "restart")) {
         return polkit.Result.YES;

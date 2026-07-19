@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from nxml_edge.adapters import SystemctlServiceAdapter
 
@@ -39,3 +41,16 @@ def test_systemctl_adapter_surfaces_noninteractive_authorization_failure(monkeyp
     monkeypatch.setattr("nxml_edge.adapters.subprocess.run", lambda *args, **kwargs: Result())
     with pytest.raises(PermissionError, match="PolicyKit did not authorize"):
         SystemctlServiceAdapter().start("nxml-bt.service")
+
+
+def test_polkit_rule_is_exactly_scoped_and_logs_decision_fields() -> None:
+    rule = Path("deploy/cradle-ns/polkit/49-nxml-edge.rules").read_text()
+    assert 'action.id !== "org.freedesktop.systemd1.manage-units"' in rule
+    assert 'subject.user !== "arelius"' in rule
+    assert 'unit === "nxml-bt.service"' in rule
+    for verb in ("start", "stop", "restart"):
+        assert f'verb === "{verb}"' in rule
+    assert "polkit.log" in rule
+    assert "subject.local" in rule
+    assert "subject.active" in rule
+    assert "ssh.service" not in rule
