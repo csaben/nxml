@@ -300,7 +300,7 @@ class ClusterDashboard:
             "error": None,
             "stale": False,
             "stale_age_seconds": 0.0,
-            "health": health,
+            "health": health.model_dump(exclude_none=True),
             "datasets": datasets,
             "dataset_count": len(datasets),
             "shard_count": sum(x.shard_count for x in datasets),

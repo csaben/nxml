@@ -89,8 +89,7 @@ def test_minimal_ready_health_uses_authenticated_dataset_counts():
     result = ClusterDashboard(ClusterClient(transport)).status()
 
     assert result["connected"] is True
-    assert result["health"].status == "ready"
-    assert result["health"].created is None
+    assert result["health"] == {"status": "ready"}
     assert result["dataset_count"] == 1
     assert result["shard_count"] == 2
     assert result["episode_count"] == 7
@@ -102,7 +101,12 @@ def test_legacy_health_counters_remain_compatible_but_do_not_drive_counts():
     result = ClusterDashboard(ClusterClient(transport)).status()
 
     assert result["connected"] is True
-    assert result["health"].committed == 10
+    assert result["health"] == {
+        "status": "ok",
+        "created": 30,
+        "uploaded": 20,
+        "committed": 10,
+    }
     assert result["dataset_count"] == 1
     assert result["shard_count"] == 2
     assert result["episode_count"] == 7
