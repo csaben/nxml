@@ -142,6 +142,11 @@ def test_recording_session_finalizes_and_stamps_integrity(monkeypatch, tmp_path)
     assert writer.config["capture_integrity"] == {"status": "complete", "error": None}
 
 
+def test_recording_defaults_to_canonical_ffv1_mkv(tmp_path):
+    session = recording_mod.HumanRecordingSession(object(), output_dir=tmp_path)
+    assert session.codec == "ffv1"
+
+
 def test_recording_loss_is_a_visible_failed_state(monkeypatch, tmp_path):
     class Controller:
         def __init__(self, **_kwargs): pass

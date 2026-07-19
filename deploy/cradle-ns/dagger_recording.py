@@ -32,7 +32,7 @@ class HumanRecordingSession:
         *,
         output_dir: Path,
         orchestrator_ws: str = "ws://127.0.0.1:7777/ws/state",
-        codec: str = "h264",
+        codec: str = "ffv1",
         fps: float = 30.0,
         game: str = "pokemon-za",
     ) -> None:
