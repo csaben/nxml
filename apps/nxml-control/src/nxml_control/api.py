@@ -84,6 +84,18 @@ def create_app(*, state_dir: str | Path) -> FastAPI:
         except ValueError as error:
             raise HTTPException(409, str(error)) from error
 
+    @app.get("/v1/datasets")
+    def datasets():
+        return {"datasets": catalog.list_datasets()}
+
+    @app.get("/v1/datasets/{dataset_id}/shards")
+    def shards(dataset_id: str):
+        return {"shards": [item.__dict__ for item in catalog.list_shards(dataset_id)]}
+
+    @app.get("/v1/datasets/{dataset_id}/episodes")
+    def episodes(dataset_id: str):
+        return {"episodes": [item.__dict__ for item in catalog.list_episodes(dataset_id)]}
+
     app.state.catalog = catalog
     app.state.ingest = service
     return app

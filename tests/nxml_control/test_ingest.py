@@ -27,14 +27,17 @@ def test_checksum_gated_exactly_once_commit(tmp_path):
     created = catalog.create_upload(**request)
     assert catalog.create_upload(**request).id == created.id
     with pytest.raises(ValueError, match="verified"):
-        catalog.commit(created.id, dataset_id="raw", shard_id="s1", manifest={})
+        catalog.commit(created.id, dataset_id="raw", shard_id="s1", manifest={"episodes": ["e1"]})
     assert service.upload(created.id, BytesIO(content)).state == "uploaded"
     committed = catalog.commit(
         created.id, dataset_id="raw", shard_id="s1", manifest={"episodes": ["e1"]}
     )
     assert committed.state == "committed"
     assert (
-        catalog.commit(created.id, dataset_id="raw", shard_id="s1", manifest={}).id == committed.id
+        catalog.commit(
+            created.id, dataset_id="raw", shard_id="s1", manifest={"episodes": ["e1"]}
+        ).id
+        == committed.id
     )
 
 
@@ -83,3 +86,49 @@ def test_existing_object_key_is_immutable(tmp_path):
     assert second == first
     with storage.open("uploads/a.tar") as source:
         assert source.read() == b"first"
+
+
+def test_normalized_catalog_and_query_endpoints(tmp_path):
+    client = TestClient(create_app(state_dir=tmp_path))
+    content = b"catalog tar"
+    digest = hashlib.sha256(content).hexdigest()
+    created = client.post(
+        "/v1/uploads",
+        headers={"Idempotency-Key": "catalog/shard"},
+        json={
+            "object_key": "uploads/catalog/shard.tar",
+            "size_bytes": len(content),
+            "sha256": digest,
+        },
+    ).json()
+    client.put(created["upload_url"], content=content)
+    manifest = {
+        "episodes": [{"episode_id": "ep-b", "frames": 2}, {"episode_id": "ep-a", "frames": 3}]
+    }
+    assert (
+        client.post(
+            f"/v1/uploads/{created['id']}/commit",
+            json={"dataset_id": "raw-v2", "shard_id": "shard-1", "manifest": manifest},
+        ).status_code
+        == 200
+    )
+    assert client.get("/v1/datasets").json() == {
+        "datasets": [{"id": "raw-v2", "shard_count": 1, "episode_count": 2}]
+    }
+    shards = client.get("/v1/datasets/raw-v2/shards").json()["shards"]
+    assert shards[0]["sha256"] == digest
+    episodes = client.get("/v1/datasets/raw-v2/episodes").json()["episodes"]
+    assert [item["id"] for item in episodes] == ["ep-b", "ep-a"]
+
+
+def test_committed_manifest_is_immutable(tmp_path):
+    catalog, service = components(tmp_path)
+    content = b"x"
+    digest = hashlib.sha256(content).hexdigest()
+    upload = catalog.create_upload(
+        idempotency_key="x", object_key="uploads/x.tar", size_bytes=1, sha256=digest
+    )
+    service.upload(upload.id, BytesIO(content))
+    catalog.commit(upload.id, dataset_id="raw", shard_id="s", manifest={"episodes": ["e"]})
+    with pytest.raises(ValueError, match="manifest cannot be changed"):
+        catalog.commit(upload.id, dataset_id="raw", shard_id="s", manifest={"episodes": ["other"]})
