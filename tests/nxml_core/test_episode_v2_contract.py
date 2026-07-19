@@ -112,37 +112,38 @@ def _dagger_row(**changes) -> dict:
     muted[1] = 0.0
     ownership = [1] * 26
     payload = {
-        "row_schema_id": "nxml.dagger-actions.v2",
-        "action_spec_id": "switch_packets.v1",
         "frame_idx": 0,
-        "frame_monotonic_ns": 1_000,
-        "policy_action": policy,
-        "policy_source_frame_monotonic_ns": 850,
-        "policy_cluster_proposal_monotonic_ns": 123_456,
-        "policy_action_monotonic_ns": 900,
-        "policy_action_age_ns": 100,
-        "policy_action_valid": True,
-        "policy_action_fresh": True,
-        "human_action": human,
-        "human_action_monotonic_ns": 950,
-        "human_action_age_ns": 50,
-        "human_action_valid": True,
-        "human_action_fresh": True,
-        "muted_policy_action": muted,
-        "muted_policy_action_monotonic_ns": 900,
+        "timestamp": 1000.25,
+        "frame_monotonic_ns": 5_000_000_000,
+        "frame_timestamp_ns": 5_000_000_000,
+        "action_timestamp": 1000.238,
+        "action_monotonic_ns": 4_988_000_000,
+        "action_timestamp_ns": 4_988_000_000,
+        "action_age_ns": 12_000_000,
+        "action_age": 0.012,
+        "action": human,
         "applied_action": human,
-        "applied_action_monotonic_ns": 950,
-        "applied_action_age_ns": 50,
-        "applied_action_valid": True,
+        "policy_action": policy,
+        "human_action": human,
+        "muted_policy_action": muted,
         "human_mask": [True] + [False] * 25,
         "mute_mask": [False, True] + [False] * 24,
-        "mute_mask_version": "switch_packets.v1",
+        "mute_mask_version": "switch_packets.v1/mute.v1",
         "ownership": ownership,
-        "ownership_source": "human_takeover",
+        "controller_id": "dagger-arbitrator:switch_packets.v1",
+        "active_driver": "human",
+        "controller": "human",
+        "ownership_source": "human",
         "mode": "hybrid",
-        "takeover_active": True,
-        "policy_revision_id": "2f772838-2179-4739-a53c-aa95dcea35a0",
-        "policy_checkpoint_sha256": "3" * 64,
+        "takeover": True,
+        "policy_id": "bc_transformer_v1",
+        "policy_revision": "2f772838-2179-4739-a53c-aa95dcea35a0",
+        "policy_digest": "336036bbf2d35ce7ffc303a242c9f561ba537093f85ed4e1b4ce63a4dbc9c038",
+        "human_monotonic_ns": 4_987_000_000,
+        "policy_monotonic_ns": 4_986_000_000,
+        "policy_observation_monotonic_ns": 4_980_000_000,
+        "proposal_valid": True,
+        "proposal_fresh": True,
         "bc_training_eligible": True,
         "valid": True,
         "invalid_reasons": [],
@@ -156,18 +157,91 @@ def test_dagger_row_preserves_proposal_mute_applied_and_takeover_provenance() ->
     assert parsed.ownership == [OwnershipCodeV2.HUMAN] * 26
     assert parsed.muted_policy_action[1] == 0.0
     assert parsed.applied_action == parsed.human_action
+    assert parsed.model_dump(mode="json", exclude_unset=True) == _dagger_row()
+
+
+def test_deployed_edge_row_without_eligibility_round_trips_fail_closed() -> None:
+    live_writer_row = _dagger_row()
+    live_writer_row.pop("bc_training_eligible")
+    parsed = DaggerActionRecordV2.model_validate(live_writer_row)
+    assert parsed.bc_training_eligible is False
+    assert parsed.model_dump(mode="json", exclude_unset=True) == live_writer_row
 
 
 @pytest.mark.parametrize(
     ("change", "message"),
     [
-        ({"policy_checkpoint_sha256": "4" * 63}, "policy_checkpoint_sha256"),
-        ({"policy_action_age_ns": 99}, "age must equal"),
-        ({"ownership": [1] * 25 + [2]}, "takeover must mark every"),
-        ({"applied_action": [0.0] * 26}, "does not match per-dimension ownership"),
-        ({"bc_training_eligible": True, "applied_action_valid": False}, "BC eligibility"),
+        ({"action_age_ns": 99}, "action_age_ns must equal"),
+        ({"action": [0.0] * 26}, "alias must equal"),
+        (
+            {
+                "bc_training_eligible": True,
+                "ownership": [2] * 26,
+                "takeover": False,
+                "applied_action": [0.25, 0.0, *([0.25] * 24)],
+                "action": [0.25, 0.0, *([0.25] * 24)],
+            },
+            "BC eligibility",
+        ),
     ],
 )
 def test_dagger_row_rejects_unfaithful_provenance(change, message) -> None:
     with pytest.raises(ValidationError, match=message):
         DaggerActionRecordV2.model_validate(_dagger_row(**change))
+
+
+def test_invalid_neutral_edge_row_allows_null_action_time_and_fails_closed() -> None:
+    zero = [0.0] * 26
+    invalid = _dagger_row(
+        action=zero,
+        applied_action=zero,
+        human_action=zero,
+        policy_action=zero,
+        muted_policy_action=zero,
+        ownership=[0] * 26,
+        human_mask=[False] * 26,
+        mute_mask=[False] * 26,
+        action_timestamp=None,
+        action_monotonic_ns=None,
+        action_timestamp_ns=None,
+        action_age_ns=None,
+        action_age=0.0,
+        controller_id=None,
+        active_driver="none",
+        controller="none",
+        ownership_source=None,
+        mode=None,
+        takeover=False,
+        policy_id=None,
+        policy_revision=None,
+        policy_digest=None,
+        human_monotonic_ns=None,
+        policy_monotonic_ns=None,
+        policy_observation_monotonic_ns=None,
+        proposal_valid=False,
+        proposal_fresh=False,
+        bc_training_eligible=False,
+        valid=False,
+        invalid_reasons=["no_prior_arbitration_record"],
+    )
+    parsed = ActionRecordV2.model_validate(invalid)
+    assert parsed.effective_action_ns is None
+    assert parsed.bc_training_eligible is False
+
+
+def test_invalid_row_rejects_non_neutral_or_missing_reason() -> None:
+    with pytest.raises(ValidationError, match="neutral applied_action"):
+        ActionRecordV2.model_validate(
+            _dagger_row(valid=False, invalid_reasons=["missing"], bc_training_eligible=False)
+        )
+    with pytest.raises(ValidationError, match="require invalid_reasons"):
+        ActionRecordV2.model_validate(
+            _dagger_row(
+                valid=False,
+                invalid_reasons=[],
+                applied_action=[0.0] * 26,
+                action=[0.0] * 26,
+                ownership=[0] * 26,
+                bc_training_eligible=False,
+            )
+        )

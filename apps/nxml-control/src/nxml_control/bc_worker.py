@@ -112,15 +112,20 @@ def decode_action_rows(
     actions: list[list[float]] = []
     previous_frame_ns = -1
     for expected_index, row in enumerate(rows):
-        if row.get("row_schema_id") == "nxml.dagger-actions.v2":
+        is_dagger = row.get("row_schema_id") == "nxml.dagger-actions.v2" or "policy_digest" in row
+        if is_dagger:
             parsed = DaggerActionRecordV2.model_validate(row)
-            frame_index = parsed.frame_idx
-            frame_ns = parsed.frame_monotonic_ns
-            action_ns = parsed.applied_action_monotonic_ns
-            action_age = parsed.applied_action_age_ns / 1_000_000_000
+            frame_index = parsed.effective_frame_index
+            frame_ns = parsed.effective_frame_ns
+            action_ns = parsed.effective_action_ns
+            action_age = (
+                parsed.action_age_ns / 1_000_000_000
+                if parsed.action_age_ns is not None
+                else -1
+            )
             ownership = [int(value) for value in parsed.ownership]
-            human_mask = parsed.human_mask
-            row_valid = parsed.valid and parsed.applied_action_valid
+            human_mask = parsed.human_mask or parsed.human_action_mask or []
+            row_valid = parsed.valid and parsed.applied_action_valid is not False
             row_eligible = parsed.bc_training_eligible
             applied_values = parsed.applied_action
         else:
@@ -144,16 +149,18 @@ def decode_action_rows(
             "valid",
         )
         missing = [field for field in required if field not in row]
-        if row.get("row_schema_id") != "nxml.dagger-actions.v2" and missing:
+        if not is_dagger and missing:
             raise ValueError(f"edge-v2 action row lacks required fields: {missing}")
         if frame_index != expected_index:
             raise ValueError(
                 "frame_idx must be a complete, ordered, duplicate-free sequence from zero"
             )
-        if frame_ns <= previous_frame_ns:
+        if frame_ns is None or frame_ns <= previous_frame_ns:
             raise ValueError("frame_monotonic_ns must be strictly increasing")
         previous_frame_ns = frame_ns
-        if action_ns > frame_ns:
+        if is_dagger and (not row_valid or not row_eligible):
+            continue
+        if action_ns is None or action_ns > frame_ns:
             raise ValueError("noncausal action alignment")
         expected_age = (frame_ns - action_ns) / 1_000_000_000
         if not math.isclose(
@@ -168,7 +175,7 @@ def decode_action_rows(
             continue
         if control_source == "policy" and 2 not in ownership:
             continue
-        if row.get("row_schema_id") == "nxml.dagger-actions.v2" and control_source == "policy":
+        if is_dagger and control_source == "policy":
             continue
         applied = [float(value) for value in applied_values]
         if len(applied) != ACTION_DIM:

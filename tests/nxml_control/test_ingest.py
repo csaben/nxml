@@ -80,7 +80,7 @@ def test_changed_idempotent_request_and_bad_checksum_fail(tmp_path):
 def test_dagger_episode_requires_explicit_positive_quality_before_snapshot(tmp_path):
     client = TestClient(create_app(state_dir=tmp_path))
     content, manifest = fixture_shard("dagger-episode")
-    manifest["episodes"][0]["action_rows_schema_id"] = "nxml.dagger-actions.v2"
+    manifest["episodes"][0]["action_schema_id"] = "nxml.dagger-actions.v2"
     digest = hashlib.sha256(content).hexdigest()
     upload = client.post(
         "/v1/uploads",

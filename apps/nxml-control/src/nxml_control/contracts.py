@@ -19,6 +19,17 @@ class ShardEpisodeV2(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     episode_id: str = Field(min_length=1)
     action_rows_schema_id: Literal["nxml.dagger-actions.v2"] | None = None
+    action_schema_id: Literal["nxml.dagger-actions.v2"] | None = None
+
+    @model_validator(mode="after")
+    def matching_action_schema_aliases(self):
+        if (
+            self.action_rows_schema_id is not None
+            and self.action_schema_id is not None
+            and self.action_rows_schema_id != self.action_schema_id
+        ):
+            raise ValueError("action schema aliases must match")
+        return self
 
 
 class ShardManifestV2(BaseModel):

@@ -386,6 +386,7 @@ class Catalog:
                 episode_manifest = json.loads(episode["manifest_json"])
                 requires_explicit_quality = (
                     episode_manifest.get("action_rows_schema_id") == "nxml.dagger-actions.v2"
+                    or episode_manifest.get("action_schema_id") == "nxml.dagger-actions.v2"
                 )
                 quality = db.execute(
                     "SELECT * FROM episode_quality_dispositions WHERE dataset_id=? AND episode_id=? ORDER BY created_at DESC,disposition_id DESC LIMIT 1",

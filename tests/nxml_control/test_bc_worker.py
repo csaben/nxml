@@ -56,37 +56,38 @@ def dagger_action_parquet(*, count=80, eligible=True):
         human = [float(index % 2), *([0.0] * 25)]
         rows.append(
             {
-                "row_schema_id": "nxml.dagger-actions.v2",
-                "action_spec_id": "switch_packets.v1",
                 "frame_idx": index,
+                "timestamp": frame_ns / 1_000_000_000,
                 "frame_monotonic_ns": frame_ns,
-                "policy_action": None,
-                "policy_source_frame_monotonic_ns": None,
-                "policy_cluster_proposal_monotonic_ns": None,
-                "policy_action_monotonic_ns": None,
-                "policy_action_age_ns": None,
-                "policy_action_valid": False,
-                "policy_action_fresh": False,
-                "human_action": human,
-                "human_action_monotonic_ns": action_ns,
-                "human_action_age_ns": 1_000_000,
-                "human_action_valid": True,
-                "human_action_fresh": True,
-                "muted_policy_action": None,
-                "muted_policy_action_monotonic_ns": None,
+                "frame_timestamp_ns": frame_ns,
+                "action_timestamp": action_ns / 1_000_000_000,
+                "action_monotonic_ns": action_ns,
+                "action_timestamp_ns": action_ns,
+                "action_age_ns": 1_000_000,
+                "action_age": 0.001,
+                "action": human,
                 "applied_action": human,
-                "applied_action_monotonic_ns": action_ns,
-                "applied_action_age_ns": 1_000_000,
-                "applied_action_valid": True,
+                "human_action": human,
                 "human_mask": [True, *([False] * 25)],
+                "policy_action": [0.0] * 26,
+                "muted_policy_action": [0.0] * 26,
                 "mute_mask": [False] * 26,
-                "mute_mask_version": "switch_packets.v1",
+                "mute_mask_version": "switch_packets.v1/mute.v1",
                 "ownership": [1] * 26,
-                "ownership_source": "per_dimension",
-                "mode": "human_only",
-                "takeover_active": False,
-                "policy_revision_id": None,
-                "policy_checkpoint_sha256": None,
+                "controller_id": "dagger-arbitrator:switch_packets.v1",
+                "active_driver": "human",
+                "controller": "human",
+                "policy_id": None,
+                "policy_revision": None,
+                "policy_digest": None,
+                "human_monotonic_ns": action_ns,
+                "policy_monotonic_ns": None,
+                "policy_observation_monotonic_ns": None,
+                "ownership_source": "human",
+                "mode": "human",
+                "takeover": False,
+                "proposal_valid": False,
+                "proposal_fresh": False,
                 "bc_training_eligible": eligible,
                 "valid": True,
                 "invalid_reasons": [],
@@ -194,6 +195,48 @@ def test_action_decoder_accepts_dagger_rows_and_uses_applied_action_only(tmp_pat
     parquet.write_bytes(dagger_action_parquet(count=8, eligible=False))
     with pytest.raises(ValueError, match="no eligible action rows"):
         decode_action_rows(parquet, control_source="human")
+
+    deployed = pq.read_table(io.BytesIO(dagger_action_parquet(count=8))).drop(
+        ["bc_training_eligible"]
+    )
+    pq.write_table(deployed, parquet)
+    with pytest.raises(ValueError, match="no eligible action rows"):
+        decode_action_rows(parquet, control_source="human")
+
+
+def test_action_decoder_accepts_invalid_neutral_dagger_row_with_null_action_time(tmp_path):
+    rows = pq.read_table(io.BytesIO(dagger_action_parquet(count=8))).to_pylist()
+    zero = [0.0] * 26
+    rows[0].update(
+        {
+            "action_timestamp": None,
+            "action_monotonic_ns": None,
+            "action_timestamp_ns": None,
+            "action_age_ns": None,
+            "action_age": 0.0,
+            "action": zero,
+            "applied_action": zero,
+            "human_action": zero,
+            "human_mask": [False] * 26,
+            "policy_action": zero,
+            "muted_policy_action": zero,
+            "ownership": [0] * 26,
+            "controller_id": None,
+            "active_driver": "none",
+            "controller": "none",
+            "human_monotonic_ns": None,
+            "ownership_source": None,
+            "mode": None,
+            "bc_training_eligible": False,
+            "valid": False,
+            "invalid_reasons": ["no_prior_arbitration_record"],
+        }
+    )
+    parquet = tmp_path / "invalid-neutral.parquet"
+    pq.write_table(pa.Table.from_pylist(rows), parquet)
+    indices, _, total = decode_action_rows(parquet, control_source="human")
+    assert total == 8
+    assert indices == list(range(1, 8))
 
 
 @pytest.mark.parametrize(
