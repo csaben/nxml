@@ -47,6 +47,55 @@ def action_parquet(*, count=80, noncausal_at=None):
     return sink.getvalue()
 
 
+def dagger_action_parquet(*, count=80, eligible=True):
+    sink = io.BytesIO()
+    rows = []
+    for index in range(count):
+        frame_ns = 1_000_000_000 + index * 33_333_333
+        action_ns = frame_ns - 1_000_000
+        human = [float(index % 2), *([0.0] * 25)]
+        rows.append(
+            {
+                "row_schema_id": "nxml.dagger-actions.v2",
+                "action_spec_id": "switch_packets.v1",
+                "frame_idx": index,
+                "frame_monotonic_ns": frame_ns,
+                "policy_action": None,
+                "policy_source_frame_monotonic_ns": None,
+                "policy_cluster_proposal_monotonic_ns": None,
+                "policy_action_monotonic_ns": None,
+                "policy_action_age_ns": None,
+                "policy_action_valid": False,
+                "policy_action_fresh": False,
+                "human_action": human,
+                "human_action_monotonic_ns": action_ns,
+                "human_action_age_ns": 1_000_000,
+                "human_action_valid": True,
+                "human_action_fresh": True,
+                "muted_policy_action": None,
+                "muted_policy_action_monotonic_ns": None,
+                "applied_action": human,
+                "applied_action_monotonic_ns": action_ns,
+                "applied_action_age_ns": 1_000_000,
+                "applied_action_valid": True,
+                "human_mask": [True, *([False] * 25)],
+                "mute_mask": [False] * 26,
+                "mute_mask_version": "switch_packets.v1",
+                "ownership": [1] * 26,
+                "ownership_source": "per_dimension",
+                "mode": "human_only",
+                "takeover_active": False,
+                "policy_revision_id": None,
+                "policy_checkpoint_sha256": None,
+                "bc_training_eligible": eligible,
+                "valid": True,
+                "invalid_reasons": [],
+            }
+        )
+    pq.write_table(pa.Table.from_pylist(rows), sink)
+    return sink.getvalue()
+
+
 def raw_shard(episode_id="human", *, noncausal_at=None):
     members = {
         f"{episode_id}.mkv": b"test-video-not-decoded",
@@ -131,6 +180,19 @@ def test_action_decoder_rejects_hidden_negative_causal_age(tmp_path):
     parquet = tmp_path / "bad.parquet"
     parquet.write_bytes(action_parquet(noncausal_at=3))
     with pytest.raises(ValueError, match="noncausal action alignment"):
+        decode_action_rows(parquet, control_source="human")
+
+
+def test_action_decoder_accepts_dagger_rows_and_uses_applied_action_only(tmp_path):
+    parquet = tmp_path / "dagger.parquet"
+    parquet.write_bytes(dagger_action_parquet(count=8))
+    indices, actions, total = decode_action_rows(parquet, control_source="human")
+    assert indices == list(range(8)) and total == 8
+    assert actions.shape == (8, 26)
+    assert actions[:, 0].tolist() == [float(index % 2) for index in range(8)]
+
+    parquet.write_bytes(dagger_action_parquet(count=8, eligible=False))
+    with pytest.raises(ValueError, match="no eligible action rows"):
         decode_action_rows(parquet, control_source="human")
 
 

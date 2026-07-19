@@ -18,6 +18,7 @@ class MemberV2(BaseModel):
 class ShardEpisodeV2(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     episode_id: str = Field(min_length=1)
+    action_rows_schema_id: Literal["nxml.dagger-actions.v2"] | None = None
 
 
 class ShardManifestV2(BaseModel):

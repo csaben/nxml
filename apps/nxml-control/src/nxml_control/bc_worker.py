@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from nxml_core.contracts import DaggerActionRecordV2
 from pydantic import BaseModel, ConfigDict, Field
 
 from nxml_control.catalog import Catalog
@@ -111,6 +112,27 @@ def decode_action_rows(
     actions: list[list[float]] = []
     previous_frame_ns = -1
     for expected_index, row in enumerate(rows):
+        if row.get("row_schema_id") == "nxml.dagger-actions.v2":
+            parsed = DaggerActionRecordV2.model_validate(row)
+            frame_index = parsed.frame_idx
+            frame_ns = parsed.frame_monotonic_ns
+            action_ns = parsed.applied_action_monotonic_ns
+            action_age = parsed.applied_action_age_ns / 1_000_000_000
+            ownership = [int(value) for value in parsed.ownership]
+            human_mask = parsed.human_mask
+            row_valid = parsed.valid and parsed.applied_action_valid
+            row_eligible = parsed.bc_training_eligible
+            applied_values = parsed.applied_action
+        else:
+            frame_index = int(row.get("frame_idx", -1))
+            frame_ns = int(row.get("frame_monotonic_ns", -1))
+            action_ns = int(row.get("action_monotonic_ns", -1))
+            action_age = float(row.get("action_age", -1))
+            ownership = [int(value) for value in row.get("ownership", ())]
+            human_mask = [bool(value) for value in row.get("human_mask", ())]
+            row_valid = bool(row.get("valid", False))
+            row_eligible = True
+            applied_values = row.get("applied_action", ())
         required = (
             "frame_idx",
             "frame_monotonic_ns",
@@ -122,36 +144,33 @@ def decode_action_rows(
             "valid",
         )
         missing = [field for field in required if field not in row]
-        if missing:
+        if row.get("row_schema_id") != "nxml.dagger-actions.v2" and missing:
             raise ValueError(f"edge-v2 action row lacks required fields: {missing}")
-        frame_index = int(row["frame_idx"])
         if frame_index != expected_index:
             raise ValueError(
                 "frame_idx must be a complete, ordered, duplicate-free sequence from zero"
             )
-        frame_ns = int(row["frame_monotonic_ns"])
         if frame_ns <= previous_frame_ns:
             raise ValueError("frame_monotonic_ns must be strictly increasing")
         previous_frame_ns = frame_ns
-        action_ns = int(row["action_monotonic_ns"])
         if action_ns > frame_ns:
             raise ValueError("noncausal action alignment")
         expected_age = (frame_ns - action_ns) / 1_000_000_000
         if not math.isclose(
-            float(row["action_age"]), expected_age, rel_tol=0.0, abs_tol=1e-9
+            action_age, expected_age, rel_tol=0.0, abs_tol=1e-9
         ):
             raise ValueError("action_age does not match monotonic timestamps")
-        if not bool(row.get("valid", False)):
+        if not row_valid or not row_eligible:
             continue
-        ownership = [int(value) for value in row.get("ownership", ())]
-        human_mask = [bool(value) for value in row.get("human_mask", ())]
         if len(ownership) != ACTION_DIM or len(human_mask) != ACTION_DIM:
             raise ValueError("ownership and human_mask must have 26 dimensions")
         if control_source == "human" and not (any(human_mask) or 1 in ownership):
             continue
         if control_source == "policy" and 2 not in ownership:
             continue
-        applied = [float(value) for value in row["applied_action"]]
+        if row.get("row_schema_id") == "nxml.dagger-actions.v2" and control_source == "policy":
+            continue
+        applied = [float(value) for value in applied_values]
         if len(applied) != ACTION_DIM:
             raise ValueError(f"applied_action must have {ACTION_DIM} dimensions")
         frame_indices.append(frame_index)

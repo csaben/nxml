@@ -16,6 +16,8 @@ Training job and worker details are versioned in [`TRAINING_WORKER.md`](TRAINING
 
 Episode v2 Parquet ownership is integer encoded: `0` unowned, `1` human, `2` policy. `human_action_mask` separately indicates explicit human inputs.
 
+New AI/hybrid recordings use the additive strict contract in [`DAGGER_ACTIONS_V2.md`](DAGGER_ACTIONS_V2.md). Legacy human-only episode-v2 rows remain supported unchanged.
+
 ## Strict commit manifest
 
 Commit accepts only this field mapping; unknown fields are rejected:

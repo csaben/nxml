@@ -77,6 +77,49 @@ def test_changed_idempotent_request_and_bad_checksum_fail(tmp_path):
     assert catalog.get(upload.id).state == "created"
 
 
+def test_dagger_episode_requires_explicit_positive_quality_before_snapshot(tmp_path):
+    client = TestClient(create_app(state_dir=tmp_path))
+    content, manifest = fixture_shard("dagger-episode")
+    manifest["episodes"][0]["action_rows_schema_id"] = "nxml.dagger-actions.v2"
+    digest = hashlib.sha256(content).hexdigest()
+    upload = client.post(
+        "/v1/uploads",
+        headers={"Idempotency-Key": "dagger-explicit-quality"},
+        json={
+            "object_key": "uploads/dagger-explicit-quality.tar",
+            "size_bytes": len(content),
+            "sha256": digest,
+        },
+    ).json()
+    assert client.put(upload["upload_url"], content=content).status_code == 200
+    assert client.post(
+        f"/v1/uploads/{upload['id']}/commit",
+        json={"dataset_id": "dagger", "shard_id": "dagger-1", "manifest": manifest},
+    ).status_code == 200
+
+    missing = client.post(
+        "/v1/datasets/dagger/snapshots", json={"control_source": "human"}
+    )
+    assert missing.status_code == 422
+    quality = client.post(
+        "/v1/datasets/dagger/episodes/dagger-episode/quality-dispositions",
+        headers={"Idempotency-Key": "dagger-episode-validator-v2"},
+        json={
+            "schema_id": "nxml.episode-quality.v1",
+            "training_eligible": True,
+            "reason": "dagger_actions_v2_validated",
+            "validator": "dagger-actions-validator",
+            "validator_version": "2",
+        },
+    )
+    assert quality.status_code == 201
+    snapshot = client.post(
+        "/v1/datasets/dagger/snapshots", json={"control_source": "human"}
+    )
+    assert snapshot.status_code == 201
+    assert snapshot.json()["manifest"]["shards"][0]["episode_ids"] == ["dagger-episode"]
+
+
 def test_http_contract_and_openapi(tmp_path):
     client = TestClient(create_app(state_dir=tmp_path))
     content, api_manifest = fixture_shard()

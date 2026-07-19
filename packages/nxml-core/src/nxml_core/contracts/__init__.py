@@ -5,11 +5,14 @@ from nxml_core.contracts.episode_v2 import (
     CaptureMetadataV2,
     ClockMappingV2,
     ControllerV2,
+    DaggerActionRecordV2,
+    DaggerModeV2,
     EpisodeManifestV2,
     EventRecordV2,
     FileChecksumV2,
     LineageV2,
     OwnershipCodeV2,
+    OwnershipSourceV2,
     validate_action_records,
 )
 
@@ -18,10 +21,13 @@ __all__ = [
     "CaptureMetadataV2",
     "ClockMappingV2",
     "ControllerV2",
+    "DaggerActionRecordV2",
+    "DaggerModeV2",
     "EpisodeManifestV2",
     "EventRecordV2",
     "FileChecksumV2",
     "LineageV2",
     "OwnershipCodeV2",
+    "OwnershipSourceV2",
     "validate_action_records",
 ]

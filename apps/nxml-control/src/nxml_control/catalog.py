@@ -377,17 +377,31 @@ class Catalog:
             if not shard_rows:
                 raise KeyError(dataset_id)
             episode_rows = db.execute(
-                "SELECT id,shard_id FROM episodes WHERE dataset_id=? ORDER BY shard_id,ordinal",
+                "SELECT id,shard_id,manifest_json FROM episodes WHERE dataset_id=? ORDER BY shard_id,ordinal",
                 (dataset_id,),
             ).fetchall()
             eligible_by_shard = {row["id"]: [] for row in shard_rows}
             exclusions = []
             for episode in episode_rows:
+                episode_manifest = json.loads(episode["manifest_json"])
+                requires_explicit_quality = (
+                    episode_manifest.get("action_rows_schema_id") == "nxml.dagger-actions.v2"
+                )
                 quality = db.execute(
                     "SELECT * FROM episode_quality_dispositions WHERE dataset_id=? AND episode_id=? ORDER BY created_at DESC,disposition_id DESC LIMIT 1",
                     (dataset_id, episode["id"]),
                 ).fetchone()
-                if quality is not None and not bool(quality["training_eligible"]):
+                if requires_explicit_quality and quality is None:
+                    exclusions.append(
+                        {
+                            "episode_id": episode["id"],
+                            "reason": "missing_explicit_quality_disposition",
+                            "validator": "nxml-control",
+                            "validator_version": "dagger-actions-v2",
+                            "disposition_id": None,
+                        }
+                    )
+                elif quality is not None and not bool(quality["training_eligible"]):
                     exclusions.append(
                         {
                             "episode_id": episode["id"],

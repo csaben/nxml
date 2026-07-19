@@ -17,6 +17,18 @@ def select_training_rows(
     Policy includes any policy-owned applied dimension. Invalid rows never train.
     """
     for row in rows:
+        if row.get("row_schema_id") == "nxml.dagger-actions.v2":
+            from nxml_core.contracts import DaggerActionRecordV2, OwnershipCodeV2
+
+            parsed = DaggerActionRecordV2.model_validate(row)
+            if not parsed.bc_training_eligible:
+                continue
+            if control_source == "policy":
+                continue
+            if control_source == "human" and OwnershipCodeV2.HUMAN not in parsed.ownership:
+                continue
+            yield parsed.model_dump(mode="json")
+            continue
         if not bool(row.get("valid", False)):
             continue
         mask = [bool(value) for value in row.get("human_action_mask", ())]
