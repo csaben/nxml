@@ -49,6 +49,24 @@ def v4l2_mjpeg_stream_command(device: str) -> list[str]:
     ]
 
 
+def v4l2_mjpeg_frames_command(device: str) -> list[str]:
+    """Read native camera JPEG frames without decoding or transcoding."""
+    return [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-fflags",
+        "nobuffer",
+        *v4l2_input_args(device),
+        "-c:v",
+        "copy",
+        "-f",
+        "image2pipe",
+        "pipe:1",
+    ]
+
+
 def capture_preview_jpeg(device: str, *, width: int = 960, timeout: float = 5.0) -> bytes:
     command = [
         "ffmpeg",
