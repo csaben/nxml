@@ -146,6 +146,7 @@ def main() -> None:
     info = client.connect()
     transport_ms: list[float] = []
     processing_ms: list[float] = []
+    network_overhead_ms: list[float] = []
     total_ms: list[float] = []
     warming_total_ms: list[float] = []
     source_drops = 0
@@ -171,6 +172,9 @@ def main() -> None:
                     first_proposal_at = time.monotonic()
                 transport_ms.append(result.transport_latency_ns / 1e6)
                 processing_ms.append((result.processing_latency_ns or 0) / 1e6)
+                network_overhead_ms.append(
+                    (result.transport_latency_ns - (result.processing_latency_ns or 0)) / 1e6
+                )
                 total_ms.append((result.received_monotonic_ns - frame_ns) / 1e6)
                 proposals += 1
 
@@ -228,6 +232,7 @@ def main() -> None:
                 "steady_proposal_hz": (proposals - 1) / steady_elapsed,
                 "warming_observation_to_response_ms": summary(warming_total_ms),
                 "network_roundtrip_ms": summary(transport_ms),
+                "network_and_edge_overhead_ms": summary(network_overhead_ms),
                 "cluster_processing_ms": summary(processing_ms),
                 "observation_to_proposal_ms": summary(total_ms),
                 "freshest_observation_to_proposal_ms": min(total_ms),
