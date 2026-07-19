@@ -34,6 +34,12 @@ install -m 0644 -o root -g root "$rule_source" "$rule_vendor"
 systemctl restart polkit.service
 systemctl is-active --quiet polkit.service
 
+# Establish the private identity proxy before diagnostic authorization proofs
+# so the UI cannot remain stranded behind loopback. This never enables Funnel.
+tailscale set --operator="$expected_user"
+tailscale serve --bg --yes "$expected_backend"
+tailscale serve status | grep -Fq "https://${expected_host}"
+
 # Use the real unprivileged edge process as the PolicyKit subject. pkcheck is
 # run by root so it may supply the exact systemd unit/verb details, but it does
 # not call systemd or change any service state.
@@ -54,11 +60,5 @@ if pkcheck --action-id org.freedesktop.systemd1.manage-units \
     echo "narrow PolicyKit proof failed: ssh.service was authorized" >&2
     exit 1
 fi
-
-# Delegate only Tailscale CLI configuration to the logged-in operator, then
-# install a private Tailnet Serve proxy. This never enables Funnel.
-tailscale set --operator="$expected_user"
-tailscale serve --bg --yes "$expected_backend"
-tailscale serve status | grep -Fq "https://${expected_host}"
 
 echo "NXML identity proxy finalized: https://${expected_host}"
