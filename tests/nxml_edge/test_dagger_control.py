@@ -73,3 +73,16 @@ def test_hybrid_takeover_remains_immediate_during_policy_gap():
     a.transition(mode=Mode.HYBRID)
     out = a.apply(100, p(at=100, dims=(4, 5, 25)), None)
     assert out.source == "human" and out.takeover and out.action[25] == 1
+
+
+def test_human_mode_observes_gap_and_hard_stall_without_policy_ownership():
+    a = Arbitrator(stale_ns=55, hard_stall_ns=250)
+    policy = p(at=100, revision="r1")
+    assert a.observe_policy(155, policy) == ("none", None, 0, False)
+    assert a.observe_policy(156, policy) == (
+        "transient_gap",
+        "policy_transient_gap",
+        1,
+        False,
+    )
+    assert a.observe_policy(405, policy) == ("disarmed", "policy_stall", 250, True)

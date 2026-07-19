@@ -200,6 +200,27 @@ class ActionPlane:
                         human = self._human
                         policy = self._policy_for_arbitration()
                         applied = self.arbitrator.apply(now, human, policy)
+                        if self.arbitrator.mode is Mode.HUMAN:
+                            gap_state, gap_reason, gap_duration, hard = (
+                                self.arbitrator.observe_policy(now, policy)
+                            )
+                            if gap_state != "none":
+                                applied = replace(
+                                    applied,
+                                    gap_state=gap_state,
+                                    gap_reason=gap_reason,
+                                    gap_duration_ns=gap_duration,
+                                    boundary=("policy_stall" if hard else applied.boundary),
+                                    disarmed=hard,
+                                )
+                            if hard:
+                                applied = replace(
+                                    applied,
+                                    action=np.zeros(26, np.float32),
+                                    ownership=np.zeros(26, np.uint8),
+                                    source="none",
+                                    valid=False,
+                                )
                         self.orchestrator.post_action(applied.action.tolist())
                         self._append(applied, human, policy)
                         if applied.disarmed:

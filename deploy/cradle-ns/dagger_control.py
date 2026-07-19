@@ -139,27 +139,17 @@ class Arbitrator:
             return self._owned(now_ns, human, "human", 1, takeover=True)
 
         if not fresh_p:
-            if self._gap_started_ns is None:
-                self._gap_started_ns = (
-                    policy.monotonic_ns + self.stale_ns
-                    if policy is not None and policy.monotonic_ns <= now_ns
-                    else now_ns
-                )
-                self._recent_gaps = [x for x in self._recent_gaps if now_ns - x <= 10_000_000_000]
-                self._recent_gaps.append(now_ns)
-            duration = max(0, now_ns - self._gap_started_ns)
-            hard = duration >= self.hard_stall_ns or len(self._recent_gaps) >= 4
+            state, reason, duration, hard = self.observe_policy(now_ns, policy)
             return self._neutral(
                 now_ns,
-                "policy_stall" if hard else "policy_transient_gap",
+                reason,
                 disarmed=hard,
-                gap_state="disarmed" if hard else "transient_gap",
+                gap_state=state,
                 gap_duration_ns=duration,
             )
         assert policy is not None
-        recovered = self._gap_started_ns is not None
-        gap_duration = now_ns - self._gap_started_ns if recovered else 0
-        self._gap_started_ns = None
+        state, _reason, gap_duration, _hard = self.observe_policy(now_ns, policy)
+        recovered = state == "recovered"
         original_policy = policy
         muted = policy.action.copy()
         muted[np.asarray(self.mute.values)] = 0
@@ -182,6 +172,34 @@ class Arbitrator:
                 gap_duration_ns=gap_duration,
             )
         return result
+
+    def observe_policy(
+        self, now_ns: int, policy: Proposal | None
+    ) -> tuple[str, str | None, int, bool]:
+        """Track proposal advancement independently of which source owns the packet."""
+        fresh = policy is not None and 0 <= now_ns - policy.monotonic_ns <= self.stale_ns
+        if fresh:
+            if self._gap_started_ns is None:
+                return "none", None, 0, False
+            duration = max(0, now_ns - self._gap_started_ns)
+            self._gap_started_ns = None
+            return "recovered", "policy_transient_gap", duration, False
+        if self._gap_started_ns is None:
+            self._gap_started_ns = (
+                policy.monotonic_ns + self.stale_ns
+                if policy is not None and policy.monotonic_ns <= now_ns
+                else now_ns
+            )
+            self._recent_gaps = [x for x in self._recent_gaps if now_ns - x <= 10_000_000_000]
+            self._recent_gaps.append(now_ns)
+        duration = max(0, now_ns - self._gap_started_ns)
+        hard = duration >= self.hard_stall_ns or len(self._recent_gaps) >= 4
+        return (
+            "disarmed" if hard else "transient_gap",
+            "policy_stall" if hard else "policy_transient_gap",
+            duration,
+            hard,
+        )
 
     def _owned(
         self,
