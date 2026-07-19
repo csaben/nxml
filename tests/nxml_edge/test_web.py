@@ -42,14 +42,15 @@ def test_status_and_session_controls(edge) -> None:
     assert _endpoint(app, "/api/session/rearm")(_request("edge-secret")).ejected is False
 
 
-def test_bearer_auth_reaches_harmless_status_route(edge) -> None:
+def test_bearer_auth_reaches_status_and_mocked_start_route(edge) -> None:
     supervisor, services, _ = edge
     app = create_app(supervisor, token="edge-secret")
 
     status = _endpoint(app, "/api/status")(_request("edge-secret", bearer=True))
+    _endpoint(app, "/api/session/start")(_request("edge-secret", bearer=True))
 
     assert status.driver == "human"
-    assert services.calls == []
+    assert ("start", "nxml-bt.service") in services.calls
 
 
 @pytest.mark.parametrize("token", [None, "", "wrong-secret"])
