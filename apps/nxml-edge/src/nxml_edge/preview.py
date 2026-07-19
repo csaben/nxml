@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from typing import Protocol
 
-import cv2
+from nxml_capture.backends.ffmpeg_v4l2 import capture_preview_jpeg, inspect_jpeg
 
 
 class PreviewSource(Protocol):
     def frames(self) -> Iterator[bytes]: ...
+
+    def status(self) -> dict[str, object]: ...
 
 
 class CapturePreview:
@@ -19,34 +22,44 @@ class CapturePreview:
 
     boundary = b"frame"
 
-    def __init__(self, device: str, *, fps: float = 2.0, width: int = 640) -> None:
+    def __init__(self, device: str, *, fps: float = 1.0, width: int = 960) -> None:
         self.device = device
         self.period = 1.0 / fps
         self.width = width
+        self._status: dict[str, object] = {"ok": False, "error": "waiting for first frame"}
+        self._lock = threading.Lock()
+
+    def status(self) -> dict[str, object]:
+        with self._lock:
+            return dict(self._status)
 
     def frames(self) -> Iterator[bytes]:
         while True:
             started = time.monotonic()
-            capture = cv2.VideoCapture(self.device)
             try:
-                if capture.isOpened():
-                    capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-                    ok, frame = capture.read()
-                    if ok:
-                        encoded, jpeg = cv2.imencode(
-                            ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 72]
-                        )
-                        if encoded:
-                            payload = jpeg.tobytes()
-                            yield (
-                                b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
-                                + str(len(payload)).encode()
-                                + b"\r\n\r\n"
-                                + payload
-                                + b"\r\n"
-                            )
-            finally:
-                capture.release()
+                payload = capture_preview_jpeg(self.device, width=self.width)
+                sanity = inspect_jpeg(payload)
+                with self._lock:
+                    self._status = {
+                        "ok": sanity.sane,
+                        "error": sanity.reason,
+                        "capture": "mjpeg 1920x1080@30 via ffmpeg/v4l2",
+                        "channel_means": sanity.channel_means,
+                        "channel_stds": sanity.channel_stds,
+                        "green_ratio": sanity.green_ratio,
+                        "edge_variance": sanity.edge_variance,
+                    }
+                if sanity.sane:
+                    yield (
+                        b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                        + str(len(payload)).encode()
+                        + b"\r\n\r\n"
+                        + payload
+                        + b"\r\n"
+                    )
+            except (OSError, RuntimeError, TimeoutError) as error:
+                with self._lock:
+                    self._status = {"ok": False, "error": f"bad capture format: {error}"}
             time.sleep(max(0.0, self.period - (time.monotonic() - started)))
 
 

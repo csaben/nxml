@@ -69,6 +69,13 @@ def create_app(
             return {"reachable": False, "error": "controller state is not configured"}
         return controller.status()
 
+    @app.get("/api/preview/status")
+    def preview_status(request: Request):
+        require_token(request)
+        if preview is None:
+            return {"ok": False, "error": "capture preview is not configured"}
+        return preview.status()
+
     @app.get("/api/cluster/status")
     def cluster_status(request: Request):
         require_token(request)
