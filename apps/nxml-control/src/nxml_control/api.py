@@ -8,6 +8,13 @@ from fastapi import FastAPI, Header, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from nxml_control.catalog import Catalog, IdentityConflictError, InvalidManifestError, Upload
+from nxml_control.models import (
+    CandidateError,
+    ConflictError,
+    DeploymentRuntime,
+    FakePolicyRuntime,
+    ModelRegistry,
+)
 from nxml_control.service import IngestService
 from nxml_control.storage import LocalObjectStorage
 from nxml_control.training import FakeTrainingExecutor, TrainingExecutor, TrainingJobs, TrainingSpec
@@ -18,6 +25,23 @@ class CreateUploadRequest(BaseModel):
     object_key: str = Field(pattern=r"^uploads/[A-Za-z0-9._/-]+\.tar$")
     size_bytes: int = Field(gt=0)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class RegisterModelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    model_id: str
+    checkpoint_path: str
+    checkpoint_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_snapshot_id: str
+    source_config: dict[str, Any]
+    source_commit_id: str
+    compatibility: dict[str, Any]
+    evaluation: dict[str, Any]
+
+
+class ActivationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: str | None = None
 
 
 class TrainingRequest(BaseModel):
@@ -43,12 +67,16 @@ def _view(item: Upload) -> dict[str, Any]:
 
 
 def create_app(
-    *, state_dir: str | Path, training_executor: TrainingExecutor | None = None
+    *,
+    state_dir: str | Path,
+    training_executor: TrainingExecutor | None = None,
+    deployment_runtime: DeploymentRuntime | None = None,
 ) -> FastAPI:
     state = Path(state_dir)
     catalog = Catalog(state / "catalog.sqlite3")
     service = IngestService(catalog, LocalObjectStorage(state / "objects"))
     training = TrainingJobs(state / "catalog.sqlite3", training_executor or FakeTrainingExecutor())
+    models = ModelRegistry(state / "catalog.sqlite3", deployment_runtime or FakePolicyRuntime())
     app = FastAPI(title="NXML ML Control Plane", version="1.0.0")
 
     @app.get("/healthz")
@@ -167,6 +195,63 @@ def create_app(
             return {"metrics": training.metrics(job_id)}
         except KeyError as error:
             raise HTTPException(404, "training job not found") from error
+
+    @app.post("/v1/models/revisions", status_code=201)
+    def register_model(body: RegisterModelRequest):
+        return models.register(**body.model_dump())
+
+    @app.get("/v1/models/revisions/{revision_id}")
+    def model_revision(revision_id: str):
+        try:
+            return models.get(revision_id)
+        except KeyError as error:
+            raise HTTPException(404, "model revision not found") from error
+
+    @app.post("/v1/models/revisions/{revision_id}/validate")
+    def validate_model(revision_id: str):
+        try:
+            return models.validate(revision_id)
+        except KeyError as error:
+            raise HTTPException(404, "model revision not found") from error
+        except CandidateError as error:
+            raise HTTPException(422, str(error)) from error
+
+    @app.get("/v1/deployment")
+    def deployment():
+        return models.deployment()
+
+    @app.post("/v1/models/revisions/{revision_id}/promote")
+    def promote_model(
+        revision_id: str,
+        body: ActivationRequest,
+        idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1)],
+    ):
+        try:
+            return models.promote(
+                revision_id,
+                expected_revision=body.expected_revision,
+                idempotency_key=idempotency_key,
+            )
+        except KeyError as error:
+            raise HTTPException(404, "model revision not found") from error
+        except CandidateError as error:
+            raise HTTPException(422, str(error)) from error
+        except ConflictError as error:
+            raise HTTPException(409, str(error)) from error
+
+    @app.post("/v1/deployment/rollback")
+    def rollback_model(
+        body: ActivationRequest,
+        idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1)],
+    ):
+        try:
+            return models.rollback(
+                expected_revision=body.expected_revision, idempotency_key=idempotency_key
+            )
+        except CandidateError as error:
+            raise HTTPException(422, str(error)) from error
+        except ConflictError as error:
+            raise HTTPException(409, str(error)) from error
 
     app.state.catalog = catalog
     app.state.ingest = service
