@@ -36,6 +36,14 @@ class _Controller:
     def latest(self) -> ControllerSnapshot | None:
         return self.snapshot
 
+    def latest_at(self, *, timestamp: float, monotonic_ns: int | None = None):
+        snapshot = self.snapshot
+        if snapshot is None:
+            return None
+        if monotonic_ns is not None and snapshot.monotonic_ns is not None:
+            return snapshot if snapshot.monotonic_ns <= monotonic_ns else None
+        return snapshot if snapshot.timestamp <= timestamp else None
+
     def wait_for_first(self, timeout: float = 5.0) -> bool:
         return self.snapshot is not None
 
@@ -89,7 +97,10 @@ def test_explicit_human_mode_owns_full_fresh_neutral_packet() -> None:
 
 def test_stale_and_disconnected_packets_are_invalid_and_unowned() -> None:
     stale = Synchronizer(
-        _Source(), _Controller(_snapshot(timestamp=9.0)), driver="human", max_action_age=0.2
+        _Source(),
+        _Controller(_snapshot(timestamp=9.0, monotonic_ns=100_000_000)),
+        driver="human",
+        max_action_age=0.2,
     )._pair(_frame())
     disconnected = Synchronizer(
         _Source(), _Controller(_snapshot(), connected=False), driver="human"
@@ -117,7 +128,7 @@ def test_unknown_or_inference_provenance_is_never_relabelled() -> None:
 
     assert unknown is not None and unknown.invalid_reasons == ("unknown_provenance",)
     assert inference is not None and inference.invalid_reasons == ("inference_provenance",)
-    np.testing.assert_array_equal(inference.applied_action, inference_action)
+    np.testing.assert_array_equal(inference.applied_action, neutral_action())
     assert inference.human_mask is not None and not inference.human_mask.any()
     assert inference.ownership is not None and not inference.ownership.any()
 
@@ -162,6 +173,12 @@ def test_human_capture_roundtrip_has_temporal_bounds_events_and_checksums(
     assert all(all(row["human_mask"]) for row in rows)
     assert all(set(row["ownership"]) == {1} for row in rows)
     assert all(row["invalid_reasons"] == [] for row in rows)
+    assert all(row["action_monotonic_ns"] <= row["frame_monotonic_ns"] for row in rows)
+    assert all(
+        row["action_age"]
+        == pytest.approx((row["frame_monotonic_ns"] - row["action_monotonic_ns"]) / 1e9)
+        for row in rows
+    )
     events = pq.read_table(tmp_path / "human.events.parquet").to_pylist()
     assert events[0]["kind"] == "human_session_started"
 
@@ -173,3 +190,32 @@ def test_human_capture_roundtrip_has_temporal_bounds_events_and_checksums(
         payload = (tmp_path / name).read_bytes()
         assert metadata["bytes"] == len(payload)
         assert metadata["sha256"] == hashlib.sha256(payload).hexdigest()
+
+
+def test_no_prior_sample_is_neutral_invalid_and_unowned() -> None:
+    future = _snapshot(timestamp=10.2, monotonic_ns=1_200_000_000)
+    synced = Synchronizer(_Source(), _Controller(future), driver="human")._pair(_frame())
+    assert synced is not None and not synced.valid
+    assert synced.invalid_reasons == ("no_prior_controller_sample",)
+    np.testing.assert_array_equal(synced.applied_action, neutral_action())
+    assert synced.human_mask is not None and not synced.human_mask.any()
+    assert synced.ownership is not None and not synced.ownership.any()
+
+
+def test_exact_equal_sample_is_causally_valid() -> None:
+    sample = _snapshot(timestamp=10.1, monotonic_ns=1_100_000_000)
+    synced = Synchronizer(_Source(), _Controller(sample), driver="human")._pair(_frame())
+    assert synced is not None and synced.valid and synced.action_age == 0
+
+
+def test_future_sample_from_legacy_source_is_invariant_violation() -> None:
+    class LegacyController:
+        is_connected = True
+        def latest(self):
+            return _snapshot(timestamp=10.2, monotonic_ns=1_200_000_000)
+
+    synced = Synchronizer(_Source(), LegacyController(), driver="human")._pair(_frame())
+    assert synced is not None and not synced.valid
+    assert synced.invalid_reasons == ("future_controller_sample",)
+    assert synced.action_age < 0
+    np.testing.assert_array_equal(synced.applied_action, neutral_action())

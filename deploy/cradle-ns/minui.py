@@ -109,7 +109,7 @@ PAGE = """<!doctype html>
     try { const s=await fetch('/api/ops/status',{cache:'no-store'}).then(r=>r.json());
       const r=s.recording||{}; $('session').textContent=`human · ${r.state||'idle'} · ${r.frames||0} frames · ${(r.duration_seconds||0).toFixed(1)}s`;
       $('record').textContent=['recording','stopping'].includes(r.state)?'Stop episode':'Start episode';
-      const p=s.spool; $('spool').textContent=p?`${p.pending_episodes||0} pending · ${p.episodes_uploaded||0} shipped`:`unavailable: ${s.errors.spool||'unknown'}`;
+      const p=s.spool; $('spool').textContent=p?`${p.pending_episodes||0} pending · ${p.episodes_shipped||0} shipped · ${((p.local_buffered_bytes||0)/1e9).toFixed(2)} GB buffered · ${p.disk_free_gb||'?'} GB free · ${p.receipt_state||'unknown'}${p.blocked_reason?' · blocked: '+p.blocked_reason:''}`:`unavailable: ${s.errors.spool||'unknown'}`;
       const c=s.cluster; $('cluster').textContent=c?`${(c.datasets.datasets||[]).length} datasets · ${(c.snapshots.snapshots||[]).length} snapshots`:`unavailable: ${s.errors.cluster||'unknown'}`;
       const d=c&&c.deployment; $('model').textContent=d&&d.active_revision?`active ${d.active_revision.slice(0,8)} · gen ${d.generation}`:'none active';
     } catch(e) { $('cluster').textContent='operations status unavailable'; }
@@ -185,6 +185,11 @@ def create_app(
     def recording_start() -> dict:
         if recorder is None:
             raise HTTPException(503, "recording is not configured")
+        if operations is not None:
+            spool = operations.snapshot().spool or {}
+            if spool.get("admission_open") is False:
+                reason = spool.get("blocked_reason") or "local spool admission is closed"
+                raise HTTPException(409, str(reason))
         try:
             return recorder.start()
         except RuntimeError as error:
@@ -300,6 +305,7 @@ def main() -> None:
         spool_status_path=args.spool_status,
         cluster_url=args.cluster_url,
         cluster_token_path=args.cluster_token,
+        capture_dir=args.capture_output,
     )
     fanout = MjpegFanoutSource(args.capture)
     recorder = HumanRecordingSession(fanout, output_dir=args.capture_output)

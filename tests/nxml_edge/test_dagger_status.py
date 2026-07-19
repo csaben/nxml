@@ -44,12 +44,14 @@ def test_status_models_preserve_contract_and_spool_metadata(tmp_path):
         spool_status_path=spool,
         cluster_url="http://127.0.0.1:1",
         cluster_token_path=None,
+        capture_dir=tmp_path,
         request_timeout=0.01,
     )
     wire = reader.refresh().wire()
     assert wire["schema_version"] == "nxml.dagger-operations-status.v1"
     assert wire["session"]["recording_available"] is False
     assert wire["spool"]["commit_id"] == "receipt-7"
+    assert wire["spool"]["local_buffered_bytes"] >= spool.stat().st_size
     assert "cluster" in wire["errors"]
 
 
@@ -109,6 +111,26 @@ def test_recording_controls_are_explicit_and_do_not_add_auth():
     with TestClient(app) as client:
         assert client.post("/api/recording/start").json()["state"] == "recording"
         assert client.post("/api/recording/stop").json()["state"] == "finalized"
+
+
+def test_disk_pressure_closes_recording_admission():
+    class Status:
+        def __init__(self):
+            self.spool = {"admission_open": False, "blocked_reason": "disk pressure"}
+        def wire(self): return {}
+    class Operations:
+        def start(self): pass
+        def stop(self): pass
+        def snapshot(self): return Status()
+    class Recorder:
+        def status(self): return {"state": "idle"}
+        def start(self): raise AssertionError("recorder must not start")
+
+    app = minui.create_app(Orchestrator(), "/dev/null", Operations(), recorder=Recorder())
+    with TestClient(app) as client:
+        response = client.post("/api/recording/start")
+    assert response.status_code == 409
+    assert response.json()["detail"] == "disk pressure"
 
 
 def test_recording_session_finalizes_and_stamps_integrity(monkeypatch, tmp_path):

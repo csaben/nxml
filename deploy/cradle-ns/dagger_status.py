@@ -45,12 +45,14 @@ class OperationsReader:
         spool_status_path: Path,
         cluster_url: str,
         cluster_token_path: Path | None,
+        capture_dir: Path | None = None,
         poll_seconds: float = 5.0,
         request_timeout: float = 2.0,
     ) -> None:
         self.spool_status_path = spool_status_path
         self.cluster_url = cluster_url.rstrip("/")
         self.cluster_token_path = cluster_token_path
+        self.capture_dir = capture_dir
         self.poll_seconds = poll_seconds
         self.request_timeout = request_timeout
         self._status = OperationsStatus(observed_at=time.time())
@@ -94,6 +96,45 @@ class OperationsReader:
             value = json.loads(self.spool_status_path.read_text())
             if not isinstance(value, dict):
                 raise ValueError("status root is not an object")
+            staging_bytes = int(value.get("staging_bytes") or 0)
+            source_files = (
+                [path for path in self.capture_dir.glob("*") if path.is_file()]
+                if self.capture_dir is not None and self.capture_dir.is_dir()
+                else []
+            )
+            source_bytes = sum(path.stat().st_size for path in source_files)
+            manifests = [path for path in source_files if path.name.endswith(".manifest.json")]
+            oldest_mtime = min((path.stat().st_mtime for path in manifests), default=None)
+            blocked = value.get("blocked_episodes") or {}
+            uploading = value.get("uploading")
+            pending = int(value.get("pending_episodes") or 0)
+            shipped = int(value.get("episodes_shipped") or 0)
+            value.update(
+                {
+                    "source_buffered_bytes": source_bytes,
+                    "local_buffered_bytes": source_bytes + staging_bytes,
+                    "oldest_pending_age_seconds": (
+                        max(0.0, time.time() - oldest_mtime) if oldest_mtime is not None else None
+                    ),
+                    "receipt_state": (
+                        "uploading"
+                        if uploading
+                        else "awaiting_receipt"
+                        if pending
+                        else "committed_and_deleted"
+                        if shipped
+                        else "none"
+                    ),
+                    "deletion_eligible": False,
+                    "blocked_reason": (
+                        "disk pressure"
+                        if value.get("disk_pressure")
+                        else next(
+                            (str(item.get("error")) for item in blocked.values()), None
+                        )
+                    ),
+                }
+            )
             return value
         except (OSError, ValueError, json.JSONDecodeError) as error:
             errors["spool"] = str(error)

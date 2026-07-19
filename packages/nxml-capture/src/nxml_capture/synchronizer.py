@@ -31,6 +31,10 @@ class ControllerStateSource(Protocol):
 
     def latest(self) -> ControllerSnapshot | None: ...
 
+    def latest_at(
+        self, *, timestamp: float, monotonic_ns: int | None = None
+    ) -> ControllerSnapshot | None: ...
+
     def wait_for_first(self, timeout: float = 5.0) -> bool: ...
 
     def start(self) -> None: ...
@@ -93,10 +97,22 @@ class Synchronizer:
                 yield synced
 
     def _pair(self, frame: Frame) -> SyncedFrame | None:
-        snapshot = self.controller.latest()
+        latest_at = getattr(self.controller, "latest_at", None)
+        snapshot = (
+            latest_at(timestamp=frame.timestamp, monotonic_ns=frame.monotonic_ns)
+            if callable(latest_at)
+            else self.controller.latest()
+        )
         if snapshot is None:
-            return self._invalid(frame, "missing_controller_sample")
-        age = max(0.0, frame.timestamp - snapshot.timestamp)
+            return self._invalid(frame, "no_prior_controller_sample")
+        if frame.monotonic_ns is not None and snapshot.monotonic_ns is not None:
+            age = (frame.monotonic_ns - snapshot.monotonic_ns) / 1e9
+        else:
+            age = frame.timestamp - snapshot.timestamp
+        if age < 0:
+            return self._invalid(
+                frame, "future_controller_sample", snapshot=snapshot, age=age
+            )
         if not self.controller.is_connected:
             return self._invalid(frame, "controller_disconnected", snapshot=snapshot, age=age)
         if age > self.max_action_age:
@@ -134,9 +150,7 @@ class Synchronizer:
         age: float = 0.0,
     ) -> SyncedFrame:
         self.invalid_samples += 1
-        action = getattr(snapshot, "action", None)
-        if not isinstance(action, np.ndarray) or action.shape != (ACTION_DIM,):
-            action = neutral_action()
+        action = neutral_action()
         return SyncedFrame(
             timestamp=frame.timestamp,
             frame=frame.image,

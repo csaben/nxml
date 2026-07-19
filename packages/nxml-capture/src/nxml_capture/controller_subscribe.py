@@ -17,6 +17,7 @@ import contextlib
 import json
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 
 import numpy as np
@@ -49,6 +50,7 @@ class ControllerSubscription:
         self.url = url
         self.reconnect_backoff = reconnect_backoff
         self._latest: ControllerSnapshot | None = None
+        self._history: deque[ControllerSnapshot] = deque(maxlen=2048)
         self._latest_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -87,6 +89,17 @@ class ControllerSubscription:
     def latest(self) -> ControllerSnapshot | None:
         with self._latest_lock:
             return self._latest
+
+    def latest_at(self, *, timestamp: float, monotonic_ns: int | None = None) -> ControllerSnapshot | None:
+        """Newest received sample causally at or before the frame clock."""
+        with self._latest_lock:
+            for sample in reversed(self._history):
+                if monotonic_ns is not None and sample.monotonic_ns is not None:
+                    if sample.monotonic_ns <= monotonic_ns:
+                        return sample
+                elif sample.timestamp <= timestamp:
+                    return sample
+        return None
 
     def wait_for_first(self, timeout: float = 5.0) -> bool:
         deadline = time.monotonic() + timeout
@@ -150,6 +163,7 @@ class ControllerSubscription:
         )
         with self._latest_lock:
             self._latest = snapshot
+            self._history.append(snapshot)
 
 
 def _action_source(raw: dict[str, object]) -> str | None:

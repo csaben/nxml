@@ -102,12 +102,13 @@ class HumanRecordingSession:
         error: str | None = None
         video_path: Path | None = None
         controller.start()
+        last_invalid_reasons: tuple[str, ...] | None = None
         try:
             for synced in synchronizer.frames():
                 if self._stop.is_set():
                     break
                 writer.append(synced)
-                if not synced.valid:
+                if not synced.valid and synced.invalid_reasons != last_invalid_reasons:
                     writer.append_event(
                         "controller_sample_invalid",
                         timestamp=synced.timestamp,
@@ -115,6 +116,14 @@ class HumanRecordingSession:
                         source="dagger-ui",
                         payload={"reasons": list(synced.invalid_reasons)},
                     )
+                elif synced.valid and last_invalid_reasons is not None:
+                    writer.append_event(
+                        "controller_sample_recovered",
+                        timestamp=synced.timestamp,
+                        monotonic_ns=synced.frame_monotonic_ns,
+                        source="dagger-ui",
+                    )
+                last_invalid_reasons = None if synced.valid else synced.invalid_reasons
                 with self._lock:
                     self._status = RecordingStatus(
                         **{
