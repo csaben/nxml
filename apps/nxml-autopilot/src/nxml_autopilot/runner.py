@@ -856,6 +856,7 @@ class AutopilotRunner:
         )
         policy_health = self._ai.health()
         policy_age_s = now - policy_ts if policy_ts else None
+        spool_status = self._spool_status(now)
         policy_ready = (
             self._ai_source.enabled
             and not self._ejected.is_set()
@@ -874,7 +875,10 @@ class AutopilotRunner:
             "policy": {
                 "id": self._policy_id,
                 "revision": self._policy_revision,
-                "previous_revision": None,
+                "active_revision": self._policy_revision,
+                "cluster_active_revision": spool_status.get("active_policy_revision"),
+                "previous_revision": spool_status.get("previous_policy_revision"),
+                "deployment_generation": spool_status.get("deployment_generation"),
                 "endpoint": self.config.policy_uri,
                 "inference_count": self._ai.inference_count,
                 "last_inference_timestamp": policy_ts or None,
@@ -908,7 +912,7 @@ class AutopilotRunner:
                 ),
             },
             "orchestrator": self._orchestrator_health(now),
-            "spool": self._spool_status(now),
+            "spool": spool_status,
         }
 
     def _orchestrator_health(self, now: float) -> dict[str, Any]:

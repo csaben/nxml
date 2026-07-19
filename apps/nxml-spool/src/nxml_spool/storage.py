@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+import httpx
+
 from nxml_spool.shards import Shard
 
 
@@ -24,11 +26,31 @@ class StorageCommit:
     shard_key: str
     checksum: str
     size_bytes: int
+    receipt: dict[str, object] | None = None
+    authoritative_receipt: bool = False
+
+
+class StorageError(RuntimeError):
+    """Base class for backend failures that must preserve local source data."""
+
+
+class StorageConflictError(StorageError):
+    pass
+
+
+class StorageValidationError(StorageError):
+    pass
+
+
+class StorageUnavailableError(StorageError):
+    pass
 
 
 class StorageBackend(Protocol):
     def publish(self, shard: Shard) -> StorageCommit:
         """Publish an immutable shard and return only after commit verification."""
+
+    def status(self) -> dict[str, object]: ...
 
 
 def sha256_file(path: Path) -> str:
@@ -70,6 +92,9 @@ class FilesystemStorageBackend:
         marker_bytes = json.dumps(marker, sort_keys=True).encode()
         self._put_bytes_immutable(marker_bytes, marker_key)
         return StorageCommit(shard.sha256, shard_key, shard.sha256, shard.size_bytes)
+
+    def status(self) -> dict[str, object]:
+        return {"backend": "filesystem", "cluster_connected": None}
 
     def _put_immutable(self, source: Path, key: str, checksum: str) -> None:
         destination = self.root / key
@@ -149,3 +174,173 @@ class HFDatasetStorageBackend:
             shard.sha256,
             shard.size_bytes,
         )
+
+    def status(self) -> dict[str, object]:
+        return {"backend": "huggingface", "cluster_connected": None}
+
+
+class ControlPlaneStorageBackend:
+    """REST ingest backend with an independently verified commit receipt."""
+
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        dataset_id: str,
+        edge_id: str,
+        token: str | None = None,
+        timeout_s: float = 30.0,
+        client: httpx.Client | None = None,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.dataset_id = dataset_id
+        self.edge_id = edge_id
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        self.client = client or httpx.Client(
+            base_url=self.base_url,
+            headers=headers,
+            timeout=timeout_s,
+        )
+
+    def publish(self, shard: Shard) -> StorageCommit:
+        shard_id = f"sha256:{shard.sha256}"
+        object_key = f"uploads/{self.edge_id}/{shard.sha256}.tar"
+        idempotency_key = f"{self.edge_id}:{self.dataset_id}:{shard.sha256}"
+        upload = self._json(
+            "POST",
+            "/v1/uploads",
+            headers={"Idempotency-Key": idempotency_key},
+            json={
+                "object_key": object_key,
+                "size_bytes": shard.size_bytes,
+                "sha256": shard.sha256,
+            },
+        )
+        upload_id = _required_str(upload, "id")
+        state = upload.get("state")
+        upload_url = _required_str(upload, "upload_url")
+        if state == "created":
+            with shard.path.open("rb") as stream:
+                self._json("PUT", upload_url, content=stream.read())
+
+        inspected = self._json("POST", f"/v1/uploads/{upload_id}/inspect")
+        if inspected.get("state") not in {"uploaded", "committed"}:
+            raise StorageUnavailableError(
+                f"upload {upload_id} did not become verified: {inspected.get('state')!r}"
+            )
+        receipt = self._json(
+            "POST",
+            f"/v1/uploads/{upload_id}/commit",
+            json={
+                "dataset_id": self.dataset_id,
+                "shard_id": shard_id,
+                "manifest": shard.api_manifest,
+            },
+        )
+        commit_id = _required_str(receipt, "commit_id")
+        # Commit response is not the deletion authority. Resolve the receipt
+        # independently so a response-loss retry converges on catalog state.
+        authoritative = self._json("GET", f"/v1/commits/{commit_id}")
+        self._validate_receipt(authoritative, shard, shard_id, upload_id)
+        return StorageCommit(
+            commit_id,
+            _required_str(authoritative, "storage_key"),
+            shard.sha256,
+            shard.size_bytes,
+            receipt=authoritative,
+            authoritative_receipt=True,
+        )
+
+    def _validate_receipt(
+        self,
+        receipt: dict[str, object],
+        shard: Shard,
+        shard_id: str,
+        upload_id: str,
+    ) -> None:
+        expected = {
+            "upload_id": upload_id,
+            "checksum": shard.sha256,
+            "size_bytes": shard.size_bytes,
+            "state": "committed",
+            "dataset_id": self.dataset_id,
+            "shard_id": shard_id,
+        }
+        mismatches = {
+            key: {"expected": value, "actual": receipt.get(key)}
+            for key, value in expected.items()
+            if receipt.get(key) != value
+        }
+        if mismatches:
+            raise StorageValidationError(f"authoritative receipt mismatch: {mismatches}")
+
+    def _json(self, method: str, path: str, **kwargs) -> dict[str, object]:
+        try:
+            response = self.client.request(method, path, **kwargs)
+        except httpx.HTTPError as error:
+            raise StorageUnavailableError(str(error)) from error
+        if response.status_code == 409:
+            raise StorageConflictError(_response_detail(response))
+        if response.status_code == 422:
+            raise StorageValidationError(_response_detail(response))
+        if response.status_code >= 400:
+            raise StorageUnavailableError(
+                f"control plane {method} {path}: {response.status_code} {_response_detail(response)}"
+            )
+        try:
+            payload = response.json()
+        except ValueError as error:
+            raise StorageUnavailableError(
+                f"control plane {method} {path} returned malformed JSON"
+            ) from error
+        if not isinstance(payload, dict):
+            raise StorageUnavailableError(
+                f"control plane {method} {path} returned non-object JSON"
+            )
+        return payload
+
+    def status(self) -> dict[str, object]:
+        try:
+            health = self._json("GET", "/healthz")
+            datasets = self._json("GET", "/v1/datasets").get("datasets", [])
+            deployment = self._json("GET", "/v1/deployment")
+        except StorageError as error:
+            return {
+                "backend": "control-plane",
+                "cluster_connected": False,
+                "cluster_error": str(error),
+            }
+        dataset_rows = datasets if isinstance(datasets, list) else []
+        return {
+            "backend": "control-plane",
+            "cluster_connected": True,
+            "cluster_error": None,
+            "cluster_upload_counts": health,
+            "dataset_count": len(dataset_rows),
+            "dataset_shard_count": sum(
+                int(row.get("shard_count", 0)) for row in dataset_rows if isinstance(row, dict)
+            ),
+            "dataset_episode_count": sum(
+                int(row.get("episode_count", 0)) for row in dataset_rows if isinstance(row, dict)
+            ),
+            # The current API addresses snapshots by ID but does not list them.
+            "snapshot_count": None,
+            "active_policy_revision": deployment.get("active_revision"),
+            "previous_policy_revision": deployment.get("previous_revision"),
+            "deployment_generation": deployment.get("generation"),
+        }
+
+
+def _required_str(payload: dict[str, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise StorageUnavailableError(f"control-plane response missing {key!r}")
+    return value
+
+
+def _response_detail(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return response.text[:500]
+    return str(payload.get("detail", payload)) if isinstance(payload, dict) else str(payload)

@@ -28,6 +28,10 @@ nxml-spool run ... --no-delete  # dry-ish run: upload but keep local files
 # Mounted S3/cluster storage instead of Hugging Face:
 nxml-spool run --watch ~/captures/za --repo unused/local \
     --storage-root /mnt/nxml-objects
+
+# NXML control plane: create → upload → inspect → commit → receipt lookup.
+nxml-spool run --watch ~/captures/za --repo pokemon-za-raw \
+    --control-url http://ml-stream:8090 --edge-id cradle-ns
 ```
 
 Below-size shards are sealed anyway once their oldest episode has waited
@@ -51,6 +55,13 @@ pressure mode and forces partial shards to seal immediately; it clears only
 below `--disk-low-watermark` (default 0.75). `status.json` exposes the current
 state. Source episodes are never deleted merely to satisfy a watermark;
 deletion remains gated by a durable checksum commit.
+
+The control-plane backend is stricter: the independently fetched authoritative
+receipt is atomically persisted in `journal.json` before any episode source is
+deleted. HTTP 409 identity conflicts and 422 validation/checksum failures put
+the affected episodes into a durable blocked state, close admission, and keep
+all local bytes. Network failures remain retryable; create/commit idempotency
+and receipt lookup converge after ambiguous response loss.
 
 ## systemd (capture machine)
 

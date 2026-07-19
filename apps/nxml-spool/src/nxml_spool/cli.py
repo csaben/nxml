@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import platform
 from pathlib import Path
 
 import click
@@ -30,6 +31,14 @@ def main() -> None:
     type=click.Path(exists=True, file_okay=False, path_type=Path),
     help="Episode output dir to watch (repeatable; collect flat dirs and autopilot roots both work)",
 )
+@click.option(
+    "--control-url",
+    default=None,
+    help="NXML control-plane base URL; enables receipt-gated REST ingest.",
+)
+@click.option("--control-token", envvar="NXML_CONTROL_TOKEN", default=None)
+@click.option("--edge-id", default=platform.node(), show_default=True)
+@click.option("--dataset-id", default=None, help="Control-plane dataset ID (default: --repo).")
 @click.option("--repo", "repo_id", required=True, help="HF dataset repo, e.g. arelius/nxml-pokemon-legends-za-v2")
 @click.option(
     "--storage-root",
@@ -59,6 +68,10 @@ def run(
     watch_dirs: tuple[Path, ...],
     repo_id: str,
     storage_root: Path | None,
+    control_url: str | None,
+    control_token: str | None,
+    edge_id: str,
+    dataset_id: str | None,
     state_dir: Path,
     shard_size_mb: int,
     settle_seconds: float,
@@ -73,13 +86,25 @@ def run(
     """Run the spool loop."""
     logging.basicConfig(format="%(asctime)s %(message)s", datefmt="[%X]", level=logging.INFO)
     from nxml_spool.spooler import run_spooler
-    from nxml_spool.storage import FilesystemStorageBackend, HFDatasetStorageBackend
-
-    storage = (
-        FilesystemStorageBackend(storage_root)
-        if storage_root is not None
-        else HFDatasetStorageBackend(repo_id, private=not public)
+    from nxml_spool.storage import (
+        ControlPlaneStorageBackend,
+        FilesystemStorageBackend,
+        HFDatasetStorageBackend,
     )
+
+    if control_url and storage_root is not None:
+        raise click.ClickException("--control-url and --storage-root are mutually exclusive")
+    if control_url:
+        storage = ControlPlaneStorageBackend(
+            control_url,
+            dataset_id=dataset_id or repo_id,
+            edge_id=edge_id,
+            token=control_token,
+        )
+    elif storage_root is not None:
+        storage = FilesystemStorageBackend(storage_root)
+    else:
+        storage = HFDatasetStorageBackend(repo_id, private=not public)
 
     run_spooler(
         list(watch_dirs),

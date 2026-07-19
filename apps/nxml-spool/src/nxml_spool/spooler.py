@@ -16,7 +16,14 @@ from pathlib import Path
 from nxml_spool.episodes import discover_episodes
 from nxml_spool.journal import Journal
 from nxml_spool.shards import pack_shard, plan_shards
-from nxml_spool.storage import HFDatasetStorageBackend, StorageBackend, StorageCommit
+from nxml_spool.storage import (
+    HFDatasetStorageBackend,
+    StorageBackend,
+    StorageCommit,
+    StorageConflictError,
+    StorageUnavailableError,
+    StorageValidationError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +137,7 @@ def run_spooler(
         pending = [
             ep
             for ep in discover_episodes(watch_dirs, settle_seconds=settle_seconds)
-            if not journal.is_shipped(ep.episode_id)
+            if not journal.is_shipped(ep.episode_id) and not journal.is_blocked(ep.episode_id)
         ]
         disk = shutil.disk_usage(watch_dirs[0]) if watch_dirs else None
         disk_free_gb = disk.free / 1e9 if disk is not None else 0
@@ -165,9 +172,52 @@ def run_spooler(
                                                "disk_pressure": pressure_active,
                                                "disk_high_watermark": disk_high_watermark,
                                                "disk_low_watermark": disk_low_watermark,
-                                               "admission_open": not pressure_active,
+                                               "admission_open": (
+                                                   not pressure_active
+                                                   and journal.stats()["episodes_blocked"] == 0
+                                               ),
                                                **_staging_status(staging_dir)})
-            commit = backend.publish(shard)
+            try:
+                commit = backend.publish(shard)
+            except (StorageConflictError, StorageValidationError) as error:
+                kind = "identity_conflict" if isinstance(error, StorageConflictError) else "validation_rejected"
+                journal.record_blocked(
+                    shard.path.name,
+                    shard.episode_ids,
+                    checksum=shard.sha256,
+                    kind=kind,
+                    error=str(error),
+                )
+                _write_status(
+                    state_dir,
+                    journal,
+                    {
+                        "uploading": None,
+                        "pending_episodes": len(pending),
+                        "last_cluster_error": str(error),
+                        "last_cluster_error_kind": kind,
+                        "admission_open": False,
+                        **_backend_status(backend),
+                        **_staging_status(staging_dir),
+                    },
+                )
+                continue
+            except StorageUnavailableError as error:
+                journal.record_transient_error(str(error))
+                _write_status(
+                    state_dir,
+                    journal,
+                    {
+                        "uploading": shard.path.name,
+                        "pending_episodes": len(pending),
+                        "last_cluster_error": str(error),
+                        "last_cluster_error_kind": "unavailable",
+                        "admission_open": not pressure_active,
+                        **_backend_status(backend),
+                        **_staging_status(staging_dir),
+                    },
+                )
+                raise
             if commit.checksum != shard.sha256:
                 raise RuntimeError(f"backend committed wrong checksum for {shard.path.name}")
             journal.record_uploaded_shard(
@@ -175,6 +225,7 @@ def run_spooler(
                 shard.episode_ids,
                 commit_id=commit.commit_id,
                 checksum=commit.checksum,
+                receipt=commit.receipt,
             )
             logger.info(f"Verified {shard.path.name} on {repo_id}")
 
@@ -199,6 +250,7 @@ def run_spooler(
                         ep
                         for ep in discover_episodes(watch_dirs, settle_seconds=settle_seconds)
                         if not journal.is_shipped(ep.episode_id)
+                        and not journal.is_blocked(ep.episode_id)
                     ]
                 ),
                 "disk_free_gb": round(disk_free_gb, 1),
@@ -206,10 +258,27 @@ def run_spooler(
                 "disk_pressure": pressure_active,
                 "disk_high_watermark": disk_high_watermark,
                 "disk_low_watermark": disk_low_watermark,
-                "admission_open": not pressure_active,
+                "admission_open": (
+                    not pressure_active and journal.stats()["episodes_blocked"] == 0
+                ),
+                **_backend_status(backend),
                 **_staging_status(staging_dir),
             },
         )
         if once:
             return
         time.sleep(poll_seconds)
+
+
+def _backend_status(backend: StorageBackend) -> dict[str, object]:
+    status = getattr(backend, "status", None)
+    if status is None:
+        return {"backend": "legacy", "cluster_connected": None}
+    try:
+        return status()
+    except Exception as error:
+        return {
+            "backend": type(backend).__name__,
+            "cluster_connected": False,
+            "cluster_error": str(error),
+        }

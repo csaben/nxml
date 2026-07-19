@@ -34,6 +34,25 @@
   pending/staging state, age, and `admission_open`.
 - `ejected`: persistent safety latch.
 
+For the REST ingest backend, `spool` additionally exposes:
+
+- `backend="control-plane"`, `cluster_connected`, and `cluster_error`;
+- `cluster_upload_counts` (`created`, `uploaded`, `committed`);
+- `dataset_count`, `dataset_shard_count`, and `dataset_episode_count`;
+- `snapshot_count` (currently `null`, because the control API has lookup but no
+  snapshot-list endpoint);
+- `active_policy_revision`, `previous_policy_revision`, and
+  `deployment_generation`;
+- `episodes_blocked`, per-episode durable conflict details,
+  `backend_state.last_error_kind`, and receipt-bearing uploaded-shard journal
+  entries.
+
+`policy.cluster_active_revision`, `policy.previous_revision`, and
+`policy.deployment_generation` mirror those deployment fields for supervisor
+consumers. `policy.active_revision` remains the revision actually loaded by
+the local autopilot process; the distinction prevents catalog intent from
+being mistaken for completed edge activation.
+
 ## Edge-v2 to strict cluster-v2 mapping
 
 The explicit mapper is `nxml_capture.schema_v2_compat`. It applies:

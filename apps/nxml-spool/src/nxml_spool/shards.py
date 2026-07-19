@@ -24,6 +24,7 @@ class Shard:
     episode_ids: list[str]
     size_bytes: int
     sha256: str
+    api_manifest: dict[str, object]
 
 
 def pack_shard(
@@ -34,13 +35,40 @@ def pack_shard(
     shard_path = staging_dir / f"shard-{shard_index:06d}.tar"
     tmp_path = shard_path.with_suffix(".tar.tmp")
 
+    members: list[dict[str, object]] = []
+
+    def add_member(tar: tarfile.TarFile, source: Path, arcname: str, kind: str) -> None:
+        tar.add(source, arcname=arcname)
+        digest = hashlib.sha256()
+        with source.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        members.append(
+            {
+                "path": arcname,
+                "kind": kind,
+                "size_bytes": source.stat().st_size,
+                "sha256": digest.hexdigest(),
+            }
+        )
+
     with tarfile.open(tmp_path, "w") as tar:
         for ep in episodes:
-            tar.add(ep.video_path, arcname=f"{ep.episode_id}{ep.video_path.suffix}")
-            tar.add(ep.parquet_path, arcname=f"{ep.episode_id}.parquet")
+            add_member(
+                tar,
+                ep.video_path,
+                f"{ep.episode_id}{ep.video_path.suffix}",
+                "video",
+            )
+            add_member(tar, ep.parquet_path, f"{ep.episode_id}.parquet", "actions")
             if ep.events_path is not None:
-                tar.add(ep.events_path, arcname=f"{ep.episode_id}.events.parquet")
-            tar.add(ep.manifest_path, arcname=f"{ep.episode_id}.json")
+                add_member(
+                    tar,
+                    ep.events_path,
+                    f"{ep.episode_id}.events.parquet",
+                    "events",
+                )
+            add_member(tar, ep.manifest_path, f"{ep.episode_id}.json", "episode_manifest")
     tmp_path.replace(shard_path)
     digest = hashlib.sha256()
     with shard_path.open("rb") as stream:
@@ -48,6 +76,12 @@ def pack_shard(
             digest.update(chunk)
     shard_sha256 = digest.hexdigest()
 
+    api_manifest: dict[str, object] = {
+        "schema_id": "nxml.episode.v2",
+        "action_spec_id": "switch_packets.v1",
+        "episodes": [{"episode_id": ep.episode_id} for ep in episodes],
+        "members": members,
+    }
     sidecar = {
         "shard": shard_path.name,
         "episodes": [
@@ -61,6 +95,7 @@ def pack_shard(
         "n_episodes": len(episodes),
         "bytes": shard_path.stat().st_size,
         "sha256": shard_sha256,
+        "api_manifest": api_manifest,
     }
     sidecar_path = shard_path.with_suffix(".json")
     sidecar_path.write_text(json.dumps(sidecar, indent=2))
@@ -71,6 +106,7 @@ def pack_shard(
         episode_ids=[ep.episode_id for ep in episodes],
         size_bytes=shard_path.stat().st_size,
         sha256=shard_sha256,
+        api_manifest=api_manifest,
     )
 
 

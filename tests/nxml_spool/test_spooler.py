@@ -8,11 +8,18 @@ import tarfile
 import time
 from pathlib import Path
 
+import pytest
 from nxml_spool.episodes import discover_episodes
 from nxml_spool.journal import Journal
 from nxml_spool.shards import pack_shard, plan_shards
 from nxml_spool.spooler import run_spooler
-from nxml_spool.storage import FilesystemStorageBackend
+from nxml_spool.storage import (
+    FilesystemStorageBackend,
+    StorageCommit,
+    StorageConflictError,
+    StorageUnavailableError,
+    StorageValidationError,
+)
 
 
 def _write_episode(root: Path, name: str, *, subdir: str | None = None, kb: int = 8) -> Path:
@@ -206,3 +213,141 @@ def test_restart_after_remote_commit_is_exactly_once(tmp_path: Path) -> None:
     assert len(list(object_root.glob("shards/*.tar"))) == 1
     assert len(list(object_root.glob("commits/*.commit.json"))) == 1
     assert not list(watch.glob("*.mkv"))
+
+
+class ReceiptBackend:
+    def publish(self, shard):
+        receipt = {
+            "commit_id": "receipt-1",
+            "checksum": shard.sha256,
+            "size_bytes": shard.size_bytes,
+            "state": "committed",
+        }
+        return StorageCommit(
+            "receipt-1",
+            "uploads/shard.tar",
+            shard.sha256,
+            shard.size_bytes,
+            receipt=receipt,
+            authoritative_receipt=True,
+        )
+
+    def status(self):
+        return {"backend": "control-plane", "cluster_connected": True}
+
+
+def test_receipt_is_journaled_before_source_deletion(tmp_path: Path) -> None:
+    watch = tmp_path / "capture"
+    _write_episode(watch, "episode")
+    _age(tmp_path)
+    state = tmp_path / "state"
+    run_spooler(
+        [watch],
+        repo_id="raw",
+        state_dir=state,
+        shard_size_mb=1,
+        settle_seconds=30,
+        storage=ReceiptBackend(),
+        once=True,
+    )
+    journal = json.loads((state / "journal.json").read_text())
+    assert journal["uploaded_shards"][0]["receipt"]["commit_id"] == "receipt-1"
+    assert not list(watch.glob("*.mkv"))
+
+
+def test_journal_failure_keeps_sources_after_remote_receipt(
+    tmp_path: Path, monkeypatch
+) -> None:
+    watch = tmp_path / "capture"
+    _write_episode(watch, "episode")
+    _age(tmp_path)
+
+    def fail_journal(*_args, **_kwargs):
+        raise OSError("journal fsync failed")
+
+    monkeypatch.setattr(Journal, "record_uploaded_shard", fail_journal)
+    with pytest.raises(OSError, match="journal fsync"):
+        run_spooler(
+            [watch],
+            repo_id="raw",
+            state_dir=tmp_path / "state",
+            shard_size_mb=1,
+            settle_seconds=30,
+            storage=ReceiptBackend(),
+            once=True,
+        )
+    assert list(watch.glob("*.mkv")), "deletion must follow durable receipt journal"
+
+
+class RejectingBackend:
+    def __init__(self, error):
+        self.error = error
+
+    def publish(self, _shard):
+        raise self.error("cluster rejected shard")
+
+    def status(self):
+        return {"backend": "control-plane", "cluster_connected": True}
+
+
+@pytest.mark.parametrize(
+    ("error", "kind"),
+    [
+        (StorageConflictError, "identity_conflict"),
+        (StorageValidationError, "validation_rejected"),
+    ],
+)
+def test_semantic_rejection_is_durable_and_never_deletes(
+    tmp_path: Path, error, kind: str
+) -> None:
+    watch = tmp_path / "capture"
+    _write_episode(watch, "episode")
+    _age(tmp_path)
+    state = tmp_path / "state"
+    run_spooler(
+        [watch],
+        repo_id="raw",
+        state_dir=state,
+        shard_size_mb=1,
+        settle_seconds=30,
+        storage=RejectingBackend(error),
+        once=True,
+    )
+    assert list(watch.glob("*.mkv"))
+    journal = Journal(state / "journal.json")
+    stats = journal.stats()
+    assert stats["episodes_blocked"] == 1
+    assert next(iter(stats["blocked_episodes"].values()))["kind"] == kind
+    assert json.loads((state / "status.json").read_text())["admission_open"] is False
+
+
+class OutageThenRecoveryBackend(ReceiptBackend):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def publish(self, shard):
+        self.calls += 1
+        if self.calls == 1:
+            raise StorageUnavailableError("cluster offline")
+        return super().publish(shard)
+
+
+def test_cluster_outage_then_restart_recovers_without_deletion(tmp_path: Path) -> None:
+    watch = tmp_path / "capture"
+    _write_episode(watch, "episode")
+    _age(tmp_path)
+    state = tmp_path / "state"
+    backend = OutageThenRecoveryBackend()
+    with pytest.raises(StorageUnavailableError, match="offline"):
+        run_spooler(
+            [watch], repo_id="raw", state_dir=state, shard_size_mb=1,
+            settle_seconds=30, storage=backend, once=True,
+        )
+    assert list(watch.glob("*.mkv"))
+    run_spooler(
+        [watch], repo_id="raw", state_dir=state, shard_size_mb=1,
+        settle_seconds=30, storage=backend, once=True,
+    )
+    assert not list(watch.glob("*.mkv"))
+    status = json.loads((state / "status.json").read_text())
+    assert status["cluster_connected"] is True
