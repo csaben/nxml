@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
+
+from pydantic import ValidationError
+
+from nxml_control.contracts import ShardManifestV2
 
 
 @dataclass(frozen=True)
@@ -42,6 +48,40 @@ class Episode:
     dataset_id: str
     shard_id: str
     ordinal: int
+    manifest: dict
+
+
+class InvalidManifestError(ValueError):
+    pass
+
+
+class IdentityConflictError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class CommitReceipt:
+    commit_id: str
+    upload_id: str
+    checksum: str
+    size_bytes: int
+    storage_key: str
+    state: str
+    committed_at: str
+    dataset_id: str
+    shard_id: str
+
+    @property
+    def id(self) -> str:
+        return self.commit_id
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    snapshot_id: str
+    dataset_id: str
+    created_at: str
+    control_source: str
     manifest: dict
 
 
@@ -81,6 +121,16 @@ class Catalog:
         CREATE TABLE IF NOT EXISTS episodes(
           id TEXT NOT NULL,dataset_id TEXT NOT NULL REFERENCES datasets(id),shard_id TEXT NOT NULL REFERENCES shards(id),
           ordinal INTEGER NOT NULL,manifest_json TEXT NOT NULL,PRIMARY KEY(dataset_id,id),UNIQUE(shard_id,ordinal));
+        CREATE TABLE IF NOT EXISTS commit_receipts(
+          commit_id TEXT PRIMARY KEY,upload_id TEXT NOT NULL UNIQUE REFERENCES uploads(id),checksum TEXT NOT NULL,
+          size_bytes INTEGER NOT NULL,storage_key TEXT NOT NULL,state TEXT NOT NULL CHECK(state="committed"),
+          committed_at TEXT NOT NULL,dataset_id TEXT NOT NULL,shard_id TEXT NOT NULL UNIQUE);
+        CREATE TABLE IF NOT EXISTS snapshots(
+          snapshot_id TEXT PRIMARY KEY,dataset_id TEXT NOT NULL REFERENCES datasets(id),created_at TEXT NOT NULL,
+          control_source TEXT NOT NULL,manifest_json TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS snapshot_shards(
+          snapshot_id TEXT NOT NULL REFERENCES snapshots(snapshot_id),shard_id TEXT NOT NULL REFERENCES shards(id),
+          ordinal INTEGER NOT NULL,PRIMARY KEY(snapshot_id,shard_id),UNIQUE(snapshot_id,ordinal));
         CREATE INDEX IF NOT EXISTS shards_dataset_idx ON shards(dataset_id);
         CREATE INDEX IF NOT EXISTS episodes_shard_idx ON episodes(shard_id);
         """)
@@ -134,9 +184,16 @@ class Catalog:
             )
         return self.get(upload_id)
 
-    def commit(self, upload_id: str, *, dataset_id: str, shard_id: str, manifest: dict) -> Upload:
-        episodes = _episode_entries(manifest)
-        canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
+    def commit(
+        self, upload_id: str, *, dataset_id: str, shard_id: str, manifest: dict
+    ) -> CommitReceipt:
+        try:
+            parsed = ShardManifestV2.model_validate(manifest)
+        except ValidationError as error:
+            raise InvalidManifestError(str(error)) from error
+        normalized = parsed.model_dump(mode="json")
+        episodes = _episode_entries(normalized)
+        canonical = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
         with self.connect() as db:
             row = db.execute("SELECT * FROM uploads WHERE id=?", (upload_id,)).fetchone()
             if row is None:
@@ -144,15 +201,21 @@ class Catalog:
             item = _upload(row)
             if item.state == "committed":
                 if (item.dataset_id, item.shard_id) != (dataset_id, shard_id):
-                    raise ValueError("committed upload cannot be reassigned")
+                    raise IdentityConflictError("committed upload cannot be reassigned")
                 existing = db.execute(
                     "SELECT manifest_json FROM shards WHERE id=?", (shard_id,)
                 ).fetchone()
                 if existing is not None and existing[0] != canonical:
-                    raise ValueError("committed manifest cannot be changed")
-                return item
+                    raise IdentityConflictError("committed manifest cannot be changed")
+                receipt = db.execute(
+                    "SELECT * FROM commit_receipts WHERE upload_id=?", (upload_id,)
+                ).fetchone()
+                assert receipt is not None
+                return _receipt(receipt)
             if item.state != "uploaded":
-                raise ValueError("upload must be verified before commit")
+                raise IdentityConflictError("upload must be verified before commit")
+            commit_id = str(uuid4())
+            committed_at = datetime.now(UTC).isoformat()
             try:
                 db.execute("INSERT OR IGNORE INTO datasets VALUES(?)", (dataset_id,))
                 db.execute(
@@ -182,9 +245,74 @@ class Catalog:
                     "UPDATE uploads SET state='committed',dataset_id=?,shard_id=?,manifest_json=? WHERE id=?",
                     (dataset_id, shard_id, canonical, upload_id),
                 )
+                db.execute(
+                    "INSERT INTO commit_receipts VALUES(?,?,?,?,?,?,?,?,?)",
+                    (
+                        commit_id,
+                        upload_id,
+                        item.actual_sha256,
+                        item.actual_size_bytes,
+                        item.object_key,
+                        "committed",
+                        committed_at,
+                        dataset_id,
+                        shard_id,
+                    ),
+                )
             except sqlite3.IntegrityError as error:
-                raise ValueError("shard or episode already registered") from error
-        return self.get(upload_id)
+                raise IdentityConflictError("shard or episode already registered") from error
+        return self.get_receipt(commit_id)
+
+    def get_receipt(self, commit_id: str) -> CommitReceipt:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT * FROM commit_receipts WHERE commit_id=?", (commit_id,)
+            ).fetchone()
+        if row is None:
+            raise KeyError(commit_id)
+        return _receipt(row)
+
+    def create_snapshot(self, dataset_id: str, *, control_source: str = "all") -> Snapshot:
+        if control_source not in {"all", "human", "policy"}:
+            raise ValueError("control_source must be all, human, or policy")
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT id,sha256,size_bytes,object_key FROM shards WHERE dataset_id=? ORDER BY id",
+                (dataset_id,),
+            ).fetchall()
+            if not rows:
+                raise KeyError(dataset_id)
+            manifest = {
+                "dataset_id": dataset_id,
+                "control_source": control_source,
+                "shards": [dict(row) for row in rows],
+            }
+            canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
+            snapshot_id = "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
+            created_at = datetime.now(UTC).isoformat()
+            db.execute(
+                "INSERT OR IGNORE INTO snapshots VALUES(?,?,?,?,?)",
+                (snapshot_id, dataset_id, created_at, control_source, canonical),
+            )
+            for ordinal, row in enumerate(rows):
+                db.execute(
+                    "INSERT OR IGNORE INTO snapshot_shards VALUES(?,?,?)",
+                    (snapshot_id, row["id"], ordinal),
+                )
+            stored = db.execute(
+                "SELECT * FROM snapshots WHERE snapshot_id=?", (snapshot_id,)
+            ).fetchone()
+            assert stored is not None
+            return _snapshot(stored)
+
+    def get_snapshot(self, snapshot_id: str) -> Snapshot:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT * FROM snapshots WHERE snapshot_id=?", (snapshot_id,)
+            ).fetchone()
+        if row is None:
+            raise KeyError(snapshot_id)
+        return _snapshot(row)
 
     def list_datasets(self) -> list[dict]:
         with self.connect() as db:
@@ -258,5 +386,19 @@ def _episode(row: sqlite3.Row) -> Episode:
         row["dataset_id"],
         row["shard_id"],
         row["ordinal"],
+        json.loads(row["manifest_json"]),
+    )
+
+
+def _receipt(row: sqlite3.Row) -> CommitReceipt:
+    return CommitReceipt(**{name: row[name] for name in CommitReceipt.__dataclass_fields__})
+
+
+def _snapshot(row: sqlite3.Row) -> Snapshot:
+    return Snapshot(
+        row["snapshot_id"],
+        row["dataset_id"],
+        row["created_at"],
+        row["control_source"],
         json.loads(row["manifest_json"]),
     )

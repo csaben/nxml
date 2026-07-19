@@ -9,6 +9,28 @@ from nxml_control.service import IngestService
 from nxml_control.storage import LocalObjectStorage
 
 
+def shard_manifest(episode_id="e1"):
+    return {
+        "schema_id": "nxml.episode.v2",
+        "action_spec_id": "switch_packets.v1",
+        "episodes": [{"episode_id": episode_id}],
+        "members": [
+            {
+                "path": f"{episode_id}.parquet",
+                "kind": "actions",
+                "size_bytes": 1,
+                "sha256": "a" * 64,
+            },
+            {
+                "path": f"{episode_id}.events.parquet",
+                "kind": "events",
+                "size_bytes": 1,
+                "sha256": "b" * 64,
+            },
+        ],
+    }
+
+
 def components(tmp_path):
     catalog = Catalog(tmp_path / "catalog.sqlite3")
     return catalog, IngestService(catalog, LocalObjectStorage(tmp_path / "objects"))
@@ -27,16 +49,14 @@ def test_checksum_gated_exactly_once_commit(tmp_path):
     created = catalog.create_upload(**request)
     assert catalog.create_upload(**request).id == created.id
     with pytest.raises(ValueError, match="verified"):
-        catalog.commit(created.id, dataset_id="raw", shard_id="s1", manifest={"episodes": ["e1"]})
+        catalog.commit(created.id, dataset_id="raw", shard_id="s1", manifest=shard_manifest())
     assert service.upload(created.id, BytesIO(content)).state == "uploaded"
     committed = catalog.commit(
-        created.id, dataset_id="raw", shard_id="s1", manifest={"episodes": ["e1"]}
+        created.id, dataset_id="raw", shard_id="s1", manifest=shard_manifest()
     )
     assert committed.state == "committed"
     assert (
-        catalog.commit(
-            created.id, dataset_id="raw", shard_id="s1", manifest={"episodes": ["e1"]}
-        ).id
+        catalog.commit(created.id, dataset_id="raw", shard_id="s1", manifest=shard_manifest()).id
         == committed.id
     )
 
@@ -70,7 +90,7 @@ def test_http_contract_and_openapi(tmp_path):
     assert (
         client.post(
             f"/v1/uploads/{upload['id']}/commit",
-            json={"dataset_id": "raw", "shard_id": "edge-1", "manifest": {}},
+            json={"dataset_id": "raw", "shard_id": "edge-1", "manifest": shard_manifest()},
         ).json()["state"]
         == "committed"
     )
@@ -102,9 +122,7 @@ def test_normalized_catalog_and_query_endpoints(tmp_path):
         },
     ).json()
     client.put(created["upload_url"], content=content)
-    manifest = {
-        "episodes": [{"episode_id": "ep-b", "frames": 2}, {"episode_id": "ep-a", "frames": 3}]
-    }
+    manifest = shard_manifest("ep-b")
     assert (
         client.post(
             f"/v1/uploads/{created['id']}/commit",
@@ -113,12 +131,12 @@ def test_normalized_catalog_and_query_endpoints(tmp_path):
         == 200
     )
     assert client.get("/v1/datasets").json() == {
-        "datasets": [{"id": "raw-v2", "shard_count": 1, "episode_count": 2}]
+        "datasets": [{"id": "raw-v2", "shard_count": 1, "episode_count": 1}]
     }
     shards = client.get("/v1/datasets/raw-v2/shards").json()["shards"]
     assert shards[0]["sha256"] == digest
     episodes = client.get("/v1/datasets/raw-v2/episodes").json()["episodes"]
-    assert [item["id"] for item in episodes] == ["ep-b", "ep-a"]
+    assert [item["id"] for item in episodes] == ["ep-b"]
 
 
 def test_committed_manifest_is_immutable(tmp_path):
@@ -129,6 +147,74 @@ def test_committed_manifest_is_immutable(tmp_path):
         idempotency_key="x", object_key="uploads/x.tar", size_bytes=1, sha256=digest
     )
     service.upload(upload.id, BytesIO(content))
-    catalog.commit(upload.id, dataset_id="raw", shard_id="s", manifest={"episodes": ["e"]})
+    catalog.commit(upload.id, dataset_id="raw", shard_id="s", manifest=shard_manifest("e"))
     with pytest.raises(ValueError, match="manifest cannot be changed"):
-        catalog.commit(upload.id, dataset_id="raw", shard_id="s", manifest={"episodes": ["other"]})
+        catalog.commit(upload.id, dataset_id="raw", shard_id="s", manifest=shard_manifest("other"))
+
+
+def test_receipt_is_immutable_queryable_and_snapshot_is_content_addressed(tmp_path):
+    client = TestClient(create_app(state_dir=tmp_path))
+    content = b"receipt"
+    digest = hashlib.sha256(content).hexdigest()
+    upload = client.post(
+        "/v1/uploads",
+        headers={"Idempotency-Key": "receipt"},
+        json={"object_key": "uploads/receipt.tar", "size_bytes": len(content), "sha256": digest},
+    ).json()
+    client.put(upload["upload_url"], content=content)
+    request = {"dataset_id": "raw", "shard_id": "receipt-1", "manifest": shard_manifest()}
+    receipt = client.post(f"/v1/uploads/{upload['id']}/commit", json=request).json()
+    assert set(receipt) == {
+        "commit_id",
+        "upload_id",
+        "checksum",
+        "size_bytes",
+        "storage_key",
+        "state",
+        "committed_at",
+        "dataset_id",
+        "shard_id",
+    }
+    assert receipt["checksum"] == digest and receipt["state"] == "committed"
+    assert client.post(f"/v1/uploads/{upload['id']}/commit", json=request).json() == receipt
+    assert client.get(f"/v1/commits/{receipt['commit_id']}").json() == receipt
+    first = client.post("/v1/datasets/raw/snapshots", json={"control_source": "human"}).json()
+    second = client.post("/v1/datasets/raw/snapshots", json={"control_source": "human"}).json()
+    assert first["snapshot_id"] == second["snapshot_id"]
+    assert first["manifest"]["shards"][0]["sha256"] == digest
+    assert (
+        client.get(f"/v1/snapshots/{first['snapshot_id']}").json()["manifest"] == first["manifest"]
+    )
+
+
+def test_manifest_validation_is_422_and_identity_conflict_is_409(tmp_path):
+    client = TestClient(create_app(state_dir=tmp_path))
+    content = b"status"
+    digest = hashlib.sha256(content).hexdigest()
+    upload = client.post(
+        "/v1/uploads",
+        headers={"Idempotency-Key": "status"},
+        json={"object_key": "uploads/status.tar", "size_bytes": len(content), "sha256": digest},
+    ).json()
+    client.put(upload["upload_url"], content=content)
+    assert (
+        client.post(
+            f"/v1/uploads/{upload['id']}/commit",
+            json={"dataset_id": "raw", "shard_id": "s", "manifest": {}},
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            f"/v1/uploads/{upload['id']}/commit",
+            json={"dataset_id": "raw", "shard_id": "s", "manifest": shard_manifest()},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            f"/v1/uploads/{upload['id']}/commit",
+            json={"dataset_id": "other", "shard_id": "s", "manifest": shard_manifest()},
+        ).status_code
+        == 409
+    )

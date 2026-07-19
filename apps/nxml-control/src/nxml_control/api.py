@@ -7,7 +7,7 @@ from typing import Annotated, Any
 from fastapi import FastAPI, Header, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from nxml_control.catalog import Catalog, Upload
+from nxml_control.catalog import Catalog, IdentityConflictError, InvalidManifestError, Upload
 from nxml_control.service import IngestService
 from nxml_control.storage import LocalObjectStorage
 
@@ -17,6 +17,11 @@ class CreateUploadRequest(BaseModel):
     object_key: str = Field(pattern=r"^uploads/[A-Za-z0-9._/-]+\.tar$")
     size_bytes: int = Field(gt=0)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class SnapshotRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    control_source: str = Field(default="all", pattern=r"^(all|human|policy)$")
 
 
 class CommitRequest(BaseModel):
@@ -78,10 +83,12 @@ def create_app(*, state_dir: str | Path) -> FastAPI:
     @app.post("/v1/uploads/{upload_id}/commit")
     def commit(upload_id: str, body: CommitRequest):
         try:
-            return _view(catalog.commit(upload_id, **body.model_dump()))
+            return catalog.commit(upload_id, **body.model_dump()).__dict__
         except KeyError as error:
             raise HTTPException(404, "upload not found") from error
-        except ValueError as error:
+        except InvalidManifestError as error:
+            raise HTTPException(422, str(error)) from error
+        except IdentityConflictError as error:
             raise HTTPException(409, str(error)) from error
 
     @app.get("/v1/datasets")
@@ -95,6 +102,27 @@ def create_app(*, state_dir: str | Path) -> FastAPI:
     @app.get("/v1/datasets/{dataset_id}/episodes")
     def episodes(dataset_id: str):
         return {"episodes": [item.__dict__ for item in catalog.list_episodes(dataset_id)]}
+
+    @app.get("/v1/commits/{commit_id}")
+    def receipt(commit_id: str):
+        try:
+            return catalog.get_receipt(commit_id).__dict__
+        except KeyError as error:
+            raise HTTPException(404, "commit not found") from error
+
+    @app.post("/v1/datasets/{dataset_id}/snapshots", status_code=201)
+    def create_snapshot(dataset_id: str, body: SnapshotRequest):
+        try:
+            return catalog.create_snapshot(dataset_id, control_source=body.control_source).__dict__
+        except KeyError as error:
+            raise HTTPException(404, "dataset not found") from error
+
+    @app.get("/v1/snapshots/{snapshot_id}")
+    def snapshot(snapshot_id: str):
+        try:
+            return catalog.get_snapshot(snapshot_id).__dict__
+        except KeyError as error:
+            raise HTTPException(404, "snapshot not found") from error
 
     app.state.catalog = catalog
     app.state.ingest = service
