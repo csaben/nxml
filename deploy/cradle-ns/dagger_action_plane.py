@@ -13,7 +13,7 @@ from dagger_history import ArbitrationRecord, ArbitratorHistory
 
 
 class ActionPlane:
-    def __init__(self, orchestrator, inference, *, hz: float = 60.0, stale_ns: int = 33_000_000):
+    def __init__(self, orchestrator, inference, *, hz: float = 60.0, stale_ns: int = 55_000_000):
         self.orchestrator = orchestrator
         self.inference = inference
         self.period = 1.0 / hz

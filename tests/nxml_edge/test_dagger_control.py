@@ -39,3 +39,13 @@ def test_configuration_change_is_atomic_neutral_boundary():
     a = Arbitrator()
     out = a.transition(mode=Mode.PURE_AI)
     assert out.boundary == "configuration_changed" and not out.action.any()
+
+
+def test_policy_hold_accepts_one_frame_jitter_then_disarms_on_real_stall():
+    a = Arbitrator(stale_ns=55_000_000)
+    a.transition(mode=Mode.PURE_AI)
+    policy = p(at=1_000_000_000, revision="r1", dims=(25,))
+    assert a.apply(1_055_000_000, None, policy).source == "policy"
+    stalled = a.apply(1_055_000_001, None, policy)
+    assert stalled.disarmed and stalled.boundary == "stale_policy"
+    assert not stalled.action.any()

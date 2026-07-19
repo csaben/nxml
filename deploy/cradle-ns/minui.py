@@ -121,7 +121,7 @@ PAGE = """<!doctype html>
       const c=s.cluster; $('cluster').textContent=c?`${(c.datasets.datasets||[]).length} datasets · ${(c.snapshots.snapshots||[]).length} snapshots`:`unavailable: ${s.errors.cluster||'unknown'}`;
       const d=c&&c.deployment; $('model').textContent=d&&d.active_revision?`active ${d.active_revision.slice(0,8)} · gen ${d.generation}`:'none active';
       const m=s.model_readiness||{}; $('readiness').textContent=`model readiness: ${m.phase||'unloaded'} · ${m.armed?'armed':'unarmed'}${m.active?' · revision '+m.active.slice(0,8):''}${m.checkpoint_sha256?' · sha '+m.checkpoint_sha256.slice(0,8):''}${m.warmup_frames!=null&&m.sequence_length?' · warmup '+m.warmup_frames+'/'+m.sequence_length:''}${m.blocked_reason?' · '+m.blocked_reason:''}${m.error?' · '+m.error:''}`;
-      const i=s.inference||{}; $('inference').textContent=`inference: ${i.health||'unloaded'} · ${i.armed?'armed':'unarmed'}${i.revision?' · '+i.revision.slice(0,8):''}${i.processing_latency_ms!=null?' · cluster '+i.processing_latency_ms.toFixed(1)+'ms':''}${i.transport_latency_ms!=null?' · RTT '+i.transport_latency_ms.toFixed(1)+'ms':''}${i.proposal_age_ms!=null?' · proposal '+i.proposal_age_ms.toFixed(0)+'ms old':''}${i.error?' · '+i.error:''}`;
+      const i=s.inference||{}; $('inference').textContent=`inference: ${i.health||'unloaded'} · ${i.freshness_state||'unavailable'} · ${i.armed?'armed':'unarmed'}${i.revision?' · '+i.revision.slice(0,8):''}${i.processing_latency_ms!=null?' · cluster '+i.processing_latency_ms.toFixed(1)+'ms':''}${i.transport_latency_ms!=null?' · RTT '+i.transport_latency_ms.toFixed(1)+'ms':''}${i.proposal_age_ms!=null?' · proposal '+i.proposal_age_ms.toFixed(0)+'ms old':''}${i.proposal_sequence!=null?' · seq '+i.proposal_sequence:''}${i.error?' · '+i.error:''}`;
       const revisions=c&&c.revisions&&c.revisions.revisions||[]; const validated=revisions.filter(r=>['validated','active'].includes(r.state)); $('model-select').innerHTML=validated.length?'<option value="">Select validated revision</option>'+validated.map(r=>`<option value="${r.revision_id}">${r.model_id} · ${r.revision_id.slice(0,8)} · ${r.state}</option>`).join(''):'<option value="">No validated revisions</option>'; $('model-load').disabled=!validated.length||m.loading||!m.load_available;
       const jobs=c&&c.jobs&&c.jobs.jobs||[]; $('jobs').textContent=jobs.length?jobs.map(j=>`${j.state} ${j.job_id.slice(0,8)}`).join(' · '):'no training jobs';
     } catch(e) { $('cluster').textContent='operations status unavailable'; }
@@ -320,8 +320,8 @@ def create_app(
         if status.get("warmup_frames", 0) < status.get("sequence_length", 1) - 1:
             raise HTTPException(409, "inference warmup is incomplete")
         age = status.get("proposal_age_ms")
-        if age is None or age > 33:
-            raise HTTPException(409, "no finite policy proposal within 33 ms")
+        if age is None or age > status.get("hold_horizon_ms", 55):
+            raise HTTPException(409, "policy proposal stream exceeded its hold horizon")
         health = orchestrator.health()
         if health.get("switch_state") != "connected":
             raise HTTPException(409, "Switch is not connected")
@@ -601,7 +601,10 @@ def main() -> None:
             args.inference_endpoint, revision, timeout_ms=args.inference_timeout_ms
         )
         remote_inference = RemoteInferenceWorker(
-            source=fanout, client=inference_client, stale_ns=33_000_000
+            source=fanout,
+            client=inference_client,
+            fresh_ns=33_000_000,
+            stale_ns=55_000_000,
         )
     action_plane = ActionPlane(client, remote_inference)
     if remote_inference is not None:

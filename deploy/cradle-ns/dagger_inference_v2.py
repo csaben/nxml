@@ -243,6 +243,10 @@ class RemoteInferenceStatus:
     reconnects: int = 0
     observation_age_ms: float | None = None
     proposal_age_ms: float | None = None
+    proposal_sequence: int = 0
+    freshness_state: str = "unavailable"
+    fresh_budget_ms: float = 33.0
+    hold_horizon_ms: float = 55.0
     transport_latency_ms: float | None = None
     processing_latency_ms: float | None = None
     error: str | None = None
@@ -260,6 +264,7 @@ class RemoteInferenceWorker:
         source,
         client: InferenceV2Client,
         stale_ns: int = 100_000_000,
+        fresh_ns: int | None = None,
         reconnect_seconds: float = 0.25,
         clock_ns: Callable[[], int] = time.monotonic_ns,
         on_disarm: Callable[[str], None] | None = None,
@@ -267,6 +272,10 @@ class RemoteInferenceWorker:
         self.source = source
         self.client = client
         self.stale_ns = stale_ns
+        fresh_ns = min(33_000_000, stale_ns - 1) if fresh_ns is None else fresh_ns
+        if fresh_ns >= stale_ns:
+            raise ValueError("fresh budget must be smaller than hold horizon")
+        self.fresh_ns = fresh_ns
         self.reconnect_seconds = reconnect_seconds
         self.clock_ns = clock_ns
         self.on_disarm = on_disarm or (lambda _reason: None)
@@ -280,6 +289,8 @@ class RemoteInferenceWorker:
             revision=client.revision["revision_id"],
             checkpoint_sha256=client.revision["checkpoint_sha256"],
             sequence_length=client.revision["compatibility"]["sequence_length"],
+            fresh_budget_ms=self.fresh_ns / 1e6,
+            hold_horizon_ms=self.stale_ns / 1e6,
         )
 
     def start(self) -> None:
@@ -317,16 +328,22 @@ class RemoteInferenceWorker:
         return proposal
 
     def wait_until_fresh(self, timeout: float = 2.0) -> dict[str, Any] | None:
-        """Wait off the data plane for a healthy proposal inside the freshness budget."""
+        """Require a new proposal, unless the cached one is under one 60 Hz tick old."""
         deadline = time.monotonic() + timeout
+        initial = self.status()
+        initial_sequence = initial["proposal_sequence"]
         while time.monotonic() < deadline:
             status = self.status()
             proposal = self.latest_proposal()
+            age_ns = self.clock_ns() - proposal.monotonic_ns if proposal is not None else None
+            recent_cached = age_ns is not None and 0 <= age_ns <= 16_667_000
+            sequence_advanced = status["proposal_sequence"] > initial_sequence
             if (
                 status["ready"]
                 and status["health"] == "healthy"
                 and status["warmup_frames"] >= status["sequence_length"] - 1
                 and proposal is not None
+                and (recent_cached or sequence_advanced)
             ):
                 return status
             time.sleep(0.005)
@@ -338,9 +355,15 @@ class RemoteInferenceWorker:
             value = self._status.wire()
             proposal = self._proposal
         if proposal is not None:
-            value["proposal_age_ms"] = max(0, now - proposal.monotonic_ns) / 1e6
-            if now - proposal.monotonic_ns > self.stale_ns:
+            age_ns = now - proposal.monotonic_ns
+            value["proposal_age_ms"] = max(0, age_ns) / 1e6
+            if age_ns > self.stale_ns:
                 value["health"], value["ready"] = "stale", False
+                value["freshness_state"] = "stale_stall"
+            elif age_ns > self.fresh_ns:
+                value["freshness_state"] = "cadence_hold"
+            else:
+                value["freshness_state"] = "fresh"
         return value
 
     def _clear(self, reason: str, *, health: str) -> None:
@@ -362,6 +385,10 @@ class RemoteInferenceWorker:
                 proposals=old.proposals,
                 warming=old.warming,
                 reconnects=old.reconnects,
+                proposal_sequence=old.proposal_sequence,
+                freshness_state="stale_stall" if health == "stale" else "unavailable",
+                fresh_budget_ms=self.fresh_ns / 1e6,
+                hold_horizon_ms=self.stale_ns / 1e6,
                 error=reason,
             )
 
@@ -391,6 +418,9 @@ class RemoteInferenceWorker:
                             proposals=old.proposals,
                             warming=old.warming,
                             reconnects=old.reconnects + 1,
+                            proposal_sequence=old.proposal_sequence,
+                            fresh_budget_ms=self.fresh_ns / 1e6,
+                            hold_horizon_ms=self.stale_ns / 1e6,
                         )
                 frame = self.source.latest_mjpeg(after_sequence=sequence, timeout=0.1)
                 if frame is None:
@@ -425,6 +455,10 @@ class RemoteInferenceWorker:
                                 proposals=old.proposals,
                                 warming=warming,
                                 reconnects=old.reconnects,
+                                proposal_sequence=old.proposal_sequence,
+                                freshness_state="warming",
+                                fresh_budget_ms=self.fresh_ns / 1e6,
+                                hold_horizon_ms=self.stale_ns / 1e6,
                                 observation_age_ms=observation_age / 1e6,
                                 transport_latency_ms=result.transport_latency_ns / 1e6,
                                 processing_latency_ms=(result.processing_latency_ns or 0) / 1e6,
@@ -461,6 +495,10 @@ class RemoteInferenceWorker:
                         proposals=proposal_count,
                         warming=warming,
                         reconnects=old.reconnects,
+                        proposal_sequence=proposal_count,
+                        freshness_state="fresh" if result.action is not None else "warming",
+                        fresh_budget_ms=self.fresh_ns / 1e6,
+                        hold_horizon_ms=self.stale_ns / 1e6,
                         observation_age_ms=observation_age / 1e6,
                         transport_latency_ms=result.transport_latency_ns / 1e6,
                         processing_latency_ms=(

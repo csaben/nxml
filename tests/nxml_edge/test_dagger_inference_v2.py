@@ -365,6 +365,49 @@ def test_33ms_freshness_budget_never_reuses_old_proposal():
     worker.stop()
 
 
+def test_cadence_aware_fresh_hold_and_hard_stall_boundaries():
+    class Clock:
+        value = 1_000_000_000
+
+        def __call__(self):
+            return self.value
+
+    clock = Clock()
+    worker = RemoteInferenceWorker(
+        source=object(),
+        client=Client([]),
+        fresh_ns=33_000_000,
+        stale_ns=55_000_000,
+        clock_ns=clock,
+    )
+    worker._enabled.set()
+    with worker._lock:
+        worker._proposal = Proposal(np.zeros(26, np.float32), clock.value, "revision-1")
+        worker._status = worker._status.__class__(
+            enabled=True,
+            ready=True,
+            health="healthy",
+            revision="revision-1",
+            checkpoint_sha256="a" * 64,
+            sequence_length=32,
+            warmup_frames=31,
+            proposals=1,
+            proposal_sequence=1,
+            fresh_budget_ms=33,
+            hold_horizon_ms=55,
+        )
+    clock.value += 33_000_000
+    assert worker.status()["freshness_state"] == "fresh"
+    clock.value += 1
+    assert worker.status()["freshness_state"] == "cadence_hold"
+    assert worker.latest_proposal() is not None
+    clock.value += 21_999_999
+    assert worker.latest_proposal() is not None  # exact 55 ms remains a bounded hold.
+    clock.value += 1
+    assert worker.status()["freshness_state"] == "stale_stall"
+    assert worker.latest_proposal() is None
+
+
 def test_late_warming_counts_history_but_never_becomes_proposal():
     now = time.monotonic_ns()
     result = RemoteResult(None, "warming", now, now + 40_000_000, 40_000_000, 39_000_000, 1)
