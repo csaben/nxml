@@ -151,6 +151,7 @@ class ActionPlane:
                     if self._last_applied is not None
                     else inference.get("gap_duration_ms", 0.0)
                 ),
+                **self.arbitrator.gap_status(),
             }
 
     def recording_state(self):

@@ -76,6 +76,13 @@ class Arbitrator:
         self._neutral_boundary: str | None = None
         self._gap_started_ns: int | None = None
         self._recent_gaps: list[int] = []
+        self.gap_count = 0
+        self.gap_recoveries = 0
+        self.gap_neutral_ticks = 0
+        self.gap_hard_disarms = 0
+        self.last_gap_duration_ns = 0
+        self.max_gap_duration_ns = 0
+        self._gap_hard_reported = False
 
     def transition(self, *, mode: Mode | None = None, mute: MuteMask | None = None) -> Applied:
         if mode is not None:
@@ -190,6 +197,10 @@ class Arbitrator:
                 return "none", None, 0, False
             duration = max(0, now_ns - self._gap_started_ns)
             self._gap_started_ns = None
+            self.gap_recoveries += 1
+            self.last_gap_duration_ns = duration
+            self.max_gap_duration_ns = max(self.max_gap_duration_ns, duration)
+            self._gap_hard_reported = False
             return "recovered", "policy_transient_gap", duration, False
         if self._gap_started_ns is None:
             self._gap_started_ns = (
@@ -199,17 +210,36 @@ class Arbitrator:
             )
             self._recent_gaps = [x for x in self._recent_gaps if now_ns - x <= 10_000_000_000]
             self._recent_gaps.append(now_ns)
+            self.gap_count += 1
+            self._gap_hard_reported = False
         duration = max(0, now_ns - self._gap_started_ns)
+        self.gap_neutral_ticks += 1
         hard = (
             duration >= self.hard_stall_ns
             or len(self._recent_gaps) >= self.max_gaps_per_window
         )
+        if hard and not self._gap_hard_reported:
+            self.gap_hard_disarms += 1
+            self._gap_hard_reported = True
         return (
             "disarmed" if hard else "transient_gap",
             "policy_stall" if hard else "policy_transient_gap",
             duration,
             hard,
         )
+
+    def gap_status(self) -> dict[str, int | str | None]:
+        return {
+            "gap_count": self.gap_count,
+            "gap_recoveries": self.gap_recoveries,
+            "gap_neutral_ticks": self.gap_neutral_ticks,
+            "gap_hard_disarms": self.gap_hard_disarms,
+            "last_gap_duration_ns": self.last_gap_duration_ns,
+            "max_gap_duration_ns": self.max_gap_duration_ns,
+            "gap_density_count": len(self._recent_gaps),
+            "gap_density_window_ns": 10_000_000_000,
+            "gap_density_limit": self.max_gaps_per_window,
+        }
 
     def _owned(
         self,

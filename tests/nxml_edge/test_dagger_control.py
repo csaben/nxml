@@ -86,3 +86,14 @@ def test_human_mode_observes_gap_and_hard_stall_without_policy_ownership():
         False,
     )
     assert a.observe_policy(405, policy) == ("disarmed", "policy_stall", 250, True)
+    assert a.gap_status() == {
+        "gap_count": 1,
+        "gap_recoveries": 0,
+        "gap_neutral_ticks": 2,
+        "gap_hard_disarms": 1,
+        "last_gap_duration_ns": 0,
+        "max_gap_duration_ns": 0,
+        "gap_density_count": 1,
+        "gap_density_window_ns": 10_000_000_000,
+        "gap_density_limit": 16,
+    }
