@@ -81,3 +81,56 @@ fields above, validators must accept `frame_timestamp_ns`,
 `action_monotonic_ns`, `action_age`, and `controller` columns remain aliases for
 backward-compatible readers; they are not replacements for the causal v2
 fields.
+
+## Action-schema marker layers and current rolling drift
+
+These identifiers are not interchangeable:
+
+- An episode writer manifest has `schema_id = "nxml.episode.v2"`. Its canonical
+  action-table marker is `action_schema_id = "nxml.dagger-actions.v2"`; the
+  writer also emits `action_rows_schema_id = "nxml.dagger-actions.v2"` as the
+  compatibility/API alias.
+- A rolling bundle has `schema_id = "nxml.segment-bundle.v1"`, and a rolling
+  close has `schema_id = "nxml.episode-close.v1"`. Those `schema_id` values
+  identify their JSON envelopes, not the action table.
+- `action_rows_schema_id` is copied into legacy spool/shard `episodes[]`
+  entries. It is not a physical Parquet row field.
+- `DaggerActionRecordV2.row_schema_id` is the optional logical per-row parser
+  field. The deployed edge Parquet writer does **not** emit `row_schema_id`,
+  `action_schema_id`, or `action_rows_schema_id` as a column.
+
+Consequently, the recovered rolling Parquet files have the exact 44 columns
+listed by the producer schema, with no physical action-schema marker column.
+For each recovered row:
+
+```text
+DaggerActionRecordV2.model_validate(raw).row_schema_id == None
+```
+
+This explains the validator sequence at ml-stream `f0bc93d`:
+
+1. `DaggerActionRecordV2.model_validate(raw)` succeeds because
+   `row_schema_id` defaults to null.
+2. The following helper comparison against `"nxml.dagger-actions.v2"` raises
+   `wrong action schema`.
+
+The episode manifest that carried both action markers was local-only for the
+rolling path. A `nxml.segment-bundle.v1` tar contains exactly three members
+(`video`, `actions`, `events`), and the strict live bundle/close envelopes have
+no `action_schema_id` or `action_rows_schema_id` property. Therefore the marker
+is absent from both the physical rows and the authoritative rolling envelope;
+it cannot be recovered by renaming `schema_id`.
+
+Existing immutable recovered segments must not be rewritten. A validator can
+support them by assigning the logical row schema in memory only after matching
+the exact known 44-column producer contract and trusted rolling producer
+version. For future data, the contract should choose one explicit route:
+
+1. add physical `row_schema_id = "nxml.dagger-actions.v2"` to every Parquet
+   row; or
+2. version `SegmentBundleV1` to carry an authoritative
+   `action_rows_schema_id`, and validate rows under that trusted envelope.
+
+The current helper must not require a field that neither accepted rolling
+contract transmits. Adding a trusted envelope marker is preferable to silently
+inferring the action schema from `schema_id`, which names a different object.

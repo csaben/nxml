@@ -74,6 +74,12 @@ def test_schema_v2_preserves_proposals_ownership_and_checksums(tmp_path: Path) -
     assert writer.close() is not None
 
     table = pq.read_table(tmp_path / "episode.parquet")
+    assert len(table.schema) == 44
+    assert {
+        "row_schema_id",
+        "action_schema_id",
+        "action_rows_schema_id",
+    }.isdisjoint(table.column_names)
     expected_extension_types = {
         "takeover_reason": pa.string(),
         "takeover_release_remaining_ns": pa.int64(),
