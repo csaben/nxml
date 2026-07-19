@@ -57,3 +57,5 @@ unset TOKEN
 ```
 
 Audit it with the corresponding authenticated GET. Do not create a snapshot until this disposition is present.
+
+Segment routes and SQLite tables are created idempotently at startup. Set `NXML_INGEST_RESERVED_BYTES` before restart; the production default/example is 10 GiB. The status route remains readable when filesystem stats fail, while new upload preparation fails closed with HTTP 507.

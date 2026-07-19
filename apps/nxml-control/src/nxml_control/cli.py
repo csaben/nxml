@@ -14,6 +14,7 @@ from nxml_control.training import (
 
 CRADLE_TAILNET_IP = "100.80.98.4"
 DEFAULT_PORT = 8787
+DEFAULT_INGEST_RESERVED_BYTES = 10 * 1024 * 1024 * 1024
 
 
 def _directory(path: str, *, mode: int = 0o750) -> Path:
@@ -40,6 +41,12 @@ def main() -> None:
         help="worker command implementing nxml.bc-job.v1; defaults to NXML_BC_WORKER_COMMAND",
     )
     parser.add_argument("--job-dir", default="/var/lib/nxml-control/jobs")
+    parser.add_argument(
+        "--ingest-reserved-bytes",
+        type=int,
+        default=int(os.environ.get("NXML_INGEST_RESERVED_BYTES", DEFAULT_INGEST_RESERVED_BYTES)),
+        help="free-byte headroom reserved before accepting new uploads",
+    )
     parser.add_argument(
         "--allow-fake-training",
         action="store_true",
@@ -80,6 +87,7 @@ def main() -> None:
         checkpoint_dir=checkpoint_dir,
         training_executor=training_executor,
         training_async=training_async,
+        ingest_reserved_bytes=args.ingest_reserved_bytes,
         deployment_runtime=PolicyServerRuntime(device="cpu"),
         allow_fake_deployment_runtime=False,
     )

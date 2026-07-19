@@ -1,9 +1,6 @@
-# Continuous segment contract v1 (inactive)
+# Continuous segment contract v1
 
-This document coordinates the future edge/control contract for continuous recording. The
-models and catalog implementation exist in `nxml_control.segments`, but **no segment route
-is registered in the current FastAPI application**. Deploying the current control-plane
-release therefore does not activate or migrate this contract.
+This document defines the active edge/control contract for continuous recording. The models, catalog implementation, and typed FastAPI routes are versioned together. Existing monolithic `nxml.episode.v2` ingest remains compatible and unchanged.
 
 ## Producer sequence and cleanup gate
 
@@ -27,7 +24,7 @@ release therefore does not activate or migrate this contract.
    reuploads media. The cluster rejects missing segments, nonzero/duplicate sequence
    starts, gaps, overlaps, clock changes, or metadata/digest mismatches.
 
-The eventual versioned routes should be:
+The versioned routes are:
 
 - `POST /v1/segment-bundles/{upload_id}/commit`
 - `GET /v1/segment-receipts/{receipt_id}`
@@ -43,8 +40,7 @@ The eventual versioned routes should be:
 Mutations require `Idempotency-Key` and cluster bearer authentication. The typed
 mapping is 409 for identity/idempotency conflicts; 422 for schema, checksum, member,
 order, gap, overlap, or metadata validation; and 404 for a missing upload, receipt,
-segment, or close. These routes remain intentionally absent until activation is
-coordinated with dagger-ui.
+segment, or close. Upload preparation and content transfer reuse `POST /v1/uploads`, `PUT /v1/uploads/{upload_id}/content`, and optional `POST /v1/uploads/{upload_id}/inspect`; request buffering is memory-bounded before immutable object registration.
 
 ## Segment bundle
 
@@ -186,7 +182,7 @@ records segment ID, reason, validator, validator version/state, and disposition 
 `nxml.segment-snapshot.v1` body is content-addressed and stored append-only; later quality
 changes create a different snapshot and cannot alter an existing one.
 
-Compact status is bounded and contains only:
+Compact status is bounded, path-free, and contains catalog plus live filesystem capacity:
 
 ```json
 {
@@ -197,9 +193,34 @@ Compact status is bounded and contains only:
   "closed_episodes": 2,
   "eligible_episodes": 1,
   "excluded_episodes": 1,
-  "latest_segment_committed_at": "<RFC3339 UTC>"
+  "latest_segment_committed_at": "<RFC3339 UTC>",
+  "observed_at": "<RFC3339 UTC>",
+  "reserved_headroom_bytes": 10737418240,
+  "durable_object_bytes": 12884901888,
+  "in_progress_upload_bytes": 0,
+  "episode_count": 2,
+  "filesystems": [
+    {
+      "role": "authoritative_objects",
+      "filesystem_label": "filesystem-0",
+      "status": "available",
+      "total_bytes": 1000000000000,
+      "used_bytes": 400000000000,
+      "free_bytes": 600000000000,
+      "available_bytes": 590000000000
+    }
+  ],
+  "ingest_admission": {"state": "admitting", "reason": "capacity_available"}
 }
 ```
+
+The response always lists `authoritative_objects`, `upload_staging`, `temporary_spool`,
+and `catalog`; roles sharing a filesystem share a synthetic label. It never exposes a host
+path. A stat failure returns the status document with nullable byte fields and
+`ingest_admission.state=blocked`, preserving read APIs. New `POST /v1/uploads` requests
+return 507 while blocked. Admission reserves `NXML_INGEST_RESERVED_BYTES` and accounts for
+both temporary spool and authoritative-object bytes (twice the request size when they share
+a filesystem).
 
 Search/indexing remains asynchronous and cannot block segment receipts, edge deletion,
 episode close, snapshots, inference, training, or deployment.

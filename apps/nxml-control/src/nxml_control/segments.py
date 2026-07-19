@@ -1,4 +1,4 @@
-"""Inactive v1 contracts for receipt-gated continuous recording segments."""
+"""Active v1 contracts for receipt-gated continuous recording segments."""
 
 from __future__ import annotations
 
@@ -154,7 +154,7 @@ class SegmentReceipt:
 
 
 class SegmentCatalog:
-    """Standalone/inactive catalog sharing the existing upload/object durability boundary."""
+    """Segment catalog sharing the existing upload/object durability boundary."""
 
     def __init__(self, catalog: Catalog, ingest: IngestService, storage: ObjectStorage):
         self.catalog = catalog

@@ -166,6 +166,13 @@ class Catalog:
                 return item
         return self.get(upload_id)
 
+    def get_by_idempotency_key(self, idempotency_key: str) -> Upload | None:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT * FROM uploads WHERE idempotency_key=?", (idempotency_key,)
+            ).fetchone()
+        return None if row is None else _upload(row)
+
     def get(self, upload_id: str) -> Upload:
         with self.connect() as db:
             row = db.execute("SELECT * FROM uploads WHERE id=?", (upload_id,)).fetchone()

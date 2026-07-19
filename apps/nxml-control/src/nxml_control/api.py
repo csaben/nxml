@@ -5,9 +5,10 @@ import hashlib
 import hmac
 import os
 import stat as stat_module
-from io import BytesIO
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from tempfile import SpooledTemporaryFile, gettempdir
+from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.openapi.utils import get_openapi
@@ -25,6 +26,14 @@ from nxml_control.models import (
 )
 from nxml_control.search import SearchCatalog
 from nxml_control.search_api import create_search_router
+from nxml_control.segments import (
+    EpisodeCloseV1,
+    SegmentBundleV1,
+    SegmentCatalog,
+    SegmentConflictError,
+    SegmentContractError,
+    SegmentNotFoundError,
+)
 from nxml_control.service import IngestService
 from nxml_control.storage import LocalObjectStorage
 from nxml_control.training import FakeTrainingExecutor, TrainingExecutor, TrainingJobs, TrainingSpec
@@ -235,6 +244,192 @@ class CommitRequest(BaseModel):
     manifest: dict[str, Any]
 
 
+class SegmentReceiptResponse(BaseModel):
+    receipt_id: str
+    segment_id: str
+    upload_id: str
+    dataset_id: str
+    episode_id: str
+    sequence_index: int
+    storage_key: str
+    size_bytes: int
+    sha256: str
+    timeline_start_ns: int
+    timeline_end_ns: int
+    state: str
+    committed_at: str
+
+
+class SegmentResponse(BaseModel):
+    manifest: SegmentBundleV1
+    receipt: SegmentReceiptResponse
+
+
+class SegmentQualityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_id: str = Field(
+        default="nxml.segment-quality.v1", pattern=r"^nxml\.segment-quality\.v1$"
+    )
+    training_eligible: bool
+    reason: str = Field(min_length=1)
+    validator: str = Field(min_length=1)
+    validator_version: str = Field(min_length=1)
+    validator_state: str = Field(pattern=r"^(passed|failed)$")
+
+
+class SegmentQualityResponse(BaseModel):
+    disposition_id: str
+    idempotency_key: str
+    segment_id: str
+    training_eligible: bool
+    reason: str
+    validator: str
+    validator_version: str
+    validator_state: str
+    created_at: str
+
+
+class SegmentQualityListResponse(BaseModel):
+    dispositions: list[SegmentQualityResponse]
+
+
+class EpisodeCloseResponse(BaseModel):
+    close_id: str
+    idempotency_key: str
+    dataset_id: str
+    episode_id: str
+    manifest: EpisodeCloseV1
+    created_at: str
+
+
+class SegmentSnapshotResponse(BaseModel):
+    schema_id: str
+    snapshot_id: str
+    dataset_id: str
+    episodes: list[dict[str, Any]]
+    excluded_episodes: list[dict[str, Any]]
+    created_at: str
+
+
+class FilesystemCapacityResponse(BaseModel):
+    role: Literal["authoritative_objects", "upload_staging", "temporary_spool", "catalog"]
+    filesystem_label: str
+    status: Literal["available", "error"]
+    total_bytes: int | None
+    used_bytes: int | None
+    free_bytes: int | None
+    available_bytes: int | None
+
+
+class IngestAdmissionResponse(BaseModel):
+    state: Literal["admitting", "blocked"]
+    reason: str
+
+
+class SegmentStatusResponse(BaseModel):
+    schema_id: str
+    dataset_id: str
+    committed_segments: int
+    committed_bytes: int
+    closed_episodes: int
+    eligible_episodes: int
+    excluded_episodes: int
+    latest_segment_committed_at: str | None
+    observed_at: str
+    reserved_headroom_bytes: int
+    durable_object_bytes: int
+    in_progress_upload_bytes: int
+    episode_count: int
+    filesystems: list[FilesystemCapacityResponse]
+    ingest_admission: IngestAdmissionResponse
+
+
+def _storage_capacity_status(
+    state: Path,
+    catalog: Catalog,
+    *,
+    reserved_headroom_bytes: int,
+    requested_bytes: int = 0,
+) -> dict[str, Any]:
+    roles = (
+        ("authoritative_objects", state / "objects"),
+        ("upload_staging", state / "objects"),
+        ("temporary_spool", Path(gettempdir())),
+        ("catalog", state),
+    )
+    filesystems: list[dict[str, Any]] = []
+    device_requirements: dict[int, int] = {}
+    device_available: dict[int, int] = {}
+    device_labels: dict[int, str] = {}
+    errors: list[str] = []
+    for role, path in roles:
+        try:
+            stats = os.statvfs(path)
+            device = path.stat().st_dev
+            device_labels.setdefault(device, f"filesystem-{len(device_labels)}")
+            block_size = stats.f_frsize
+            total = stats.f_blocks * block_size
+            free = stats.f_bfree * block_size
+            available = stats.f_bavail * block_size
+            filesystems.append(
+                {
+                    "role": role,
+                    "filesystem_label": device_labels[device],
+                    "status": "available",
+                    "total_bytes": total,
+                    "used_bytes": total - free,
+                    "free_bytes": free,
+                    "available_bytes": available,
+                }
+            )
+            device_available[device] = available
+            device_requirements.setdefault(device, reserved_headroom_bytes)
+            if role in {"authoritative_objects", "temporary_spool"}:
+                device_requirements[device] += requested_bytes
+        except OSError:
+            errors.append(f"{role}_stat_failed")
+            filesystems.append(
+                {
+                    "role": role,
+                    "filesystem_label": "unavailable",
+                    "status": "error",
+                    "total_bytes": None,
+                    "used_bytes": None,
+                    "free_bytes": None,
+                    "available_bytes": None,
+                }
+            )
+    with catalog.connect() as db:
+        upload_bytes = db.execute(
+            """SELECT
+            coalesce(sum(CASE WHEN state='committed' THEN actual_size_bytes ELSE 0 END),0),
+            coalesce(sum(CASE WHEN state!='committed' THEN actual_size_bytes ELSE 0 END),0)
+            FROM uploads"""
+        ).fetchone()
+        monolithic_episodes = db.execute("SELECT count(*) FROM episodes").fetchone()[0]
+        closed_episodes = db.execute("SELECT count(*) FROM episode_closes").fetchone()[0]
+    insufficient = [
+        device
+        for device, required in device_requirements.items()
+        if device_available.get(device, -1) < required
+    ]
+    if errors:
+        admission = {"state": "blocked", "reason": ",".join(sorted(errors))}
+    elif insufficient:
+        admission = {"state": "blocked", "reason": "insufficient_available_bytes"}
+    else:
+        admission = {"state": "admitting", "reason": "capacity_available"}
+    return {
+        "observed_at": datetime.now(UTC).isoformat(),
+        "reserved_headroom_bytes": reserved_headroom_bytes,
+        "durable_object_bytes": int(upload_bytes[0]),
+        "in_progress_upload_bytes": int(upload_bytes[1]),
+        "episode_count": int(monolithic_episodes + closed_episodes),
+        "filesystems": filesystems,
+        "ingest_admission": admission,
+    }
+
+
 def _view(item: Upload) -> dict[str, Any]:
     return {**item.__dict__, "upload_url": f"/v1/uploads/{item.id}/content"}
 
@@ -256,12 +451,16 @@ def create_app(
     auth_token: str | None = None,
     training_async: bool = False,
     checkpoint_dir: str | Path | None = None,
+    ingest_reserved_bytes: int = 0,
     allow_fake_deployment_runtime: bool = True,
 ) -> FastAPI:
     state = Path(state_dir)
+    if ingest_reserved_bytes < 0:
+        raise ValueError("ingest_reserved_bytes must be non-negative")
     artifact_root = Path(checkpoint_dir or state / "checkpoints").resolve()
     catalog = Catalog(state / "catalog.sqlite3")
     service = IngestService(catalog, LocalObjectStorage(state / "objects"))
+    segments = SegmentCatalog(catalog, service, service.storage)
     training = TrainingJobs(
         state / "catalog.sqlite3",
         training_executor or FakeTrainingExecutor(),
@@ -305,6 +504,24 @@ def create_app(
         idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1)],
     ):
         try:
+            existing = catalog.get_by_idempotency_key(idempotency_key)
+            if existing is not None:
+                return _view(
+                    catalog.create_upload(
+                        idempotency_key=idempotency_key,
+                        object_key=body.object_key,
+                        size_bytes=body.size_bytes,
+                        sha256=body.sha256,
+                    )
+                )
+            capacity = _storage_capacity_status(
+                state,
+                catalog,
+                reserved_headroom_bytes=ingest_reserved_bytes,
+                requested_bytes=body.size_bytes,
+            )
+            if capacity["ingest_admission"]["state"] != "admitting":
+                raise HTTPException(507, capacity["ingest_admission"])
             return _view(
                 catalog.create_upload(
                     idempotency_key=idempotency_key,
@@ -319,7 +536,18 @@ def create_app(
     @app.put("/v1/uploads/{upload_id}/content", response_model=UploadResponse)
     async def content(upload_id: str, request: Request):
         try:
-            return _view(service.upload(upload_id, BytesIO(await request.body())))
+            upload = catalog.get(upload_id)
+            received = 0
+            with SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b") as source:
+                async for chunk in request.stream():
+                    received += len(chunk)
+                    if received > upload.expected_size_bytes:
+                        raise ValueError("upload body exceeds declared size")
+                    source.write(chunk)
+                if received != upload.expected_size_bytes:
+                    raise ValueError("upload body size does not match declaration")
+                source.seek(0)
+                return _view(service.upload(upload_id, source))
         except KeyError as error:
             raise HTTPException(404, "upload not found") from error
         except ValueError as error:
@@ -669,7 +897,110 @@ def create_app(
         except ConflictError as error:
             raise HTTPException(409, str(error)) from error
 
+    @app.post(
+        "/v1/segment-bundles/{upload_id}/commit",
+        response_model=SegmentReceiptResponse,
+    )
+    def commit_segment(upload_id: str, body: SegmentBundleV1):
+        try:
+            return segments.commit_segment(upload_id, body.model_dump(mode="json")).__dict__
+        except (SegmentNotFoundError, SegmentConflictError, SegmentContractError) as error:
+            raise HTTPException(error.status_code, str(error)) from error
+
+    @app.get("/v1/segment-receipts/{receipt_id}", response_model=SegmentReceiptResponse)
+    def segment_receipt(receipt_id: str):
+        try:
+            return segments.get_receipt(receipt_id).__dict__
+        except SegmentNotFoundError as error:
+            raise HTTPException(error.status_code, str(error)) from error
+
+    @app.get("/v1/segments/{segment_id}", response_model=SegmentResponse)
+    def segment(segment_id: str):
+        try:
+            return segments.get_segment(segment_id)
+        except SegmentNotFoundError as error:
+            raise HTTPException(error.status_code, str(error)) from error
+
+    @app.post(
+        "/v1/segments/{segment_id}/quality-dispositions",
+        status_code=201,
+        response_model=SegmentQualityResponse,
+    )
+    def set_segment_quality(
+        segment_id: str,
+        body: SegmentQualityRequest,
+        idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1)],
+    ):
+        fields = body.model_dump()
+        fields.pop("schema_id")
+        try:
+            return segments.set_quality(segment_id, idempotency_key=idempotency_key, **fields)
+        except (SegmentNotFoundError, SegmentConflictError, SegmentContractError) as error:
+            raise HTTPException(error.status_code, str(error)) from error
+
+    @app.get(
+        "/v1/segments/{segment_id}/quality-dispositions",
+        response_model=SegmentQualityListResponse,
+    )
+    def segment_quality(segment_id: str):
+        try:
+            return {"dispositions": segments.quality(segment_id)}
+        except SegmentNotFoundError as error:
+            raise HTTPException(error.status_code, str(error)) from error
+
+    @app.post(
+        "/v1/datasets/{dataset_id}/episodes/{episode_id}/close",
+        status_code=201,
+        response_model=EpisodeCloseResponse,
+    )
+    def close_segment_episode(
+        dataset_id: str,
+        episode_id: str,
+        body: EpisodeCloseV1,
+        idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1)],
+    ):
+        if body.dataset_id != dataset_id or body.episode_id != episode_id:
+            raise HTTPException(422, "episode close path identity does not match body")
+        try:
+            return segments.close_episode(
+                body.model_dump(mode="json"), idempotency_key=idempotency_key
+            )
+        except (SegmentNotFoundError, SegmentConflictError, SegmentContractError) as error:
+            raise HTTPException(error.status_code, str(error)) from error
+
+    @app.get("/v1/episode-closes/{close_id}", response_model=EpisodeCloseResponse)
+    def segment_episode_close(close_id: str):
+        try:
+            return segments.get_close(close_id)
+        except SegmentNotFoundError as error:
+            raise HTTPException(error.status_code, str(error)) from error
+
+    @app.post(
+        "/v1/datasets/{dataset_id}/segment-snapshots",
+        status_code=201,
+        response_model=SegmentSnapshotResponse,
+    )
+    def create_segment_snapshot(dataset_id: str):
+        return segments.create_snapshot(dataset_id)
+
+    @app.get("/v1/segment-snapshots/{snapshot_id}", response_model=SegmentSnapshotResponse)
+    def segment_snapshot(snapshot_id: str):
+        try:
+            return segments.get_snapshot(snapshot_id)
+        except SegmentNotFoundError as error:
+            raise HTTPException(error.status_code, str(error)) from error
+
+    @app.get("/v1/datasets/{dataset_id}/segment-status", response_model=SegmentStatusResponse)
+    def segment_status(dataset_id: str):
+        return {
+            **segments.status(dataset_id),
+            **_storage_capacity_status(
+                state, catalog, reserved_headroom_bytes=ingest_reserved_bytes
+            ),
+        }
+
     app.state.catalog = catalog
+    app.state.segments = segments
     app.state.ingest = service
     app.state.training = training
     app.state.models = models
