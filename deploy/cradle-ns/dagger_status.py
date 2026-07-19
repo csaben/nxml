@@ -157,6 +157,19 @@ class OperationsReader:
                 request = urllib.request.Request(self.cluster_url + path, headers=headers)
                 with urllib.request.urlopen(request, timeout=self.request_timeout) as response:
                     result[name] = json.load(response)
+            details = {}
+            for job in result["jobs"].get("jobs", []):
+                job_id = job.get("job_id")
+                if not job_id:
+                    continue
+                details[job_id] = {}
+                for name in ("logs", "metrics", "artifacts"):
+                    request = urllib.request.Request(
+                        f"{self.cluster_url}/v1/training/jobs/{job_id}/{name}", headers=headers
+                    )
+                    with urllib.request.urlopen(request, timeout=self.request_timeout) as response:
+                        details[job_id][name] = json.load(response)
+            result["job_details"] = details
             return result
         except (OSError, ValueError, urllib.error.URLError) as error:
             errors["cluster"] = str(error)

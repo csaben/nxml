@@ -75,7 +75,7 @@ PAGE = """<!doctype html>
  <div class="card"><div class="label">Session</div><div class="value" id="session">human · idle</div><div class="value"><select id="mode"><option value="human">Human</option><option disabled>Pure AI — policy runtime required</option><option disabled>Hybrid — policy runtime required</option></select> <button id="record">Start episode</button></div><div class="value label">Mute switch_packets.v1/mute.v1 · 0/26 (available when AI runtime is armed)</div></div>
  <div class="card"><div class="label">Local spool</div><div class="value" id="spool">loading…</div></div>
  <div class="card"><div class="label">Cluster</div><div class="value" id="cluster">loading…</div></div>
- <div class="card"><div class="label">Model</div><div class="value" id="model">loading…</div></div>
+ <div class="card"><div class="label">Models / training</div><div class="value" id="model">loading…</div><select id="model-select"><option>No compatible revisions</option></select><div class="value" id="jobs"></div></div>
 </section>
 <script>
   const HZ=60, DEADZONE=0.15, DIM=26;
@@ -112,6 +112,8 @@ PAGE = """<!doctype html>
       const p=s.spool; $('spool').textContent=p?`${p.pending_episodes||0} pending · ${p.episodes_shipped||0} shipped · ${((p.local_buffered_bytes||0)/1e9).toFixed(2)} GB buffered · ${p.disk_free_gb||'?'} GB free · ${p.receipt_state||'unknown'}${p.blocked_reason?' · blocked: '+p.blocked_reason:''}`:`unavailable: ${s.errors.spool||'unknown'}`;
       const c=s.cluster; $('cluster').textContent=c?`${(c.datasets.datasets||[]).length} datasets · ${(c.snapshots.snapshots||[]).length} snapshots`:`unavailable: ${s.errors.cluster||'unknown'}`;
       const d=c&&c.deployment; $('model').textContent=d&&d.active_revision?`active ${d.active_revision.slice(0,8)} · gen ${d.generation}`:'none active';
+      const revisions=c&&c.revisions&&c.revisions.revisions||[]; $('model-select').innerHTML=revisions.length?revisions.map(r=>`<option disabled>${r.model_id} · ${r.revision_id.slice(0,8)} · ${r.state}</option>`).join(''):'<option>No compatible revisions</option>';
+      const jobs=c&&c.jobs&&c.jobs.jobs||[]; $('jobs').textContent=jobs.length?jobs.map(j=>`${j.state} ${j.job_id.slice(0,8)}`).join(' · '):'no training jobs';
     } catch(e) { $('cluster').textContent='operations status unavailable'; }
   }
   pollOps(); setInterval(pollOps,5000);
