@@ -477,6 +477,7 @@ class SegmentDeliveryWorker:
                     path,
                     json.loads(path.read_text()),
                 )
+        recovered_episodes: set[str] = set()
         for (episode_id, index), (manifest_path, manifest) in sorted(manifests.items()):
             key = self.journal._key(episode_id, index)
             if key in known:
@@ -507,6 +508,16 @@ class SegmentDeliveryWorker:
                 manifest_path,
             )
             self.journal.store_source(source, recovered=True)
+            recovered_episodes.add(episode_id)
+        for episode_id in recovered_episodes:
+            indices = sorted(
+                int(key.rsplit(":", 1)[1])
+                for group in ("pending", "receipts")
+                for key in self.journal.value[group]
+                if key.startswith(f"{episode_id}:")
+            )
+            if indices and indices == list(range(indices[-1] + 1)):
+                self.journal.store_close_request(episode_id, indices[-1] + 1)
 
     def stop(self, *, timeout: float = 30.0) -> None:
         self._stop.set()

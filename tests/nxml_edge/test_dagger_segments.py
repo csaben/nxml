@@ -209,6 +209,7 @@ def test_startup_discovers_complete_unjournaled_triplet(tmp_path):
     assert len(recovered) == 1
     assert recovered[0].timeline_start_ns == 100
     assert recovered[0].timeline_end_ns == 33_333_532
+    assert journal.value["close_requests"][item.episode_id]["segment_count"] == 1
 
 
 def test_two_minute_faster_producer_hits_byte_gate_before_opening_next_segment(tmp_path):
