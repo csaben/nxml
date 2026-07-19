@@ -169,5 +169,5 @@ def test_openapi_success_responses_are_typed(tmp_path):
     for operation in operations:
         success = operation["responses"].get("200") or operation["responses"].get("201")
         if success and "content" in success:
-            schema = success["content"]["application/json"]["schema"]
-            assert schema, operation["operationId"]
+            for media in success["content"].values():
+                assert media["schema"], operation["operationId"]

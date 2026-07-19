@@ -76,6 +76,7 @@ def main() -> None:
     app = create_app(
         state_dir=state_dir,
         auth_token=token,
+        checkpoint_dir=checkpoint_dir,
         training_executor=training_executor,
         training_async=training_async,
     )

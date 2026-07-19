@@ -18,7 +18,11 @@ def test_constant_time_bearer_shapes_and_token_loading(tmp_path):
     assert not bearer_matches("Basic nope", TOKEN)
     assert not bearer_matches("Bearer wrong", TOKEN)
     token_file.chmod(0o640)
-    with pytest.raises(PermissionError, match="0600"):
+    assert load_service_token(token_file=token_file) == TOKEN
+    token_file.chmod(0o644)
+    assert load_service_token(token_file=token_file) == TOKEN
+    token_file.chmod(0o660)
+    with pytest.raises(PermissionError, match="not group/world-writable"):
         load_service_token(token_file=token_file)
     with pytest.raises(ValueError, match="at least 32"):
         load_service_token(environ={"NXML_CONTROL_TOKEN": "short"})

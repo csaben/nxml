@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import os
+import stat as stat_module
 from io import BytesIO
 from pathlib import Path
 from typing import Annotated, Any
@@ -7,7 +12,7 @@ from typing import Annotated, Any
 from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, ConfigDict, Field
-from starlette.responses import JSONResponse
+from starlette.responses import FileResponse, JSONResponse
 
 from nxml_control.auth import bearer_matches
 from nxml_control.catalog import Catalog, IdentityConflictError, InvalidManifestError, Upload
@@ -78,6 +83,8 @@ class TrainingJobResponse(BaseModel):
 
 class ModelRevisionResponse(BaseModel):
     revision_id: str
+    artifact_id: str
+    artifact_uri: str
     model_id: str
     checkpoint_path: str
     checkpoint_sha256: str
@@ -231,6 +238,15 @@ def _view(item: Upload) -> dict[str, Any]:
     return {**item.__dict__, "upload_url": f"/v1/uploads/{item.id}/content"}
 
 
+def _model_view(item: dict[str, Any]) -> dict[str, Any]:
+    artifact_id = "sha256:" + item["checkpoint_sha256"]
+    return {
+        **item,
+        "artifact_id": artifact_id,
+        "artifact_uri": f"/v1/models/revisions/{item['revision_id']}/artifacts/{artifact_id}",
+    }
+
+
 def create_app(
     *,
     state_dir: str | Path,
@@ -238,8 +254,10 @@ def create_app(
     deployment_runtime: DeploymentRuntime | None = None,
     auth_token: str | None = None,
     training_async: bool = False,
+    checkpoint_dir: str | Path | None = None,
 ) -> FastAPI:
     state = Path(state_dir)
+    artifact_root = Path(checkpoint_dir or state / "checkpoints").resolve()
     catalog = Catalog(state / "catalog.sqlite3")
     service = IngestService(catalog, LocalObjectStorage(state / "objects"))
     training = TrainingJobs(
@@ -497,9 +515,12 @@ def create_app(
     ):
         limit = min(max(limit, 1), 500)
         return {
-            "revisions": models.list_revisions(
-                model_id=model_id, state=state, limit=limit, offset=max(offset, 0)
-            )
+            "revisions": [
+                _model_view(item)
+                for item in models.list_revisions(
+                    model_id=model_id, state=state, limit=limit, offset=max(offset, 0)
+                )
+            ]
         }
 
     @app.post("/v1/models/revisions", status_code=201, response_model=ModelRevisionResponse)
@@ -519,19 +540,78 @@ def create_app(
                 or job["checkpoint_sha256"] != body.checkpoint_sha256
             ):
                 raise HTTPException(422, "model revision does not match verified training artifact")
-        return models.register(**fields)
+        return _model_view(models.register(**fields))
 
     @app.get("/v1/models/revisions/{revision_id}", response_model=ModelRevisionResponse)
     def model_revision(revision_id: str):
         try:
-            return models.get(revision_id)
+            return _model_view(models.get(revision_id))
         except KeyError as error:
             raise HTTPException(404, "model revision not found") from error
+
+    @app.get(
+        "/v1/models/revisions/{revision_id}/artifacts/{artifact_id}",
+        response_class=FileResponse,
+        responses={
+            200: {
+                "content": {
+                    "application/octet-stream": {"schema": {"type": "string", "format": "binary"}}
+                },
+                "description": "Digest-verified immutable policy checkpoint",
+            }
+        },
+    )
+    def download_model_artifact(revision_id: str, artifact_id: str):
+        try:
+            revision = models.get(revision_id)
+        except KeyError as error:
+            raise HTTPException(404, "model revision not found") from error
+        expected_id = "sha256:" + revision["checkpoint_sha256"]
+        if artifact_id != expected_id:
+            raise HTTPException(404, "model artifact not found")
+        raw_path = Path(revision["checkpoint_path"])
+        if not raw_path.is_absolute():
+            raise HTTPException(422, "model artifact path is not an absolute managed path")
+        try:
+            resolved = raw_path.resolve(strict=True)
+        except FileNotFoundError as error:
+            raise HTTPException(404, "model artifact file not found") from error
+        if raw_path != resolved:
+            raise HTTPException(422, "model artifact path must be canonical and symlink-free")
+        try:
+            resolved.relative_to(artifact_root)
+        except ValueError as error:
+            raise HTTPException(
+                403, "model artifact is outside the managed checkpoint root"
+            ) from error
+        file_stat = resolved.stat()
+        if not stat_module.S_ISREG(file_stat.st_mode) or file_stat.st_uid != os.geteuid():
+            raise HTTPException(403, "model artifact ownership or type is invalid")
+        digest = hashlib.sha256()
+        with resolved.open("rb") as source:
+            while chunk := source.read(1024 * 1024):
+                digest.update(chunk)
+        actual = digest.hexdigest()
+        if not hmac.compare_digest(actual.encode(), revision["checkpoint_sha256"].encode()):
+            raise HTTPException(409, "model artifact checksum does not match immutable revision")
+        digest_header = base64.b64encode(bytes.fromhex(actual)).decode()
+        return FileResponse(
+            resolved,
+            media_type="application/octet-stream",
+            filename=f"{revision_id}.pt",
+            headers={
+                "ETag": f'"sha256:{actual}"',
+                "Digest": f"sha-256={digest_header}",
+                "X-Checksum-SHA256": actual,
+                "Cache-Control": "private, max-age=31536000, immutable",
+                "Content-Length": str(file_stat.st_size),
+            },
+        )
 
     @app.post("/v1/models/revisions/{revision_id}/validate", response_model=ModelRevisionResponse)
     def validate_model(revision_id: str):
         try:
-            return models.validate(revision_id)
+            return _model_view(models.validate(revision_id))
         except KeyError as error:
             raise HTTPException(404, "model revision not found") from error
         except CandidateError as error:

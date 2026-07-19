@@ -18,9 +18,14 @@ def load_service_token(
     path_value = str(token_file) if token_file is not None else env.get(ENV_TOKEN_FILE)
     if path_value:
         path = Path(path_value)
-        mode = stat.S_IMODE(path.stat().st_mode)
-        if mode != 0o600:
-            raise PermissionError(f"token file must have mode 0600, got {mode:04o}: {path}")
+        file_stat = path.stat()
+        mode = stat.S_IMODE(file_stat.st_mode)
+        if not stat.S_ISREG(file_stat.st_mode):
+            raise PermissionError(f"token path must be a regular file: {path}")
+        if not mode & stat.S_IRUSR or mode & (stat.S_IWGRP | stat.S_IWOTH):
+            raise PermissionError(
+                f"token file must be owner-readable and not group/world-writable, got {mode:04o}: {path}"
+            )
         token = path.read_text().strip()
     else:
         token = env.get(ENV_TOKEN, "").strip()
