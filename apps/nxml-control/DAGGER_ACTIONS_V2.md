@@ -15,7 +15,11 @@ The episode JSON manifest uses:
 
 The shard API manifest must copy `action_schema_id` into its corresponding
 `episodes[]` entry. `action_rows_schema_id` is accepted as a compatibility
-alias. Until that marker is present, the cluster cannot enforce explicit
+alias. The deployed Parquet writer does not emit a row-level marker; validators
+therefore require its exact physical column signature. If an explicit physical
+marker is added, `row_schema_id`, `action_schema_id`, and
+`action_rows_schema_id` are accepted only when their non-null values equal the
+canonical ID; conflicting or unknown values fail closed. Until that marker is present, the cluster cannot enforce explicit
 episode-quality gating before snapshot creation.
 
 ## Exact physical columns

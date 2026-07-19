@@ -1,6 +1,8 @@
 import hashlib
+import importlib.util
 import io
 import tarfile
+from pathlib import Path
 
 import numpy as np
 import pyarrow as pa
@@ -338,3 +340,41 @@ def test_split_requires_independent_sequence_windows():
     actions = np.zeros((17, ACTION_DIM), dtype=np.float32)
     with pytest.raises(ValueError, match="at least 18"):
         _split_episode(latents, actions, sequence_length=8, val_fraction=0.1)
+
+
+def _rolling_validator_module():
+    path = Path(__file__).parents[2] / "apps" / "nxml-control" / "deploy" / "validate_rolling.py"
+    spec = importlib.util.spec_from_file_location("nxml_validate_rolling", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_rolling_validator_accepts_canonical_edge_shape_and_schema_aliases() -> None:
+    helper = _rolling_validator_module()
+    columns = sorted(helper.EDGE_ACTION_COLUMNS)
+    assert helper.validate_action_schema(columns, [{}]) == helper.ACTION_SCHEMA_ID
+    for marker in helper.ACTION_SCHEMA_MARKERS:
+        assert (
+            helper.validate_action_schema(
+                [*columns, marker], [{marker: helper.ACTION_SCHEMA_ID}]
+            )
+            == helper.ACTION_SCHEMA_ID
+        )
+
+
+def test_rolling_validator_rejects_schema_shape_and_marker_drift() -> None:
+    helper = _rolling_validator_module()
+    columns = sorted(helper.EDGE_ACTION_COLUMNS)
+    with pytest.raises(ValueError, match="missing=.*proposal_sequence"):
+        helper.validate_action_schema(
+            [name for name in columns if name != "proposal_sequence"], [{}]
+        )
+    with pytest.raises(ValueError, match="extra=.*mystery"):
+        helper.validate_action_schema([*columns, "mystery"], [{}])
+    with pytest.raises(ValueError, match="encountered=.*nxml.dagger-actions.v1"):
+        helper.validate_action_schema(
+            [*columns, "action_schema_id"],
+            [{"action_schema_id": "nxml.dagger-actions.v1"}],
+        )

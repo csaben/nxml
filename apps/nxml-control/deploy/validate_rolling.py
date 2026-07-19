@@ -18,6 +18,40 @@ from torchcodec.decoders import VideoDecoder
 
 CHUNK = 1024 * 1024
 ROLES = {"video", "actions", "events"}
+ACTION_SCHEMA_ID = "nxml.dagger-actions.v2"
+ACTION_SCHEMA_MARKERS = {"row_schema_id", "action_schema_id", "action_rows_schema_id"}
+EDGE_ACTION_COLUMNS = {
+    "frame_idx", "timestamp", "frame_monotonic_ns", "frame_timestamp_ns",
+    "action_timestamp", "action_monotonic_ns", "action_timestamp_ns", "action_age_ns",
+    "action_age", "valid", "invalid_reasons", "action", "applied_action",
+    "human_action", "human_mask", "policy_action", "ownership", "controller_id",
+    "active_driver", "controller", "policy_id", "policy_revision", "policy_digest",
+    "human_monotonic_ns", "policy_monotonic_ns", "policy_observation_monotonic_ns",
+    "muted_policy_action", "mute_mask", "mute_mask_version", "ownership_source",
+    "mode", "takeover", "takeover_reason", "takeover_release_remaining_ns",
+    "proposal_valid", "proposal_fresh", "proposal_sequence", "proposal_age_ns",
+    "gap_state", "gap_reason", "gap_duration_ns", "boundary_sequence",
+    "boundary_acknowledged", "bc_training_eligible",
+}
+
+
+def validate_action_schema(column_names: list[str], rows: list[dict]) -> str:
+    columns = set(column_names)
+    marker_columns = columns & ACTION_SCHEMA_MARKERS
+    physical = columns - marker_columns
+    if physical != EDGE_ACTION_COLUMNS:
+        missing = sorted(EDGE_ACTION_COLUMNS - physical)
+        extra = sorted(physical - EDGE_ACTION_COLUMNS)
+        raise ValueError(f"wrong action schema columns: missing={missing}, extra={extra}")
+    encountered = {
+        row.get(marker)
+        for row in rows
+        for marker in marker_columns
+        if row.get(marker) is not None
+    }
+    if encountered and encountered != {ACTION_SCHEMA_ID}:
+        raise ValueError(f"wrong action schema marker: encountered={sorted(map(str, encountered))}")
+    return ACTION_SCHEMA_ID
 
 
 def digest(path: Path) -> tuple[int, str]:
@@ -102,13 +136,13 @@ def validate_episode(db, objects: Path, episode_id: str) -> dict:
             rows = action_table.to_pylist()
             if not rows:
                 raise ValueError("empty actions parquet")
+            validate_action_schema(action_table.column_names, rows)
             eligible = 0
             prior_frame = None
             frame_ids = []
             for raw in rows:
-                parsed = DaggerActionRecordV2.model_validate(raw)
-                if parsed.row_schema_id != "nxml.dagger-actions.v2":
-                    raise ValueError("wrong action schema")
+                normalized = {key: value for key, value in raw.items() if key not in ACTION_SCHEMA_MARKERS}
+                parsed = DaggerActionRecordV2.model_validate(normalized)
                 frame_ns = parsed.effective_frame_ns
                 frame_id = parsed.effective_frame_index
                 if frame_ns is None or (prior_frame is not None and frame_ns <= prior_frame):
