@@ -186,6 +186,9 @@ class UdevDeviceAdapter(SymlinkDeviceAdapter):
 
 
 class BluetoothctlAdapter:
+    def __init__(self, orchestrator_url: str | None = None) -> None:
+        self.orchestrator_url = orchestrator_url.rstrip("/") if orchestrator_url else None
+
     def probe(self, switch_mac: str | None) -> BluetoothProbe:
         try:
             show = subprocess.run(
@@ -205,9 +208,22 @@ class BluetoothctlAdapter:
                 text=True,
                 timeout=2,
             )
-            return BluetoothProbe(powered, "Connected: yes" in info.stdout, switch_mac)
+            connected = "Connected: yes" in info.stdout
+            if self.orchestrator_url is not None:
+                connected = self._orchestrator_connected()
+            return BluetoothProbe(powered, connected, switch_mac)
         except (OSError, subprocess.SubprocessError) as error:
             return BluetoothProbe(False, False, switch_mac, str(error))
+
+    def _orchestrator_connected(self) -> bool:
+        try:
+            with urllib.request.urlopen(
+                self.orchestrator_url + "/health", timeout=1.0
+            ) as response:
+                payload = json.loads(response.read())
+            return bool(isinstance(payload, dict) and payload.get("connected"))
+        except (OSError, ValueError, urllib.error.URLError):
+            return False
 
 
 class SystemctlServiceAdapter:

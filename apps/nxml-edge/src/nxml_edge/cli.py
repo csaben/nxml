@@ -57,7 +57,7 @@ def main(config_path: Path, token_file: Path, fixture_adapters: bool) -> None:
     else:
         client = AutopilotClient(config.autopilot_url, token)
         devices = UdevDeviceAdapter()
-        bluetooth = BluetoothctlAdapter()
+        bluetooth = BluetoothctlAdapter(f"http://127.0.0.1:{config.orchestrator_port}")
         policy = HttpPolicyAdapter(client)
         runtime = HttpRuntimeAdapter(client)
         services = SystemctlServiceAdapter()
