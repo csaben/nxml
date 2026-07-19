@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Literal, cast
 
 import click
 
@@ -22,6 +23,13 @@ from nxml_collect.recorder import RecorderConfig, main_with_exit
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(version=__version__)
+@click.option(
+    "--driver",
+    type=click.Choice(["human", "unknown"]),
+    default="unknown",
+    show_default=True,
+    help="Provenance assertion. Select human only for an exclusive, AI-disabled session.",
+)
 @click.option(
     "--game",
     required=True,
@@ -60,7 +68,7 @@ from nxml_collect.recorder import RecorderConfig, main_with_exit
     default=0.5,
     type=float,
     show_default=True,
-    help="Drop frames whose nearest controller snapshot is older than this many seconds.",
+    help="Mark samples invalid when controller state is older than this many seconds.",
 )
 @click.option(
     "--initial-timeout",
@@ -78,7 +86,7 @@ from nxml_collect.recorder import RecorderConfig, main_with_exit
 )
 @click.option(
     "--ui-host",
-    default="0.0.0.0",  # noqa: S104
+    default="0.0.0.0",
     show_default=True,
     help="Bind address for the teleop UI server.",
 )
@@ -115,6 +123,7 @@ def main(
     output_dir: Path,
     camera_id: int,
     orchestrator_url: str,
+    driver: str,
     max_frames: int | None,
     max_action_age: float,
     initial_timeout: float,
@@ -131,6 +140,7 @@ def main(
         game=game,
         camera_id=camera_id,
         orchestrator_url=orchestrator_url,
+        driver=cast("Literal['human', 'unknown']", driver),
         max_frames=max_frames,
         max_action_age=max_action_age,
         initial_timeout=initial_timeout,

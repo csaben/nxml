@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import FrameType
+from typing import Literal
 
 from nxml_capture import (
     ControllerSubscription,
@@ -29,14 +30,15 @@ class RecorderConfig:
     game: str
     camera_id: int = 0
     orchestrator_url: str = "ws://127.0.0.1:7777/ws/state"
+    driver: Literal["human", "unknown"] = "unknown"
     max_frames: int | None = None
     max_action_age: float = 0.5
     initial_timeout: float = 10.0
     progress_every: int = 60
     ui_port: int | None = None
-    ui_host: str = "0.0.0.0"  # noqa: S104
+    ui_host: str = "0.0.0.0"
     writer: str = "video_parquet"  # "video_parquet" | "npz"
-    codec: str = "ffv1"  # only used when writer == "video_parquet"
+    codec: Literal["ffv1", "h264"] = "ffv1"  # only used with video_parquet
     fps: float = 30.0
     extra_metadata: dict[str, object] = field(default_factory=dict)
 
@@ -49,6 +51,7 @@ def run_recorder(config: RecorderConfig) -> Path | None:
         controller,
         max_action_age=config.max_action_age,
         initial_timeout=config.initial_timeout,
+        driver=config.driver,
     )
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
@@ -99,6 +102,14 @@ def run_recorder(config: RecorderConfig) -> Path | None:
             t_start = time.time()
             for synced in sync.frames():
                 writer.append(synced)
+                if not synced.valid and isinstance(writer, VideoParquetEpisodeWriter):
+                    writer.append_event(
+                        "controller_sample_invalid",
+                        timestamp=synced.timestamp,
+                        monotonic_ns=synced.frame_monotonic_ns,
+                        source="nxml-collect",
+                        payload={"reasons": list(synced.invalid_reasons)},
+                    )
                 count = len(writer)
                 if count % config.progress_every == 0:
                     elapsed = time.time() - t_start
@@ -117,6 +128,11 @@ def run_recorder(config: RecorderConfig) -> Path | None:
             ui_server.stop()
         out_path = writer.close()
         if out_path is not None:
+            config.extra_metadata["collector_status"] = {
+                "driver": config.driver,
+                "controller_connected_at_close": controller.is_connected,
+                "invalid_samples": sync.invalid_samples,
+            }
             _stamp_metadata(out_path, config)
             print(f"[nxml-collect] wrote {out_path} ({len(writer)} frames)")
         else:

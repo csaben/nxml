@@ -30,6 +30,7 @@ class ControllerSnapshot:
     action: np.ndarray  # (26,) float32
     packet: dict[str, object]  # raw orchestrator packet (dict)
     monotonic_ns: int | None = None
+    action_source: str | None = None
 
 
 class ControllerSubscription:
@@ -145,6 +146,17 @@ class ControllerSubscription:
             action=packet_to_action(packet),
             packet=raw,
             monotonic_ns=time.monotonic_ns(),
+            action_source=_action_source(raw),
         )
         with self._latest_lock:
             self._latest = snapshot
+
+
+def _action_source(raw: dict[str, object]) -> str | None:
+    """Read optional provenance without requiring it from legacy orchestrators."""
+    metadata = raw.get("_nxml")
+    if isinstance(metadata, dict):
+        source = metadata.get("action_source")
+        if source in {"human", "inference"}:
+            return str(source)
+    return None

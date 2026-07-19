@@ -104,6 +104,7 @@ _PARQUET_SCHEMA = pa.schema(
         ("action_monotonic_ns", pa.int64()),
         ("action_age", pa.float64()),
         ("valid", pa.bool_()),
+        ("invalid_reasons", pa.list_(pa.string())),
         # Kept as an alias so schema-v1 readers continue to work.
         ("action", _action_array_type()),
         ("applied_action", _action_array_type()),
@@ -276,6 +277,7 @@ class VideoParquetEpisodeWriter:
                     "action_monotonic_ns": synced.action_monotonic_ns,
                     "action_age": synced.action_age,
                     "valid": synced.valid,
+                    "invalid_reasons": list(synced.invalid_reasons),
                     "action": synced.action.tolist(),
                     "applied_action": synced.applied_action.tolist(),
                     "human_action": (synced.human_action if synced.human_action is not None else zero_action).tolist(),
