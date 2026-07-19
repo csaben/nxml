@@ -25,10 +25,11 @@ class Transport:
         self.actions: list[list[float]] = []
         self.fail = False
 
-    def post_human(self, vector: list[float]) -> None:
+    def post_human(self, vector: list[float]) -> dict[str, object]:
         self.actions.append(vector)
         if self.fail:
             raise RuntimeError("offline")
+        return {"status": 200, "applied": True}
 
 
 def request(session_id: str, sequence: int, vector: list[float]) -> HumanActionRequest:
@@ -54,6 +55,11 @@ def test_enable_action_disable_always_brackets_with_neutral() -> None:
     assert transport.actions == [neutral_action().tolist(), action, neutral_action().tolist()]
     assert bridge.status()["enabled"] is False
     assert bridge.status()["neutral_reason"] == "client_disabled"
+    assert bridge.status()["actions_accepted"] == 1
+    assert bridge.status()["last_vector_summary"] == {
+        "non_neutral_count": 1,
+        "non_neutral": [{"index": 25, "value": 1.0}],
+    }
 
 
 def test_stale_heartbeat_neutralizes_and_latches_off() -> None:
@@ -69,6 +75,7 @@ def test_stale_heartbeat_neutralizes_and_latches_off() -> None:
     assert transport.actions[-1] == neutral_action().tolist()
     assert bridge.status()["enabled"] is False
     assert bridge.status()["neutral_reason"] == "stale_heartbeat"
+    assert bridge.status()["neutral_posts"] == 2
 
 
 def test_rate_and_sequence_are_bounded() -> None:

@@ -13,8 +13,8 @@ class _Preview:
 
 
 class _Actions:
-    def post_human(self, vector: list[float]) -> None:
-        pass
+    def post_human(self, vector: list[float]) -> dict[str, object]:
+        return {"status": 200, "applied": True}
 
 
 def _request(token: str | None = None, *, bearer: bool = False) -> Request:
@@ -115,6 +115,8 @@ def test_ui_has_explicit_human_enable_and_known_standard_mapping(edge) -> None:
     assert "0:24,1:25" in html  # standard south/east -> Switch B/A
     assert "2:22,3:23" in html  # standard west/north -> Switch Y/X
     assert "source: 'policy'" not in html
+    assert "gamepad-telemetry" in html
+    assert "proxy-telemetry" in html
 
 
 def test_human_enable_route_is_not_reachable_without_edge_auth(edge) -> None:
