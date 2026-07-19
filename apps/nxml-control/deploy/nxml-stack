@@ -11,6 +11,8 @@ CONTROL_URL=http://100.80.98.4:8787
 INFERENCE_ENDPOINT=tcp://100.80.98.4:5557
 DATASET=nxml-pokemon-za-v2
 GPU0_MIN_FREE_MIB=${NXML_INFERENCE_MIN_FREE_MIB:-4096}
+READINESS_ATTEMPTS=${NXML_INFERENCE_READINESS_ATTEMPTS:-45}
+READINESS_INTERVAL_SECONDS=${NXML_INFERENCE_READINESS_INTERVAL_SECONDS:-2}
 ACTION=${1:-status}
 shift || true
 
@@ -103,6 +105,25 @@ check_inference_capacity() {
 }
 
 
+wait_for_readiness() {
+  [[ $READINESS_ATTEMPTS =~ ^[1-9][0-9]*$ ]] || die "NXML_INFERENCE_READINESS_ATTEMPTS must be a positive integer"
+  [[ $READINESS_INTERVAL_SECONDS =~ ^[1-9][0-9]*$ ]] || die "NXML_INFERENCE_READINESS_INTERVAL_SECONDS must be a positive integer"
+  local attempt
+  for ((attempt=1; attempt<=READINESS_ATTEMPTS; attempt++)); do
+    if active "$CONTROL" && active "$INFERENCE" &&
+      curl --fail --silent --show-error "$CONTROL_URL/healthz" >/dev/null 2>&1 &&
+      inference_info >/dev/null 2>&1; then
+      log "readiness reached after attempt ${attempt}/${READINESS_ATTEMPTS}"
+      return 0
+    fi
+    if (( attempt == 1 || attempt % 5 == 0 )); then
+      log "warming: readiness attempt ${attempt}/${READINESS_ATTEMPTS}; control=$(systemctl is-active "$CONTROL" 2>/dev/null || true) inference=$(systemctl is-active "$INFERENCE" 2>/dev/null || true)"
+    fi
+    (( attempt < READINESS_ATTEMPTS )) && sleep "$READINESS_INTERVAL_SECONDS"
+  done
+  return 1
+}
+
 verify() {
   active "$CONTROL" || die "$CONTROL is not active"
   active "$INFERENCE" || die "$INFERENCE is not active"
@@ -167,6 +188,14 @@ start_stack() {
   trap rollback ERR INT TERM
   systemctl start "$CONTROL"
   systemctl start "$INFERENCE"
+  if ! wait_for_readiness; then
+    if active "$CONTROL" && active "$INFERENCE"; then
+      success=1
+      trap - ERR INT TERM
+      die "services are active but readiness timed out; left running for diagnosis"
+    fi
+    return 1
+  fi
   verify
   success=1
   trap - ERR INT TERM

@@ -19,3 +19,7 @@ def test_training_capacity_is_explicitly_separate():
     assert "training GPU capacity was not assessed or reserved" in text
     assert "no job submitted" in text
     assert "GPU1" in text
+    assert "wait_for_readiness" in text
+    assert "warming: readiness attempt" in text
+    assert "readiness timed out; left running for diagnosis" in text
+    assert "trap - ERR INT TERM" in text
