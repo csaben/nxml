@@ -301,10 +301,14 @@ def create_app(
             recorder.start()
         return result
 
-    def require_arm_ready():
+    def arm_readiness(*, wait: bool) -> dict:
         if action_plane is None or remote_inference is None or operations is None:
             raise HTTPException(503, "remote action plane is not configured")
-        status = remote_inference.status()
+        status = (
+            remote_inference.wait_until_fresh(timeout=2.0) if wait else remote_inference.status()
+        )
+        if status is None:
+            raise HTTPException(409, "inference did not produce a fresh proposal within 2 seconds")
         deployment = (operations.snapshot().cluster or {}).get("deployment") or {}
         expected = remote_inference.client.revision
         if deployment.get("active_revision") != expected["revision_id"]:
@@ -321,10 +325,24 @@ def create_app(
         health = orchestrator.health()
         if health.get("switch_state") != "connected":
             raise HTTPException(409, "Switch is not connected")
+        return {
+            "schema_version": "nxml.dagger-arm-readiness.v1",
+            "ready": True,
+            "revision": expected["revision_id"],
+            "checkpoint_sha256": expected["checkpoint_sha256"],
+            "proposal_age_ms": age,
+            "warmup_frames": status["warmup_frames"],
+            "sequence_length": status["sequence_length"],
+            "switch_state": health["switch_state"],
+        }
+
+    @app.get("/api/control/readiness")
+    def control_readiness() -> dict:
+        return arm_readiness(wait=True)
 
     @app.post("/api/control/arm")
     def control_arm() -> dict:
-        require_arm_ready()
+        arm_readiness(wait=True)
         recording_boundary(action_plane.arm, kind="armed")
         return action_plane.status()
 

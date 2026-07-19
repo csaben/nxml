@@ -299,6 +299,22 @@ class RemoteInferenceWorker:
             return None
         return proposal
 
+    def wait_until_fresh(self, timeout: float = 2.0) -> dict[str, Any] | None:
+        """Wait off the data plane for a healthy proposal inside the freshness budget."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status = self.status()
+            proposal = self.latest_proposal()
+            if (
+                status["ready"]
+                and status["health"] == "healthy"
+                and status["warmup_frames"] >= status["sequence_length"] - 1
+                and proposal is not None
+            ):
+                return status
+            time.sleep(0.005)
+        return None
+
     def status(self) -> dict[str, Any]:
         now = self.clock_ns()
         with self._lock:

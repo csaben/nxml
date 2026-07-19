@@ -1,5 +1,6 @@
 import json
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,7 +9,7 @@ from types import SimpleNamespace
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "deploy/cradle-ns"))
-from dagger_control import Arbitrator, Mode
+from dagger_control import Arbitrator, Mode, Proposal
 from dagger_inference_v2 import (
     MODE_FRAME_V2,
     MODE_INFO,
@@ -69,6 +70,43 @@ def test_disarm_callback_failure_does_not_escape_worker_clear():
     )
     worker._clear("stale", health="stale")
     assert worker.status()["health"] == "stale"
+
+
+def test_wait_until_fresh_survives_stale_to_healthy_arm_gate_race():
+    worker = RemoteInferenceWorker(
+        source=object(),
+        client=SimpleNamespace(revision=revision()),
+    )
+    worker._enabled.set()
+    worker._status = worker._status.__class__(
+        enabled=True,
+        ready=False,
+        health="stale",
+        revision="revision-1",
+        checkpoint_sha256="a" * 64,
+        sequence_length=32,
+        warmup_frames=31,
+    )
+
+    def recover():
+        time.sleep(0.01)
+        now = time.monotonic_ns()
+        with worker._lock:
+            worker._proposal = Proposal(np.zeros(26, np.float32), now, "revision-1")
+            worker._status = worker._status.__class__(
+                enabled=True,
+                ready=True,
+                health="healthy",
+                revision="revision-1",
+                checkpoint_sha256="a" * 64,
+                sequence_length=32,
+                warmup_frames=31,
+            )
+
+    thread = threading.Thread(target=recover)
+    thread.start()
+    assert worker.wait_until_fresh(timeout=0.2)["health"] == "healthy"
+    thread.join()
 
 
 def proposal(timestamp=10, state="proposal", **updates):
