@@ -9,6 +9,7 @@ from nxml_core.contracts.episode_v2 import (
     EventRecordV2,
     FileChecksumV2,
     LineageV2,
+    OwnershipCodeV2,
     validate_action_records,
 )
 
@@ -21,5 +22,6 @@ __all__ = [
     "EventRecordV2",
     "FileChecksumV2",
     "LineageV2",
+    "OwnershipCodeV2",
     "validate_action_records",
 ]

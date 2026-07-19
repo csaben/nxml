@@ -9,6 +9,7 @@ from nxml_core.contracts.episode_v2 import (
     EpisodeManifestV2,
     FileChecksumV2,
     LineageV2,
+    OwnershipCodeV2,
     validate_action_records,
 )
 from pydantic import ValidationError
@@ -25,7 +26,7 @@ def _record(index: int, *, frame_ns: int, action_ns: int) -> ActionRecordV2:
         human_action_mask=[True] * 26,
         policy_action=None,
         controller=ControllerV2.HUMAN,
-        ownership=[ControllerV2.HUMAN] * 26,
+        ownership=[OwnershipCodeV2.HUMAN] * 26,
         valid=True,
     )
 
@@ -89,3 +90,14 @@ def test_contract_forbids_unknown_fields() -> None:
     payload["legacy_action"] = [0.0] * 26
     with pytest.raises(ValidationError, match="legacy_action"):
         ActionRecordV2.model_validate(payload)
+
+
+def test_ownership_uses_canonical_parquet_integer_codes() -> None:
+    payload = _record(0, frame_ns=100, action_ns=90).model_dump(mode="json")
+    assert payload["ownership"] == [1] * 26
+    payload["ownership"][0:3] = [0, 1, 2]
+    assert ActionRecordV2.model_validate(payload).ownership[:3] == [
+        OwnershipCodeV2.UNOWNED,
+        OwnershipCodeV2.HUMAN,
+        OwnershipCodeV2.POLICY,
+    ]

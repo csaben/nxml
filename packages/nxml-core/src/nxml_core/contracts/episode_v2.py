@@ -9,7 +9,7 @@ manifest maps that clock to UTC for correlation with other systems.
 from __future__ import annotations
 
 from datetime import datetime
-from enum import StrEnum
+from enum import IntEnum, StrEnum
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -28,6 +28,14 @@ class ControllerV2(StrEnum):
     BLENDED = "blended"
     SAFETY = "safety"
     NONE = "none"
+
+
+class OwnershipCodeV2(IntEnum):
+    """Canonical Parquet wire encoding: 0=unowned, 1=human, 2=policy."""
+
+    UNOWNED = 0
+    HUMAN = 1
+    POLICY = 2
 
 
 class ClockMappingV2(ContractModel):
@@ -81,7 +89,7 @@ class ActionRecordV2(ContractModel):
     human_action_mask: list[bool]
     policy_action: Action | None = None
     controller: ControllerV2
-    ownership: list[ControllerV2]
+    ownership: list[OwnershipCodeV2]
     policy_id: str | None = None
     policy_revision: str | None = None
     valid: bool
@@ -145,9 +153,7 @@ class EpisodeManifestV2(ContractModel):
         return self
 
 
-def validate_action_records(
-    records: list[ActionRecordV2], *, action_dim: int
-) -> None:
+def validate_action_records(records: list[ActionRecordV2], *, action_dim: int) -> None:
     """Validate episode-level width, ordering, and monotonic timestamp invariants."""
     previous_frame_index = -1
     previous_frame_ns = -1
