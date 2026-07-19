@@ -72,7 +72,7 @@ PAGE = """<!doctype html>
   <span id="seq"></span>
 </div>
 <section id="ops">
- <div class="card"><div class="label">Session</div><div class="value" id="session">human · idle</div><div class="value"><button id="record">Start episode</button></div></div>
+ <div class="card"><div class="label">Session</div><div class="value" id="session">human · idle</div><div class="value"><select id="mode"><option value="human">Human</option><option disabled>Pure AI — policy runtime required</option><option disabled>Hybrid — policy runtime required</option></select> <button id="record">Start episode</button></div><div class="value label">Mute switch_packets.v1/mute.v1 · 0/26 (available when AI runtime is armed)</div></div>
  <div class="card"><div class="label">Local spool</div><div class="value" id="spool">loading…</div></div>
  <div class="card"><div class="label">Cluster</div><div class="value" id="cluster">loading…</div></div>
  <div class="card"><div class="label">Model</div><div class="value" id="model">loading…</div></div>
