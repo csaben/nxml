@@ -197,30 +197,44 @@ class SegmentClient:
 class SegmentJournal:
     def __init__(self, path: Path):
         self.path = path
+        self._lock = threading.RLock()
         self.value = (
             json.loads(path.read_text())
             if path.is_file()
-            else {"pending": {}, "cleanup": {}, "receipts": {}, "close": None}
+            else {
+                "pending": {},
+                "cleanup": {},
+                "receipts": {},
+                "close_request": None,
+                "close": None,
+            }
         )
         self.value.setdefault("pending", {})
         self.value.setdefault("cleanup", {})
+        self.value.setdefault("close_request", None)
+
+    @staticmethod
+    def _key(episode_id: str, sequence_index: int) -> str:
+        return f"{episode_id}:{sequence_index}"
 
     def store_pending(self, prepared: PreparedSegment) -> None:
-        source = prepared.source
-        self.value["pending"][str(source.sequence_index)] = {
-            "source": self._source_wire(source),
-            "tar_path": str(prepared.tar_path),
-            "bundle": prepared.bundle,
-        }
-        self._sync()
+        with self._lock:
+            source = prepared.source
+            self.value["pending"][self._key(source.episode_id, source.sequence_index)] = {
+                "source": self._source_wire(source),
+                "tar_path": str(prepared.tar_path),
+                "bundle": prepared.bundle,
+            }
+            self._sync()
 
     def store_source(self, source: SegmentSource) -> None:
-        self.value["pending"][str(source.sequence_index)] = {
-            "source": self._source_wire(source),
-            "tar_path": None,
-            "bundle": None,
-        }
-        self._sync()
+        with self._lock:
+            self.value["pending"][self._key(source.episode_id, source.sequence_index)] = {
+                "source": self._source_wire(source),
+                "tar_path": None,
+                "bundle": None,
+            }
+            self._sync()
 
     @staticmethod
     def _source_wire(source: SegmentSource) -> dict[str, Any]:
@@ -275,13 +289,14 @@ class SegmentJournal:
         return sorted(result, key=lambda item: item.sequence_index)
 
     def store_receipt(self, receipt: dict[str, Any]) -> None:
-        key = str(receipt["sequence_index"])
-        pending = self.value["pending"].get(key)
-        self.value["receipts"][str(receipt["sequence_index"])] = receipt
-        if pending is not None:
-            self.value["cleanup"][key] = pending
-        self.value["pending"].pop(key, None)
-        self._sync()
+        with self._lock:
+            key = self._key(receipt["episode_id"], receipt["sequence_index"])
+            pending = self.value["pending"].get(key)
+            self.value["receipts"][key] = receipt
+            if pending is not None:
+                self.value["cleanup"][key] = pending
+            self.value["pending"].pop(key, None)
+            self._sync()
 
     def cleanup_paths(self) -> list[tuple[str, list[Path]]]:
         result = []
@@ -295,12 +310,20 @@ class SegmentJournal:
         return result
 
     def mark_deleted(self, sequence_index: str | int) -> None:
-        self.value["cleanup"].pop(str(sequence_index), None)
-        self._sync()
+        with self._lock:
+            self.value["cleanup"].pop(str(sequence_index), None)
+            self._sync()
 
     def store_close(self, close: dict[str, Any]) -> None:
-        self.value["close"] = close
-        self._sync()
+        with self._lock:
+            self.value["close"] = close
+            self.value["close_request"] = None
+            self._sync()
+
+    def store_close_request(self, episode_id: str, count: int) -> None:
+        with self._lock:
+            self.value["close_request"] = {"episode_id": episode_id, "segment_count": count}
+            self._sync()
 
     def _sync(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -352,6 +375,14 @@ class SegmentDeliveryWorker:
                 self.queue.put_nowait(item)
             self._thread = threading.Thread(target=self._run, daemon=True, name="segment-delivery")
             self._thread.start()
+            request = self.journal.value.get("close_request")
+            if request:
+                threading.Thread(
+                    target=self.close_episode,
+                    args=(request["episode_id"], request["segment_count"]),
+                    daemon=True,
+                    name="segment-close-recovery",
+                ).start()
 
     def submit(self, item: PreparedSegment) -> bool:
         if self.queue.full():
@@ -417,7 +448,9 @@ class SegmentDeliveryWorker:
                     ):
                         if path is not None:
                             path.unlink(missing_ok=True)
-                    self.journal.mark_deleted(item.source.sequence_index)
+                    self.journal.mark_deleted(
+                        self.journal._key(item.source.episode_id, item.source.sequence_index)
+                    )
                     self.error = None
                     break
                 except Exception as error:
@@ -428,18 +461,23 @@ class SegmentDeliveryWorker:
             with self._lock:
                 self._active = None
 
-    def wait_receipts(self, count: int, *, timeout: float = 120.0) -> list[dict[str, Any]]:
+    def wait_receipts(
+        self, episode_id: str, count: int, *, timeout: float = 120.0
+    ) -> list[dict[str, Any]]:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             with self._lock:
-                receipts = list(self.receipts)
+                receipts = [
+                    receipt for receipt in self.receipts if receipt.get("episode_id") == episode_id
+                ]
             if len(receipts) >= count:
                 return sorted(receipts, key=lambda item: item["sequence_index"])
             time.sleep(0.05)
         raise TimeoutError("segment receipts did not become durable before close timeout")
 
     def close_episode(self, episode_id: str, count: int) -> dict[str, Any]:
-        receipts = self.wait_receipts(count)
+        self.journal.store_close_request(episode_id, count)
+        receipts = self.wait_receipts(episode_id, count)
         close = self.client.close_episode(episode_id, receipts)
         self.journal.store_close(close)
         return close

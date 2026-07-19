@@ -5,6 +5,7 @@ import json
 import sys
 import tarfile
 import threading
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).parents[2]
@@ -26,6 +27,7 @@ recording = load("dagger_recording_segments_test", DEPLOY / "dagger_recording.py
 
 
 def source(tmp_path: Path, *, index: int = 0):
+    tmp_path.mkdir(parents=True, exist_ok=True)
     episode = "ad9118b7-5f8b-40fe-b16f-3ae400fcfddb"
     base = tmp_path / f"{episode}.{index:06d}"
     paths = [Path(f"{base}.mkv"), Path(f"{base}.parquet"), Path(f"{base}.events.parquet")]
@@ -58,6 +60,7 @@ class Client:
         bundle = prepared.bundle
         return {
             "receipt_id": f"receipt-{bundle['sequence_index']}",
+            "episode_id": bundle["episode_id"],
             "segment_id": bundle["segment_id"],
             "sequence_index": bundle["sequence_index"],
             "timeline_start_ns": bundle["timeline_start_ns"],
@@ -80,13 +83,14 @@ def test_receipt_is_fsynced_before_sources_and_staging_deleted(tmp_path, monkeyp
 
     def checked_unlink(path, *args, **kwargs):
         state = json.loads(journal.path.read_text())
-        observed.append(state["receipts"].get("0", {}).get("receipt_id"))
+        key = f"{prepared.source.episode_id}:0"
+        observed.append(state["receipts"].get(key, {}).get("receipt_id"))
         return real_unlink(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "unlink", checked_unlink)
     worker.start()
     assert worker.submit(prepared)
-    receipts = worker.wait_receipts(1, timeout=2)
+    receipts = worker.wait_receipts(prepared.source.episode_id, 1, timeout=2)
     worker.close_episode(prepared.source.episode_id, 1)
     worker.stop()
     assert receipts[0]["receipt_id"] == "receipt-0"
@@ -102,7 +106,7 @@ def test_restart_reconciles_durable_pending_idempotently(tmp_path):
     client = Client()
     worker = segments.SegmentDeliveryWorker(client, segments.SegmentJournal(journal.path))
     worker.start()
-    worker.wait_receipts(1, timeout=2)
+    worker.wait_receipts(prepared.source.episode_id, 1, timeout=2)
     worker.stop()
     assert client.calls == 1
     assert json.loads(journal.path.read_text())["pending"] == {}
@@ -112,7 +116,13 @@ def test_restart_reclaims_files_left_after_receipt_fsync(tmp_path):
     prepared = segments.prepare_segment(source(tmp_path), tmp_path / "stage", "dataset")
     journal = segments.SegmentJournal(tmp_path / "journal.json")
     journal.store_pending(prepared)
-    journal.store_receipt({"sequence_index": 0, "receipt_id": "durable"})
+    journal.store_receipt(
+        {
+            "episode_id": prepared.source.episode_id,
+            "sequence_index": 0,
+            "receipt_id": "durable",
+        }
+    )
     assert prepared.source.video.exists() and prepared.tar_path.exists()
     worker = segments.SegmentDeliveryWorker(Client(), segments.SegmentJournal(journal.path))
     worker.start()
@@ -120,6 +130,45 @@ def test_restart_reclaims_files_left_after_receipt_fsync(tmp_path):
     assert not prepared.source.video.exists()
     assert not prepared.tar_path.exists()
     assert json.loads(journal.path.read_text())["cleanup"] == {}
+
+
+def test_restart_recovers_close_intent_after_segment_receipt(tmp_path):
+    prepared = segments.prepare_segment(source(tmp_path), tmp_path / "stage", "dataset")
+    journal = segments.SegmentJournal(tmp_path / "journal.json")
+    journal.store_pending(prepared)
+    journal.store_close_request(prepared.source.episode_id, 1)
+    client = Client()
+    worker = segments.SegmentDeliveryWorker(client, segments.SegmentJournal(journal.path))
+    worker.start()
+    deadline = time.monotonic() + 2
+    state = json.loads(journal.path.read_text())
+    while state["close_request"] is not None and time.monotonic() < deadline:
+        time.sleep(0.01)
+        state = json.loads(journal.path.read_text())
+    worker.stop()
+    assert client.closed is not None
+    assert state["close_request"] is None
+    assert state["close"]["state"] == "closed"
+
+
+def test_journal_keys_segment_zero_by_episode_uuid(tmp_path):
+    journal = segments.SegmentJournal(tmp_path / "journal.json")
+    first = source(tmp_path / "first")
+    second = source(tmp_path / "second")
+    second = segments.SegmentSource(
+        "80895a91-9bf2-45d6-b352-276e329e510b",
+        second.sequence_index,
+        second.timeline_start_ns,
+        second.timeline_end_ns,
+        second.video,
+        second.actions,
+        second.events,
+        second.manifest,
+    )
+    journal.store_source(first)
+    journal.store_source(second)
+    assert len(journal.value["pending"]) == 2
+    assert all(key.endswith(":0") for key in journal.value["pending"])
 
 
 def test_bounded_backpressure_never_deletes_unreceipted(tmp_path):
