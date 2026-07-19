@@ -72,13 +72,26 @@ def test_real_writer_episode_spools_and_decodes(tmp_path: Path) -> None:
         tar.extractall(extract_dir, filter="data")
 
     manifest = json.loads((extract_dir / "20260710_010101.json").read_text())
+    assert manifest["schema_version"] == 2
+    assert manifest["schema_id"] == "nxml.episode.v2"
+    assert manifest["action_spec"] == "switch_packets.v1"
+    assert manifest["episode_id"]
     assert manifest["frame_count"] == 20
     assert manifest["action_dim"] == 26
+    assert set(manifest["files"]) == {
+        "20260710_010101.mp4",
+        "20260710_010101.parquet",
+        "20260710_010101.events.parquet",
+    }
 
     table = pq.read_table(extract_dir / "20260710_010101.parquet")
     assert table.num_rows == 20
     actions = table["action"].combine_chunks().flatten().to_numpy().reshape(-1, 26)
     assert abs(actions[10, 0] - 0.5) < 1e-5  # stick value survived the round trip
+    assert table["applied_action"].equals(table["action"])
+    assert table["valid"].to_pylist() == [True] * 20
+    events = pq.read_table(extract_dir / "20260710_010101.events.parquet")
+    assert events.num_rows == 0
 
     from torchcodec.decoders import VideoDecoder
 

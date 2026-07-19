@@ -27,8 +27,24 @@ from nxml_capture.source import CaptureSource, Frame
 class SyncedFrame:
     timestamp: float
     frame: np.ndarray  # (H, W, C) uint8, BGR
-    action: np.ndarray  # (26,) float32
+    action: np.ndarray  # (26,) float32; compatibility alias for applied_action
     action_age: float  # seconds between frame ts and action ts (>= 0)
+    frame_monotonic_ns: int | None = None
+    action_timestamp: float | None = None
+    action_monotonic_ns: int | None = None
+    human_action: np.ndarray | None = None
+    human_mask: np.ndarray | None = None
+    policy_action: np.ndarray | None = None
+    ownership: np.ndarray | None = None
+    controller_id: str | None = None
+    active_driver: str | None = None
+    policy_id: str | None = None
+    policy_revision: str | None = None
+    valid: bool = True
+
+    @property
+    def applied_action(self) -> np.ndarray:
+        return self.action
 
 
 class Synchronizer:
@@ -70,6 +86,9 @@ class Synchronizer:
             frame=frame.image,
             action=snapshot.action,
             action_age=age,
+            frame_monotonic_ns=frame.monotonic_ns,
+            action_timestamp=snapshot.timestamp,
+            action_monotonic_ns=snapshot.monotonic_ns,
         )
 
     def latest(self) -> SyncedFrame | None:

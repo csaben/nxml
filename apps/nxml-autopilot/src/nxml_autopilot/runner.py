@@ -33,6 +33,7 @@ from typing import Any
 
 import httpx
 import numpy as np
+from nx_packets import ACTION_DIM
 from nxml_capture import SyncedFrame
 from nxml_capture.backends.v4l2 import V4L2Source
 from nxml_mux import ActionSnapshot, ControllerMux, HumanPriority, HumanTakeover
@@ -41,7 +42,6 @@ from nxml_mux.input_devices.mappers.base import Mapper
 from nxml_mux.input_devices.readers import EvdevReader, WebGamepadReader
 from nxml_mux.input_devices.registry import get as get_mapper
 from nxml_mux.input_devices.registry import load_bundled_mappers
-from nx_packets import ACTION_DIM
 
 
 @dataclass
@@ -418,6 +418,12 @@ class AutopilotRunner:
         info = self._client.info()
         self._sequence_length = int(info["sequence_length"])
         self._latent_shape = tuple(info["latent_shape"])
+        self._policy_id = str(
+            info.get("policy_id") or info.get("architecture") or config.policy_uri
+        )
+        self._policy_revision = str(
+            info.get("revision") or info.get("policy_revision") or config.policy_uri
+        )
         print(
             f"[autopilot] policy {info['architecture']} seq_len={self._sequence_length} "
             f"latent={self._latent_shape} algo={info.get('algorithm')}"
@@ -497,7 +503,22 @@ class AutopilotRunner:
         # Recorder controller (toggle-able from web UI; auto-start in evdev mode).
         from nxml_autopilot.recording import RecordingController
 
-        self._recorder_ctl = RecordingController(fps=config.tick_hz)
+        self._recorder_ctl = RecordingController(
+            fps=config.tick_hz,
+            game=config.game,
+            config={
+                "mode": config.mode,
+                "tick_hz": config.tick_hz,
+                "camera_id": config.camera_id,
+                "capture_width": config.capture_width,
+                "capture_height": config.capture_height,
+            },
+            lineage={
+                "policy_id": self._policy_id,
+                "policy_revision": self._policy_revision,
+                "policy_uri": config.policy_uri,
+            },
+        )
         if config.input_source == "evdev" and config.record_dir is not None:
             config.record_dir.mkdir(parents=True, exist_ok=True)
             self._recorder_ctl.start(config.record_dir)
@@ -704,6 +725,12 @@ class AutopilotRunner:
         strategy = self._build_strategy(mode)
         self._mux.strategy = strategy
         self._mode = mode
+        self._recorder_ctl.append_event(
+            "driver_mode_changed",
+            timestamp=time.time(),
+            monotonic_ns=time.monotonic_ns(),
+            payload={"mode": mode},
+        )
 
     @property
     def mode(self) -> str:
@@ -711,6 +738,12 @@ class AutopilotRunner:
 
     def set_ai_enabled(self, enabled: bool) -> None:
         self._ai_source.enabled = enabled
+        self._recorder_ctl.append_event(
+            "policy_enabled_changed",
+            timestamp=time.time(),
+            monotonic_ns=time.monotonic_ns(),
+            payload={"enabled": bool(enabled)},
+        )
 
     @property
     def ai_enabled(self) -> bool:
@@ -779,12 +812,58 @@ class AutopilotRunner:
                     if self._recorder_ctl.is_active:
                         frame = self._source.latest()
                         if frame is not None:
+                            human_action = np.zeros(ACTION_DIM, dtype=np.float32)
+                            human_mask = np.zeros(ACTION_DIM, dtype=bool)
+                            if human_snap is not None:
+                                human_action[:] = human_snap.action
+                                human_mask[:] = (
+                                    human_snap.mask
+                                    if human_snap.mask is not None
+                                    else True
+                                )
+                            policy_action = (
+                                ai_snap.action.copy()
+                                if ai_snap is not None
+                                else np.zeros(ACTION_DIM, dtype=np.float32)
+                            )
+                            ownership = np.zeros(ACTION_DIM, dtype=np.uint8)
+                            human_active = bool(human_mask.any())
+                            if self._mode == "human-takeover" and human_active:
+                                ownership[:] = 1
+                                active_driver = "human"
+                            else:
+                                if ai_snap is not None:
+                                    ownership[:] = 2
+                                ownership[human_mask] = 1
+                                if human_active and ai_snap is not None:
+                                    active_driver = "human+policy"
+                                elif human_active:
+                                    active_driver = "human"
+                                elif ai_snap is not None:
+                                    active_driver = "policy"
+                                else:
+                                    active_driver = "neutral"
+                            action_ts = max(
+                                (s.timestamp for s in snapshots), default=t_start
+                            )
                             self._recorder_ctl.append(
                                 SyncedFrame(
                                     timestamp=t_start,
                                     frame=frame.image,
                                     action=action,
-                                    action_age=0.0,
+                                    action_age=max(0.0, t_start - action_ts),
+                                    frame_monotonic_ns=frame.monotonic_ns,
+                                    action_timestamp=action_ts,
+                                    action_monotonic_ns=time.monotonic_ns(),
+                                    human_action=human_action,
+                                    human_mask=human_mask,
+                                    policy_action=policy_action,
+                                    ownership=ownership,
+                                    controller_id=self._human.source_id,
+                                    active_driver=active_driver,
+                                    policy_id=self._policy_id,
+                                    policy_revision=self._policy_revision,
+                                    valid=True,
                                 )
                             )
 

@@ -13,6 +13,7 @@ nxml-autopilot's web mode writes one subdirectory per episode. Discovery just gl
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from dataclasses import dataclass
@@ -27,10 +28,15 @@ class Episode:
     manifest_path: Path
     video_path: Path
     parquet_path: Path
+    events_path: Path | None = None
 
     @property
-    def files(self) -> tuple[Path, Path, Path]:
-        return (self.video_path, self.parquet_path, self.manifest_path)
+    def files(self) -> tuple[Path, ...]:
+        files = [self.video_path, self.parquet_path]
+        if self.events_path is not None:
+            files.append(self.events_path)
+        files.append(self.manifest_path)
+        return tuple(files)
 
     @property
     def size_bytes(self) -> int:
@@ -77,15 +83,41 @@ def discover_episodes(
             if now - newest_mtime < settle_seconds:
                 continue
             try:
-                json.loads(manifest_path.read_text())
+                manifest = json.loads(manifest_path.read_text())
             except (json.JSONDecodeError, OSError):
                 continue  # mid-rewrite manifest; next scan gets it
+            events_path = manifest_path.with_name(stem + ".events.parquet")
+            if manifest.get("schema_version") == 2 and (
+                not events_path.is_file()
+                or not _checksums_match(manifest_path.parent, manifest)
+            ):
+                continue
             episodes.append(
                 Episode(
                     episode_id=_episode_id(root, manifest_path),
                     manifest_path=manifest_path,
                     video_path=video_path,
                     parquet_path=parquet_path,
+                    events_path=events_path if events_path.is_file() else None,
                 )
             )
     return sorted(episodes, key=lambda e: e.video_path.stat().st_mtime)
+
+
+def _checksums_match(root: Path, manifest: dict[str, object]) -> bool:
+    files = manifest.get("files")
+    if not isinstance(files, dict) or not files:
+        return False
+    for name, metadata in files.items():
+        if not isinstance(name, str) or not isinstance(metadata, dict):
+            return False
+        path = root / name
+        if not path.is_file() or path.stat().st_size != metadata.get("bytes"):
+            return False
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != metadata.get("sha256"):
+            return False
+    return True

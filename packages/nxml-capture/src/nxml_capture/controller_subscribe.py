@@ -29,6 +29,7 @@ class ControllerSnapshot:
     timestamp: float
     action: np.ndarray  # (26,) float32
     packet: dict[str, object]  # raw orchestrator packet (dict)
+    monotonic_ns: int | None = None
 
 
 class ControllerSubscription:
@@ -143,6 +144,7 @@ class ControllerSubscription:
             timestamp=time.time(),
             action=packet_to_action(packet),
             packet=raw,
+            monotonic_ns=time.monotonic_ns(),
         )
         with self._latest_lock:
             self._latest = snapshot

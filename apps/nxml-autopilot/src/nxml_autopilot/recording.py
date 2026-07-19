@@ -25,9 +25,20 @@ from nxml_capture import SyncedFrame, VideoParquetEpisodeWriter
 
 
 class RecordingController:
-    def __init__(self, *, fps: float, codec: str = "ffv1") -> None:
+    def __init__(
+        self,
+        *,
+        fps: float,
+        codec: str = "ffv1",
+        game: str | None = None,
+        config: dict[str, object] | None = None,
+        lineage: dict[str, object] | None = None,
+    ) -> None:
         self._fps = fps
         self._codec = codec
+        self._game = game
+        self._config = dict(config or {})
+        self._lineage = dict(lineage or {})
         self._lock = threading.Lock()
         self._writer: VideoParquetEpisodeWriter | None = None
         self._frames = 0
@@ -39,7 +50,14 @@ class RecordingController:
             if self._writer is not None:
                 raise RuntimeError("recording already active")
             target.mkdir(parents=True, exist_ok=True)
-            self._writer = VideoParquetEpisodeWriter(target, codec=self._codec, fps=self._fps)
+            self._writer = VideoParquetEpisodeWriter(
+                target,
+                codec=self._codec,
+                fps=self._fps,
+                game=self._game,
+                config=self._config,
+                lineage=self._lineage,
+            )
             self._frames = 0
             self._current_path = target
             return target
@@ -60,6 +78,25 @@ class RecordingController:
                 return
             self._writer.append(frame)
             self._frames += 1
+
+    def append_event(
+        self,
+        kind: str,
+        *,
+        timestamp: float,
+        monotonic_ns: int | None = None,
+        source: str = "autopilot",
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        with self._lock:
+            if self._writer is not None:
+                self._writer.append_event(
+                    kind,
+                    timestamp=timestamp,
+                    monotonic_ns=monotonic_ns,
+                    source=source,
+                    payload=payload,
+                )
 
     @property
     def is_active(self) -> bool:

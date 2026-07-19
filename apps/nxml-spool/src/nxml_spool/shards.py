@@ -36,6 +36,8 @@ def pack_shard(
         for ep in episodes:
             tar.add(ep.video_path, arcname=f"{ep.episode_id}{ep.video_path.suffix}")
             tar.add(ep.parquet_path, arcname=f"{ep.episode_id}.parquet")
+            if ep.events_path is not None:
+                tar.add(ep.events_path, arcname=f"{ep.episode_id}.events.parquet")
             tar.add(ep.manifest_path, arcname=f"{ep.episode_id}.json")
     tmp_path.replace(shard_path)
 

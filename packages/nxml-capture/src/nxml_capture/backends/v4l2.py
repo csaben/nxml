@@ -88,7 +88,11 @@ class V4L2Source:
                 if not ok:
                     time.sleep(0.05)
                     continue
-                frame = Frame(timestamp=time.time(), image=np.ascontiguousarray(image))
+                frame = Frame(
+                    timestamp=time.time(),
+                    image=np.ascontiguousarray(image),
+                    monotonic_ns=time.monotonic_ns(),
+                )
                 with self._latest_lock:
                     self._latest = frame
                 try:

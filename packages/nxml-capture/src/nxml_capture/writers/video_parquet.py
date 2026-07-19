@@ -25,7 +25,10 @@ rows are buffered (small) and flushed on ``close()``.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import platform
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from fractions import Fraction
@@ -40,7 +43,8 @@ from nx_packets import ACTION_DIM
 
 from nxml_capture.synchronizer import SyncedFrame
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+SCHEMA_ID = "nxml.episode.v2"
 FORMAT_TAG = "video_parquet"
 ACTION_SPEC_NAME = "switch_packets.v1"
 
@@ -94,7 +98,33 @@ _PARQUET_SCHEMA = pa.schema(
     [
         ("frame_idx", pa.int64()),
         ("timestamp", pa.float64()),
+        ("frame_monotonic_ns", pa.int64()),
+        ("action_timestamp", pa.float64()),
+        ("action_monotonic_ns", pa.int64()),
+        ("action_age", pa.float64()),
+        ("valid", pa.bool_()),
+        # Kept as an alias so schema-v1 readers continue to work.
         ("action", _action_array_type()),
+        ("applied_action", _action_array_type()),
+        ("human_action", _action_array_type()),
+        ("human_mask", pa.list_(pa.bool_(), ACTION_DIM)),
+        ("policy_action", _action_array_type()),
+        ("ownership", pa.list_(pa.uint8(), ACTION_DIM)),
+        ("controller_id", pa.string()),
+        ("active_driver", pa.string()),
+        ("policy_id", pa.string()),
+        ("policy_revision", pa.string()),
+    ]
+)
+
+_EVENTS_SCHEMA = pa.schema(
+    [
+        ("event_idx", pa.int64()),
+        ("timestamp", pa.float64()),
+        ("monotonic_ns", pa.int64()),
+        ("kind", pa.string()),
+        ("source", pa.string()),
+        ("payload_json", pa.string()),
     ]
 )
 
@@ -109,6 +139,10 @@ class VideoParquetEpisodeWriter:
         episode_name: str | None = None,
         codec: Codec = "ffv1",
         fps: float = 30.0,
+        game: str | None = None,
+        config: dict[str, object] | None = None,
+        build: dict[str, object] | None = None,
+        lineage: dict[str, object] | None = None,
     ) -> None:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -116,16 +150,24 @@ class VideoParquetEpisodeWriter:
         self._profile = _PROFILES[codec]
         self.codec = codec
         self.fps = fps
+        self.episode_id = str(uuid.uuid4())
+        self.game = game
+        self.config = dict(config or {})
+        self.build = dict(build or {})
+        self.lineage = dict(lineage or {})
 
         self._video_path = self.output_dir / f"{self.episode_name}{self._profile.container_ext}"
         self._parquet_path = self.output_dir / f"{self.episode_name}.parquet"
         self._manifest_path = self.output_dir / f"{self.episode_name}.manifest.json"
+        self._events_path = self.output_dir / f"{self.episode_name}.events.parquet"
 
         self._container: av.container.OutputContainer | None = None
         self._stream: av.video.stream.VideoStream | None = None
         self._frame_idxs: list[int] = []
         self._timestamps: list[float] = []
         self._actions: list[np.ndarray] = []
+        self._records: list[SyncedFrame] = []
+        self._events: list[dict[str, object]] = []
         self._first_timestamp: float | None = None
         self._closed = False
 
@@ -174,6 +216,29 @@ class VideoParquetEpisodeWriter:
         self._frame_idxs.append(idx)
         self._timestamps.append(synced.timestamp)
         self._actions.append(synced.action.astype(np.float32, copy=False))
+        self._records.append(synced)
+
+    def append_event(
+        self,
+        kind: str,
+        *,
+        timestamp: float,
+        monotonic_ns: int | None = None,
+        source: str = "edge",
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        if self._closed:
+            raise RuntimeError("writer already closed")
+        self._events.append(
+            {
+                "event_idx": len(self._events),
+                "timestamp": timestamp,
+                "monotonic_ns": monotonic_ns,
+                "kind": kind,
+                "source": source,
+                "payload_json": json.dumps(payload or {}, sort_keys=True),
+            }
+        )
 
     def __len__(self) -> int:
         return len(self._frame_idxs)
@@ -194,20 +259,40 @@ class VideoParquetEpisodeWriter:
         self._stream = None
 
         action_arr = np.stack(self._actions, axis=0)
-        action_storage = pa.array(action_arr.reshape(-1), type=pa.float32())
-        action_col = pa.FixedSizeListArray.from_arrays(action_storage, ACTION_DIM)
-        table = pa.Table.from_arrays(
-            [
-                pa.array(self._frame_idxs, type=pa.int64()),
-                pa.array(self._timestamps, type=pa.float64()),
-                action_col,
-            ],
-            schema=_PARQUET_SCHEMA,
-        )
+        zero_action = np.zeros(ACTION_DIM, dtype=np.float32)
+        zero_mask = np.zeros(ACTION_DIM, dtype=bool)
+        zero_owner = np.zeros(ACTION_DIM, dtype=np.uint8)
+        rows = []
+        for idx, synced in enumerate(self._records):
+            rows.append(
+                {
+                    "frame_idx": idx,
+                    "timestamp": synced.timestamp,
+                    "frame_monotonic_ns": synced.frame_monotonic_ns,
+                    "action_timestamp": synced.action_timestamp,
+                    "action_monotonic_ns": synced.action_monotonic_ns,
+                    "action_age": synced.action_age,
+                    "valid": synced.valid,
+                    "action": synced.action.tolist(),
+                    "applied_action": synced.applied_action.tolist(),
+                    "human_action": (synced.human_action if synced.human_action is not None else zero_action).tolist(),
+                    "human_mask": (synced.human_mask if synced.human_mask is not None else zero_mask).tolist(),
+                    "policy_action": (synced.policy_action if synced.policy_action is not None else zero_action).tolist(),
+                    "ownership": (synced.ownership if synced.ownership is not None else zero_owner).tolist(),
+                    "controller_id": synced.controller_id,
+                    "active_driver": synced.active_driver,
+                    "policy_id": synced.policy_id,
+                    "policy_revision": synced.policy_revision,
+                }
+            )
+        table = pa.Table.from_pylist(rows, schema=_PARQUET_SCHEMA)
         pq.write_table(table, self._parquet_path, compression="zstd")
 
+        events = pa.Table.from_pylist(self._events, schema=_EVENTS_SCHEMA)
+        pq.write_table(events, self._events_path, compression="zstd")
+
         self._manifest_path.write_text(
-            json.dumps(self._manifest(action_arr.shape[0]), indent=2)
+            json.dumps(self._manifest(action_arr.shape[0]), indent=2, sort_keys=True)
         )
         return self._video_path
 
@@ -220,12 +305,29 @@ class VideoParquetEpisodeWriter:
         # frame_shape is set lazily once we've seen at least one frame.
         return {
             "schema_version": SCHEMA_VERSION,
+            "schema_id": SCHEMA_ID,
+            "episode_id": self.episode_id,
             "format": FORMAT_TAG,
             "action_spec": ACTION_SPEC_NAME,
             "action_dim": ACTION_DIM,
             "frame_count": int(frame_count),
             "fps_estimate": float(fps_est),
             "fps_nominal": float(self.fps),
+            "game": self.game,
+            "config": self.config,
+            "build": {
+                "hostname": platform.node(),
+                **self.build,
+            },
+            "clock_mapping": {
+                "wall_clock": "unix_seconds",
+                "monotonic_clock": "monotonic_ns",
+            },
+            "capture": {
+                "timestamps": "frame arrival",
+                "frame_color": "bgr24",
+            },
+            "lineage": self.lineage,
             "video": {
                 "codec": self.codec,
                 "container": self._profile.container_ext.lstrip("."),
@@ -233,6 +335,11 @@ class VideoParquetEpisodeWriter:
                 "lossless": self._profile.lossless,
                 "gop_size": self._profile.gop_size,
                 "options": dict(self._profile.private_options),
+            },
+            "files": {
+                self._video_path.name: _file_metadata(self._video_path),
+                self._parquet_path.name: _file_metadata(self._parquet_path),
+                self._events_path.name: _file_metadata(self._events_path),
             },
             "created_at_utc": datetime.now(tz=UTC).isoformat(),
         }
@@ -246,3 +353,11 @@ class VideoParquetEpisodeWriter:
 
 def _default_episode_name() -> str:
     return datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
+
+
+def _file_metadata(path: Path) -> dict[str, object]:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return {"bytes": path.stat().st_size, "sha256": digest.hexdigest()}

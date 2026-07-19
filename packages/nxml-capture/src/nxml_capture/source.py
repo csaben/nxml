@@ -19,6 +19,7 @@ import numpy as np
 class Frame:
     timestamp: float
     image: np.ndarray  # (H, W, C) uint8, BGR
+    monotonic_ns: int | None = None
 
 
 @runtime_checkable
