@@ -18,6 +18,7 @@ from nxml_edge.adapters import (
     SystemctlServiceAdapter,
     UdevDeviceAdapter,
 )
+from nxml_edge.auth import TailscaleAuthenticator, TailscaleWhoIsResolver
 from nxml_edge.cluster import ClusterClient, ClusterDashboard, HttpTransport
 from nxml_edge.config import ConfigStore
 from nxml_edge.supervisor import EdgeSupervisor
@@ -75,8 +76,16 @@ def main(config_path: Path, token_file: Path, fixture_adapters: bool) -> None:
         ClusterClient(HttpTransport(config.cluster_url, cluster_token)),
         stale_after=config.cluster_stale_after_seconds,
     )
+    auth = None
+    if config.auth_mode == "tailscale":
+        auth = TailscaleAuthenticator(
+            tailnet_host=config.tailnet_host,
+            allowed_login=config.tailscale_allowed_login or "",
+            allowed_node_ids=config.tailscale_allowed_node_ids,
+            resolver=TailscaleWhoIsResolver(),
+        )
     uvicorn.run(
-        create_app(supervisor, token=token, cluster=cluster),
+        create_app(supervisor, token=token if auth is None else None, auth=auth, cluster=cluster),
         host=config.bind_host,
         port=config.edge_port,
     )

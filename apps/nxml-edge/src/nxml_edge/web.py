@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+from collections.abc import Callable
 from importlib.resources import files
 
 from fastapi import FastAPI, HTTPException, Request
@@ -11,11 +12,20 @@ from nxml_edge.supervisor import EdgeSupervisor
 
 
 def create_app(
-    supervisor: EdgeSupervisor, *, token: str, cluster: ClusterDashboard | None = None
+    supervisor: EdgeSupervisor,
+    *,
+    token: str | None = None,
+    auth: Callable[[Request], None] | None = None,
+    cluster: ClusterDashboard | None = None,
 ) -> FastAPI:
     app = FastAPI(title="nxml-edge", version="0.1.0")
 
     def require_token(request: Request) -> None:
+        if auth is not None:
+            auth(request)
+            return
+        if token is None:
+            raise HTTPException(status_code=503, detail="edge authentication is not configured")
         supplied = request.headers.get("x-nxml-edge-token")
         authorization = request.headers.get("authorization", "")
         scheme, _, credential = authorization.partition(" ")
@@ -28,7 +38,8 @@ def create_app(
             raise HTTPException(status_code=401, detail="bad or missing edge token")
 
     @app.get("/", response_class=HTMLResponse)
-    def index() -> HTMLResponse:
+    def index(request: Request) -> HTMLResponse:
+        require_token(request)
         html = files("nxml_edge").joinpath("static/index.html").read_text(encoding="utf-8")
         return HTMLResponse(html)
 

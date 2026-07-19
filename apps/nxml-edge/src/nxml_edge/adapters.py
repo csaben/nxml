@@ -223,10 +223,30 @@ class SystemctlServiceAdapter:
         if action not in self.ACTIONS or unit not in self.ALLOWED:
             raise PermissionError(f"systemd operation is not allowlisted: {action} {unit}")
         scope, literal_unit = self.ALLOWED[unit]
-        return ["systemctl", *(["--user"] if scope == "user" else []), action, literal_unit]
+        return [
+            "systemctl",
+            "--no-ask-password",
+            *(["--user"] if scope == "user" else []),
+            action,
+            literal_unit,
+        ]
 
     def _run(self, action: str, unit: str) -> None:
-        subprocess.run(self._command(action, unit), check=True, timeout=10)
+        result = subprocess.run(
+            self._command(action, unit),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return
+        detail = (result.stderr or result.stdout).strip()
+        if "authentication" in detail.lower() or "access denied" in detail.lower():
+            raise PermissionError(
+                f"PolicyKit did not authorize {action} {unit} noninteractively: {detail}"
+            )
+        raise RuntimeError(f"systemd could not {action} {unit}: {detail or result.returncode}")
 
     def status(self, unit: str) -> str:
         command = self._command("start", unit)

@@ -44,6 +44,7 @@ class EdgeSupervisor:
     def status(self) -> EdgeStatus:
         with self._lock:
             bt = self.bluetooth.probe(self.config.switch_mac)
+            bt_service = self.services.status(self.config.bt_unit)
             capture = self.devices.probe(self.config.capture_identity)
             policy = self.policy.probe(self.config.policy_uri)
             runtime = self.runtime.probe()
@@ -62,14 +63,24 @@ class EdgeSupervisor:
                     ready=bt.switch_connected,
                     summary="Nintendo Switch connected"
                     if bt.switch_connected
-                    else "Switch awaiting connection",
-                    detail={"switch_mac": bt.switch_mac or self.config.switch_mac},
+                    else (
+                        "Connecting to configured Nintendo Switch"
+                        if bt_service == "active"
+                        else f"Bluetooth controller service {bt_service}"
+                    ),
+                    detail={
+                        "switch_mac": bt.switch_mac or self.config.switch_mac,
+                        "service_state": bt_service,
+                        "error": bt.error,
+                    },
                     operator_steps=(
                         [
                             "Wake the Switch with a real controller",
                             "Open Controllers → Change Grip / Order",
-                            "Use Retry after the root nxml-bt service reports Switch connected",
+                            "Keep this page open while the preset-MAC controller connects",
                         ]
+                        if not bt.switch_connected and bt_service == "active"
+                        else ["Use Retry to start the Bluetooth controller service"]
                         if not bt.switch_connected
                         else []
                     ),
@@ -138,8 +149,7 @@ class EdgeSupervisor:
         with self._lock:
             self._starting = True
             self.store.ensure_web_token()
-            self.services.start(self.config.bt_unit)
-            self._log(f"requested start for {self.config.bt_unit}")
+            self._ensure_bt_started()
             status = self.status()
             prerequisite_order = (
                 Dependency.BLUETOOTH,
@@ -156,12 +166,19 @@ class EdgeSupervisor:
         with self._lock:
             current = self.status()
             if current.blocked_on in (Dependency.BLUETOOTH, Dependency.SWITCH):
-                self.services.restart(self.config.bt_unit)
-                self._log(f"requested restart for {self.config.bt_unit}")
+                self._ensure_bt_started()
             elif current.blocked_on is Dependency.AUTOPILOT:
                 self.services.restart(self.config.autopilot_unit)
                 self._log(f"requested restart for {self.config.autopilot_unit}")
             return self.status()
+
+    def _ensure_bt_started(self) -> None:
+        state = self.services.status(self.config.bt_unit)
+        if state == "active":
+            self._log(f"{self.config.bt_unit} already active; connection attempt continues")
+            return
+        self.services.start(self.config.bt_unit)
+        self._log(f"requested noninteractive start for {self.config.bt_unit}")
 
     def stop_session(self) -> EdgeStatus:
         with self._lock:

@@ -18,20 +18,10 @@
     pre { white-space:pre-wrap; max-height:16rem; overflow:auto; color:#adb5bd; }
     .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:.7rem }
     .metric { font-size:1.6rem; font-weight:800 } input { background:#11151b;color:white;border:1px solid #495057;padding:.5rem }
-    #auth-panel { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap }
-    #auth-panel input { min-width:18rem }
-    .hidden { display:none !important }
   </style>
 </head>
 <body>
-  <header><div><h1>NXML Edge</h1><div id="state">Authentication required</div></div><div id="driver">unknown</div></header>
-  <form id="auth-panel">
-    <label for="edge-token">Edge token</label>
-    <input id="edge-token" name="edge-token" type="password" autocomplete="current-password" required>
-    <button type="submit">Sign in</button>
-    <button id="logout" type="button" class="hidden">Log out</button>
-    <span id="auth-message">Enter the token from this host's protected token file.</span>
-  </form>
+  <header><div><h1>NXML Edge</h1><div id="state">Checking Tailnet identity…</div></div><div id="driver">unknown</div></header>
   <p><button onclick="act('start')">Start session</button><button onclick="act('retry')">Retry</button><button onclick="act('stop')">Stop</button><button class="danger" onclick="act('eject')">EMERGENCY EJECT</button><button onclick="act('rearm')">Re-arm</button></p>
   <main id="checks"></main><h2>Recent supervisor actions</h2><pre id="logs"></pre>
   <section><h2>Cluster <small id="cluster-state">loading</small></h2><p>Cluster failures never affect session or emergency controls.</p>
@@ -40,18 +30,11 @@
     <div class="card"><h3>Controls</h3><input id="dataset-id" placeholder="dataset id"><button onclick="clusterAct('snapshot')">Human snapshot</button><br><input id="snapshot-id" placeholder="snapshot sha256:…"><button onclick="clusterAct('train')">Submit BC</button><br><input id="revision-id" placeholder="validated revision"><input id="generation" type="number" placeholder="expected generation"><button onclick="clusterAct('promote')">Promote</button><button class="danger" onclick="clusterAct('rollback')">Rollback</button><pre id="cluster-action"></pre></div>
   </section><section class="card"><h2>Search — reserved</h2><p>Future cluster clip references, filters, and labels. No embeddings or indexing run on this edge host.</p></section>
   <script>
-    const tokenInput=document.querySelector('#edge-token'),authMessage=document.querySelector('#auth-message'),logout=document.querySelector('#logout');
-    let token=sessionStorage.getItem('nxmlEdgeToken')||'';
-    const options = method => ({method, headers:token?{'Authorization':`Bearer ${token}`}:{}});
-    function showAuth(message='Authentication required') { authMessage.textContent=message; tokenInput.classList.remove('hidden'); logout.classList.add('hidden'); }
-    function showAuthenticated() { authMessage.textContent='Authenticated for this tab'; tokenInput.classList.add('hidden'); logout.classList.remove('hidden'); }
-    document.querySelector('#auth-panel').addEventListener('submit',async event=>{event.preventDefault();token=tokenInput.value;tokenInput.value='';sessionStorage.setItem('nxmlEdgeToken',token);await refresh();});
-    logout.addEventListener('click',()=>{token='';sessionStorage.removeItem('nxmlEdgeToken');showAuth('Signed out');document.querySelector('#state').textContent='Authentication required';});
+    const options = method => ({method});
     async function refresh() {
       const response = await fetch('/api/status', options('GET'));
-      if (response.status===401) { token='';sessionStorage.removeItem('nxmlEdgeToken');showAuth('Token rejected — try again');document.querySelector('#state').textContent='Authentication required';return; }
+      if (response.status===401||response.status===403) { document.querySelector('#state').textContent='Tailnet identity not authorized';return; }
       if (!response.ok) { document.querySelector('#state').textContent=`Status unavailable — HTTP ${response.status}`;return; }
-      showAuthenticated();
       const s = await response.json();
       document.querySelector('#state').textContent = `${s.state}${s.blocked_on ? ' — blocked on '+s.blocked_on : ''}`;
       const d = document.querySelector('#driver'); d.textContent=s.driver.toUpperCase(); d.className=s.driver;
@@ -59,9 +42,9 @@
       document.querySelector('#logs').textContent=(s.logs||[]).join('\n');
       refreshCluster();
     }
-    async function act(name) { if(!token){showAuth();tokenInput.focus();return} const response=await fetch(`/api/session/${name}`, options('POST'));if(response.status===401){token='';sessionStorage.removeItem('nxmlEdgeToken');showAuth('Token rejected — try again')}await refresh(); }
+    async function act(name) { const response=await fetch(`/api/session/${name}`, options('POST'));if(!response.ok)document.querySelector('#state').textContent=await response.text();await refresh(); }
     async function refreshCluster() { try { const r=await fetch('/api/cluster/status',options('GET')),c=await r.json(); document.querySelector('#cluster-state').textContent=c.connected?'connected':`unavailable — ${c.error||'unknown'}`; for(const k of ['dataset','shard','episode']) document.querySelector(`#${k}-count`).textContent=c[`${k}_count`]??'—'; for(const k of ['deployment','snapshots','jobs','revisions','receipts']) document.querySelector(`#${k}`).textContent=JSON.stringify(c[k]??[],null,2); } catch(e) { document.querySelector('#cluster-state').textContent=`unavailable — ${e}`; } }
-    async function clusterAct(name) { if(!token){showAuth();tokenInput.focus();return} const generation=Number(document.querySelector('#generation').value),key=crypto.randomUUID(); let path,body={}; if(name==='snapshot')path=`/api/cluster/datasets/${encodeURIComponent(document.querySelector('#dataset-id').value)}/human-snapshot`; if(name==='train'){path='/api/cluster/training/bc';body={snapshot_id:document.querySelector('#snapshot-id').value,config:{trainer:'bc'}}} if(name==='promote'){path=`/api/cluster/models/${encodeURIComponent(document.querySelector('#revision-id').value)}/promote`;body={expected_generation:generation}} if(name==='rollback'){path='/api/cluster/deployment/rollback';body={expected_generation:generation}} try{const r=await fetch(path,{method:'POST',headers:{'Authorization':`Bearer ${token}`,'Idempotency-Key':key,'Content-Type':'application/json'},body:JSON.stringify(body)});document.querySelector('#cluster-action').textContent=await r.text()}catch(e){document.querySelector('#cluster-action').textContent=String(e)} refreshCluster() }
+    async function clusterAct(name) { const generation=Number(document.querySelector('#generation').value),key=crypto.randomUUID(); let path,body={}; if(name==='snapshot')path=`/api/cluster/datasets/${encodeURIComponent(document.querySelector('#dataset-id').value)}/human-snapshot`; if(name==='train'){path='/api/cluster/training/bc';body={snapshot_id:document.querySelector('#snapshot-id').value,config:{trainer:'bc'}}} if(name==='promote'){path=`/api/cluster/models/${encodeURIComponent(document.querySelector('#revision-id').value)}/promote`;body={expected_generation:generation}} if(name==='rollback'){path='/api/cluster/deployment/rollback';body={expected_generation:generation}} try{const r=await fetch(path,{method:'POST',headers:{'Idempotency-Key':key,'Content-Type':'application/json'},body:JSON.stringify(body)});document.querySelector('#cluster-action').textContent=await r.text()}catch(e){document.querySelector('#cluster-action').textContent=String(e)} refreshCluster() }
     refresh(); setInterval(refresh, 2000);
   </script>
 </body>

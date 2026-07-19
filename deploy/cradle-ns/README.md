@@ -5,8 +5,8 @@ It does not install services, change system configuration, pair Bluetooth, or
 contain credentials. Copy the examples into place only after reviewing the
 physical-interaction and privileged steps below.
 
-`apps/nxml-edge` is the always-on supervisor. Its UI listens on port 8090,
-stores its token separately with mode `0600`, discovers capture through the
+`apps/nxml-edge` is the always-on supervisor. In production its backend listens
+only on loopback port 8090 behind Tailscale Serve, discovers capture through the
 configured `/dev/v4l/by-id` identity, and consumes autopilot's authenticated
 U4 health/eject/re-arm contract. It never accepts a command name or unit name
 from the browser: only the predefined `nxml-bt.service` and
@@ -27,8 +27,24 @@ Hagibis /dev/v4l/by-id/... -> nxml-autopilot (0.0.0.0:8080)
                                   local deletion
 ```
 
-The orchestrator stays loopback-only. Only the token-protected autopilot UI is
-bound to the Tailnet. `switch_packets.v1` remains the action-space identifier.
+The orchestrator and edge backend stay loopback-only. Tailscale Serve is the
+sole edge UI entry point. `switch_packets.v1` remains the action-space identifier.
+
+## Tailscale identity access
+
+Production identity mode requires an explicit login and stable device ID,
+discovered with `tailscale whois --json <client-tailnet-ip>`. It never accepts
+a browser-supplied identity header across a network listener.
+
+```bash
+tailscale serve --bg --yes http://127.0.0.1:8090
+tailscale serve status
+```
+
+Open `https://<edge-node>.<tailnet>.ts.net/`. Serve removes spoofed identity
+headers and supplies authenticated identity to the loopback backend. Funnel
+must remain disabled. State-changing requests additionally require an exact
+same-origin HTTPS `Origin` header.
 
 ## One-time unprivileged setup
 

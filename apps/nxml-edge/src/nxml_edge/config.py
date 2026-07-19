@@ -5,7 +5,7 @@ import secrets
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class EdgeConfig(BaseModel):
@@ -20,6 +20,9 @@ class EdgeConfig(BaseModel):
     tailnet_host: str = "cradle-ns"
     bind_host: str = "0.0.0.0"
     edge_port: int = Field(default=8090, ge=1, le=65535)
+    auth_mode: Literal["token", "tailscale"] = "token"
+    tailscale_allowed_login: str | None = None
+    tailscale_allowed_node_ids: list[str] = Field(default_factory=list)
     autopilot_port: int = Field(default=8080, ge=1, le=65535)
     orchestrator_port: int = Field(default=7777, ge=1, le=65535)
     capture_path: Path = Path("~/captures/pokemon-za").expanduser()
@@ -35,8 +38,19 @@ class EdgeConfig(BaseModel):
             raise ValueError("capture_identity must use a stable /dev/v4l/by-id path")
         return value
 
+    @model_validator(mode="after")
+    def tailscale_auth_is_loopback_only(self) -> EdgeConfig:
+        if self.auth_mode == "tailscale":
+            if self.bind_host not in {"127.0.0.1", "::1"}:
+                raise ValueError("Tailscale identity mode requires a loopback bind_host")
+            if not self.tailscale_allowed_login or not self.tailscale_allowed_node_ids:
+                raise ValueError("Tailscale identity mode requires an explicit user/device allowlist")
+        return self
+
     @property
     def tailnet_url(self) -> str:
+        if self.auth_mode == "tailscale":
+            return f"https://{self.tailnet_host}"
         return f"http://{self.tailnet_host}:{self.edge_port}"
 
     @property

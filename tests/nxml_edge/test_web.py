@@ -65,13 +65,15 @@ def test_missing_or_bad_bearer_is_rejected(edge, token) -> None:
 def test_minimal_ui_renders(edge) -> None:
     supervisor, _, _ = edge
     app = create_app(supervisor, token="edge-secret")
-    response = _endpoint(app, "/")()
+    with pytest.raises(HTTPException) as error:
+        _endpoint(app, "/")(_request())
+    assert error.value.status_code == 401
+    response = _endpoint(app, "/")(_request("edge-secret"))
     assert response.status_code == 200
     html = response.body.decode()
     assert "EMERGENCY EJECT" in html
-    assert 'type="password"' in html
-    assert "sessionStorage" in html
+    assert 'type="password"' not in html
+    assert "sessionStorage" not in html
     assert "localStorage" not in html
     assert "URLSearchParams" not in html
-    assert "Authorization" in html
-    assert "Log out" in html
+    assert "Checking Tailnet identity" in html

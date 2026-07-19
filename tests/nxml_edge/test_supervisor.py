@@ -22,6 +22,33 @@ def test_start_stops_at_switch_and_guides_operator(edge) -> None:
     assert services.calls == [("start", "nxml-bt.service")]
     switch_check = next(check for check in status.checks if check.dependency is Dependency.SWITCH)
     assert "Change Grip / Order" in " ".join(switch_check.operator_steps)
+    assert switch_check.detail["switch_mac"] == "00:11:22:33:44:55"
+
+
+def test_retry_is_idempotent_while_preset_mac_service_is_active(edge) -> None:
+    supervisor, services, _ = edge
+    supervisor.bluetooth.result = BluetoothProbe(True, False, "58:2F:40:23:3C:CA")
+    services.states["nxml-bt.service"] = "active"
+
+    first = supervisor.retry()
+    second = supervisor.retry()
+
+    assert services.calls == []
+    assert first.blocked_on is Dependency.SWITCH
+    assert second.blocked_on is Dependency.SWITCH
+    switch_check = next(c for c in second.checks if c.dependency is Dependency.SWITCH)
+    assert switch_check.summary == "Connecting to configured Nintendo Switch"
+    assert switch_check.detail["switch_mac"] == "58:2F:40:23:3C:CA"
+
+
+def test_retry_starts_inactive_bluetooth_once_then_becomes_idempotent(edge) -> None:
+    supervisor, services, _ = edge
+    supervisor.bluetooth.result = BluetoothProbe(True, False, "58:2F:40:23:3C:CA")
+
+    supervisor.retry()
+    supervisor.retry()
+
+    assert services.calls == [("start", "nxml-bt.service")]
 
 
 def test_dependency_state_machine_reports_first_failed_stage(edge) -> None:
