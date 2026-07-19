@@ -33,6 +33,7 @@ class Proposal:
     action: np.ndarray
     monotonic_ns: int
     revision: str | None = None
+    observation_monotonic_ns: int | None = None
 
 
 @dataclass(frozen=True)

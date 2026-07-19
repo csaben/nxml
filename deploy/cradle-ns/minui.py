@@ -32,6 +32,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from nxml_capture.backends.ffmpeg_v4l2 import v4l2_mjpeg_stream_command
 
 sys.path.insert(0, str(Path(__file__).parent))
+from dagger_inference import InferenceStatus
 from dagger_recording import HumanRecordingSession
 from dagger_status import OperationsReader
 from nxml_capture.backends.mjpeg_fanout import MjpegFanoutSource
@@ -49,6 +50,7 @@ def validate_tailnet_bind(host: str) -> str:
     if address.version != 4 or address not in ipaddress.ip_network("100.64.0.0/10"):
         raise ValueError("bind host must be a Tailscale IPv4 address in 100.64.0.0/10")
     return host
+
 
 PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -75,7 +77,7 @@ PAGE = """<!doctype html>
  <div class="card"><div class="label">Session</div><div class="value" id="session">human · idle</div><div class="value"><select id="mode"><option value="human">Human</option><option disabled>Pure AI — policy runtime required</option><option disabled>Hybrid — policy runtime required</option></select> <button id="record">Start episode</button></div><div class="value label">Mute switch_packets.v1/mute.v1 · 0/26 (available when AI runtime is armed)</div></div>
  <div class="card"><div class="label">Local spool</div><div class="value" id="spool">loading…</div></div>
  <div class="card"><div class="label">Cluster</div><div class="value" id="cluster">loading…</div></div>
- <div class="card"><div class="label">Models / training</div><div class="value" id="model">loading…</div><select id="model-select"><option>No compatible revisions</option></select><div class="value" id="jobs"></div></div>
+ <div class="card"><div class="label">Models / training</div><div class="value" id="model">loading…</div><div class="value" id="inference">inference: unloaded · unarmed</div><select id="model-select"><option>No compatible revisions</option></select><div class="value" id="jobs"></div></div>
 </section>
 <script>
   const HZ=60, DEADZONE=0.15, DIM=26;
@@ -112,6 +114,7 @@ PAGE = """<!doctype html>
       const p=s.spool; $('spool').textContent=p?`${p.pending_episodes||0} pending · ${p.episodes_shipped||0} shipped · ${((p.local_buffered_bytes||0)/1e9).toFixed(2)} GB buffered · ${p.disk_free_gb||'?'} GB free · ${p.receipt_state||'unknown'}${p.blocked_reason?' · blocked: '+p.blocked_reason:''}`:`unavailable: ${s.errors.spool||'unknown'}`;
       const c=s.cluster; $('cluster').textContent=c?`${(c.datasets.datasets||[]).length} datasets · ${(c.snapshots.snapshots||[]).length} snapshots`:`unavailable: ${s.errors.cluster||'unknown'}`;
       const d=c&&c.deployment; $('model').textContent=d&&d.active_revision?`active ${d.active_revision.slice(0,8)} · gen ${d.generation}`:'none active';
+      const i=s.inference||{}; $('inference').textContent=`inference: ${i.health||'unloaded'} · ${i.armed?'armed':'unarmed'}${i.revision?' · '+i.revision.slice(0,8):''}${i.inference_latency_ms!=null?' · '+i.inference_latency_ms.toFixed(1)+'ms':''}${i.proposal_age_ms!=null?' · proposal '+i.proposal_age_ms.toFixed(0)+'ms old':''}${i.error?' · '+i.error:''}`;
       const revisions=c&&c.revisions&&c.revisions.revisions||[]; $('model-select').innerHTML=revisions.length?revisions.map(r=>`<option disabled>${r.model_id} · ${r.revision_id.slice(0,8)} · ${r.state}</option>`).join(''):'<option>No compatible revisions</option>';
       const jobs=c&&c.jobs&&c.jobs.jobs||[]; $('jobs').textContent=jobs.length?jobs.map(j=>`${j.state} ${j.job_id.slice(0,8)}`).join(' · '):'no training jobs';
     } catch(e) { $('cluster').textContent='operations status unavailable'; }
@@ -152,6 +155,7 @@ def create_app(
     operations: OperationsReader | None = None,
     capture_source: MjpegFanoutSource | None = None,
     recorder: HumanRecordingSession | None = None,
+    inference=None,
 ) -> FastAPI:
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -159,11 +163,15 @@ def create_app(
             operations.start()
         if capture_source is not None:
             capture_source.start()
+        if inference is not None:
+            inference.start()
         try:
             yield
         finally:
             if operations is not None:
                 operations.stop()
+            if inference is not None:
+                inference.stop()
             if capture_source is not None:
                 capture_source.stop()
 
@@ -178,9 +186,28 @@ def create_app(
     @app.get("/api/ops/status")
     def ops_status() -> dict:
         if operations is None:
-            return {"schema_version": "nxml.dagger-operations-status.v1", "observed_at": time.time(), "session": {"schema_version": "nxml.dagger-session-status.v1", "mode": "human", "recording_state": "idle", "recording_available": False, "recording_blocked_reason": "Operations polling is not configured"}, "spool": None, "cluster": None, "errors": {"operations": "not configured"}}
+            return {
+                "schema_version": "nxml.dagger-operations-status.v1",
+                "observed_at": time.time(),
+                "session": {
+                    "schema_version": "nxml.dagger-session-status.v1",
+                    "mode": "human",
+                    "recording_state": "idle",
+                    "recording_available": False,
+                    "recording_blocked_reason": "Operations polling is not configured",
+                },
+                "spool": None,
+                "cluster": None,
+                "inference": (
+                    inference.status() if inference is not None else InferenceStatus().wire()
+                ),
+                "errors": {"operations": "not configured"},
+            }
         wire = operations.snapshot().wire()
         wire["recording"] = recorder.status() if recorder is not None else {"state": "unavailable"}
+        wire["inference"] = (
+            inference.status() if inference is not None else InferenceStatus().wire()
+        )
         return wire
 
     @app.post("/api/recording/start")
@@ -233,6 +260,7 @@ def create_app(
     @app.get("/stream.mjpeg")
     def stream() -> StreamingResponse:
         if capture_source is not None:
+
             def shared_frames():
                 sequence = -1
                 while True:
@@ -240,8 +268,19 @@ def create_app(
                     if item is None:
                         continue
                     sequence = item.sequence
-                    yield b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(item.jpeg)).encode() + b"\r\n\r\n" + item.jpeg + b"\r\n"
-            return StreamingResponse(shared_frames(), media_type="multipart/x-mixed-replace; boundary=frame", headers={"Cache-Control": "no-store, private"})
+                    yield (
+                        b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                        + str(len(item.jpeg)).encode()
+                        + b"\r\n\r\n"
+                        + item.jpeg
+                        + b"\r\n"
+                    )
+
+            return StreamingResponse(
+                shared_frames(),
+                media_type="multipart/x-mixed-replace; boundary=frame",
+                headers={"Cache-Control": "no-store, private"},
+            )
 
         def frames():
             with stream_lock:
@@ -293,10 +332,18 @@ def main() -> None:
     parser.add_argument("--orchestrator-host", default="127.0.0.1")
     parser.add_argument("--orchestrator-port", type=int, default=7777)
     parser.add_argument("--capture", default=CAPTURE_DEVICE)
-    parser.add_argument("--spool-status", type=Path, default=Path("~/.local/state/nxml-spool/status.json").expanduser())
+    parser.add_argument(
+        "--spool-status",
+        type=Path,
+        default=Path("~/.local/state/nxml-spool/status.json").expanduser(),
+    )
     parser.add_argument("--cluster-url", default="http://100.80.98.4:8787")
-    parser.add_argument("--cluster-token", type=Path, default=Path("~/.config/nxml/cluster.token").expanduser())
-    parser.add_argument("--capture-output", type=Path, default=Path("~/captures/pokemon-za").expanduser())
+    parser.add_argument(
+        "--cluster-token", type=Path, default=Path("~/.config/nxml/cluster.token").expanduser()
+    )
+    parser.add_argument(
+        "--capture-output", type=Path, default=Path("~/captures/pokemon-za").expanduser()
+    )
     args = parser.parse_args()
     try:
         validate_tailnet_bind(args.host)
@@ -311,7 +358,11 @@ def main() -> None:
     )
     fanout = MjpegFanoutSource(args.capture)
     recorder = HumanRecordingSession(fanout, output_dir=args.capture_output)
-    uvicorn.run(create_app(client, args.capture, operations, fanout, recorder), host=args.host, port=args.port)
+    uvicorn.run(
+        create_app(client, args.capture, operations, fanout, recorder),
+        host=args.host,
+        port=args.port,
+    )
 
 
 if __name__ == "__main__":

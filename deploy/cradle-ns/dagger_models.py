@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import shutil
 import threading
 import urllib.request
@@ -28,24 +29,32 @@ def check_compatibility(revision: dict) -> None:
 
 
 class RevisionCache:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, *, control_url: str | None = None, token: str | None = None):
         self.root = root
+        self.control_url = control_url.rstrip("/") if control_url else None
+        self.token = token
 
     def acquire(self, revision: dict) -> Path:
         check_compatibility(revision)
         digest = revision["checkpoint_sha256"]
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise ValueError("invalid checkpoint SHA-256")
         target = self.root / digest
         if target.is_file() and _sha(target) == digest:
             return target
         self.root.mkdir(parents=True, exist_ok=True)
         temp = target.with_suffix(".tmp")
-        uri = revision["checkpoint_path"]
-        if uri.startswith(("http://", "https://")):
-            with urllib.request.urlopen(uri, timeout=60) as src, temp.open("wb") as dst:
-                shutil.copyfileobj(src, dst)
-        else:
-            source = Path(uri.removeprefix("file://"))
-            shutil.copyfile(source, temp)
+        uri = revision.get("artifact_uri")
+        expected_id = "sha256:" + digest
+        if revision.get("artifact_id") != expected_id or not uri:
+            raise ValueError("revision lacks the immutable artifact identity from control API")
+        expected_uri = f"/v1/models/revisions/{revision['revision_id']}/artifacts/{expected_id}"
+        if uri != expected_uri or self.control_url is None:
+            raise ValueError("artifact URI is not the canonical control service endpoint")
+        headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
+        request = urllib.request.Request(self.control_url + uri, headers=headers)
+        with urllib.request.urlopen(request, timeout=60) as src, temp.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
         if _sha(temp) != digest:
             temp.unlink(missing_ok=True)
             raise ValueError("checkpoint digest mismatch")
@@ -120,3 +129,8 @@ class AtomicModelRuntime:
             self._state = ModelState(
                 self._state.active, self._state.previous, error=reason, armed=False
             )
+
+    def active_handle(self) -> tuple[str | None, Any | None]:
+        """Return one atomic revision/handle snapshot for an inference worker."""
+        with self._lock:
+            return self._state.active, self._handle
