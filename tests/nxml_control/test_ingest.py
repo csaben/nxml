@@ -8,6 +8,8 @@ from nxml_control.catalog import Catalog
 from nxml_control.service import IngestService
 from nxml_control.storage import LocalObjectStorage
 
+from tests.nxml_control.fixture_shard import fixture_shard
+
 
 def shard_manifest(episode_id="e1"):
     return {
@@ -77,12 +79,12 @@ def test_changed_idempotent_request_and_bad_checksum_fail(tmp_path):
 
 def test_http_contract_and_openapi(tmp_path):
     client = TestClient(create_app(state_dir=tmp_path))
-    content = b"tar"
+    content, api_manifest = fixture_shard()
     digest = hashlib.sha256(content).hexdigest()
     response = client.post(
         "/v1/uploads",
         headers={"Idempotency-Key": "edge/shard"},
-        json={"object_key": "uploads/edge/shard.tar", "size_bytes": 3, "sha256": digest},
+        json={"object_key": "uploads/edge/shard.tar", "size_bytes": len(content), "sha256": digest},
     )
     assert response.status_code == 201
     upload = response.json()
@@ -90,7 +92,7 @@ def test_http_contract_and_openapi(tmp_path):
     assert (
         client.post(
             f"/v1/uploads/{upload['id']}/commit",
-            json={"dataset_id": "raw", "shard_id": "edge-1", "manifest": shard_manifest()},
+            json={"dataset_id": "raw", "shard_id": "edge-1", "manifest": api_manifest},
         ).json()["state"]
         == "committed"
     )
@@ -110,7 +112,7 @@ def test_existing_object_key_is_immutable(tmp_path):
 
 def test_normalized_catalog_and_query_endpoints(tmp_path):
     client = TestClient(create_app(state_dir=tmp_path))
-    content = b"catalog tar"
+    content, api_manifest = fixture_shard("ep-b")
     digest = hashlib.sha256(content).hexdigest()
     created = client.post(
         "/v1/uploads",
@@ -122,7 +124,7 @@ def test_normalized_catalog_and_query_endpoints(tmp_path):
         },
     ).json()
     client.put(created["upload_url"], content=content)
-    manifest = shard_manifest("ep-b")
+    manifest = api_manifest
     assert (
         client.post(
             f"/v1/uploads/{created['id']}/commit",
@@ -154,7 +156,7 @@ def test_committed_manifest_is_immutable(tmp_path):
 
 def test_receipt_is_immutable_queryable_and_snapshot_is_content_addressed(tmp_path):
     client = TestClient(create_app(state_dir=tmp_path))
-    content = b"receipt"
+    content, api_manifest = fixture_shard()
     digest = hashlib.sha256(content).hexdigest()
     upload = client.post(
         "/v1/uploads",
@@ -162,7 +164,7 @@ def test_receipt_is_immutable_queryable_and_snapshot_is_content_addressed(tmp_pa
         json={"object_key": "uploads/receipt.tar", "size_bytes": len(content), "sha256": digest},
     ).json()
     client.put(upload["upload_url"], content=content)
-    request = {"dataset_id": "raw", "shard_id": "receipt-1", "manifest": shard_manifest()}
+    request = {"dataset_id": "raw", "shard_id": "receipt-1", "manifest": api_manifest}
     receipt = client.post(f"/v1/uploads/{upload['id']}/commit", json=request).json()
     assert set(receipt) == {
         "commit_id",
@@ -189,7 +191,7 @@ def test_receipt_is_immutable_queryable_and_snapshot_is_content_addressed(tmp_pa
 
 def test_manifest_validation_is_422_and_identity_conflict_is_409(tmp_path):
     client = TestClient(create_app(state_dir=tmp_path))
-    content = b"status"
+    content, api_manifest = fixture_shard()
     digest = hashlib.sha256(content).hexdigest()
     upload = client.post(
         "/v1/uploads",
@@ -207,14 +209,14 @@ def test_manifest_validation_is_422_and_identity_conflict_is_409(tmp_path):
     assert (
         client.post(
             f"/v1/uploads/{upload['id']}/commit",
-            json={"dataset_id": "raw", "shard_id": "s", "manifest": shard_manifest()},
+            json={"dataset_id": "raw", "shard_id": "s", "manifest": api_manifest},
         ).status_code
         == 200
     )
     assert (
         client.post(
             f"/v1/uploads/{upload['id']}/commit",
-            json={"dataset_id": "other", "shard_id": "s", "manifest": shard_manifest()},
+            json={"dataset_id": "other", "shard_id": "s", "manifest": api_manifest},
         ).status_code
         == 409
     )

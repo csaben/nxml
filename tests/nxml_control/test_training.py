@@ -1,6 +1,8 @@
 import pytest
 from nxml_control.training import FakeTrainingExecutor, TrainingJobs, TrainingSpec
 
+from tests.nxml_control.fixture_shard import fixture_shard
+
 
 def test_fake_bc_job_persists_status_logs_metrics_and_lineage(tmp_path):
     jobs = TrainingJobs(tmp_path / "catalog.sqlite3", FakeTrainingExecutor())
@@ -38,7 +40,7 @@ def test_training_http_uses_immutable_snapshot(tmp_path):
     from nxml_control.api import create_app
 
     client = TestClient(create_app(state_dir=tmp_path))
-    content = b"train"
+    content, manifest = fixture_shard("e")
     digest = hashlib.sha256(content).hexdigest()
     upload = client.post(
         "/v1/uploads",
@@ -46,15 +48,6 @@ def test_training_http_uses_immutable_snapshot(tmp_path):
         json={"object_key": "uploads/training.tar", "size_bytes": len(content), "sha256": digest},
     ).json()
     client.put(upload["upload_url"], content=content)
-    manifest = {
-        "schema_id": "nxml.episode.v2",
-        "action_spec_id": "switch_packets.v1",
-        "episodes": [{"episode_id": "e"}],
-        "members": [
-            {"path": "e.parquet", "kind": "actions", "size_bytes": 1, "sha256": "a" * 64},
-            {"path": "e.events.parquet", "kind": "events", "size_bytes": 1, "sha256": "b" * 64},
-        ],
-    }
     client.post(
         f"/v1/uploads/{upload['id']}/commit",
         json={"dataset_id": "raw", "shard_id": "s", "manifest": manifest},
