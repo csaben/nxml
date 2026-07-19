@@ -1,0 +1,29 @@
+[Unit]
+Description=NXML authenticated ML control plane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nxml-control
+Group=nxml-control
+EnvironmentFile=/etc/nxml-control/nxml-control.env
+ExecStart=/opt/nxml/.venv/bin/nxml-control --state-dir /var/lib/nxml-control --checkpoint-dir /var/lib/nxml-control/checkpoints --log-dir /var/log/nxml-control --host 100.80.98.4 --port 8787
+ExecStartPost=/usr/bin/curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 http://100.80.98.4:8787/healthz
+Restart=on-failure
+RestartSec=5s
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ReadWritePaths=/var/lib/nxml-control /var/log/nxml-control
+
+[Install]
+WantedBy=multi-user.target

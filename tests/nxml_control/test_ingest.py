@@ -96,7 +96,7 @@ def test_http_contract_and_openapi(tmp_path):
         ).json()["state"]
         == "committed"
     )
-    assert client.get("/healthz").json()["committed"] == 1
+    assert client.get("/healthz").json() == {"status": "ready"}
     paths = client.get("/openapi.json").json()["paths"]
     assert "/v1/uploads/{upload_id}/inspect" in paths
 

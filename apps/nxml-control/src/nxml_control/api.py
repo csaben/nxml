@@ -5,8 +5,11 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import FastAPI, Header, HTTPException, Request, status
+from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.responses import JSONResponse
 
+from nxml_control.auth import bearer_matches
 from nxml_control.catalog import Catalog, IdentityConflictError, InvalidManifestError, Upload
 from nxml_control.models import (
     CandidateError,
@@ -24,9 +27,6 @@ from nxml_control.training import FakeTrainingExecutor, TrainingExecutor, Traini
 
 class HealthResponse(BaseModel):
     status: str
-    created: int
-    uploaded: int
-    committed: int
 
 
 class UploadResponse(BaseModel):
@@ -191,6 +191,7 @@ def create_app(
     state_dir: str | Path,
     training_executor: TrainingExecutor | None = None,
     deployment_runtime: DeploymentRuntime | None = None,
+    auth_token: str | None = None,
 ) -> FastAPI:
     state = Path(state_dir)
     catalog = Catalog(state / "catalog.sqlite3")
@@ -199,11 +200,28 @@ def create_app(
     models = ModelRegistry(state / "catalog.sqlite3", deployment_runtime or FakePolicyRuntime())
     search = SearchCatalog(state / "catalog.sqlite3")
     app = FastAPI(title="NXML ML Control Plane", version="1.0.0")
+
+    if auth_token is not None:
+        if len(auth_token) < 32:
+            raise ValueError("auth_token must be at least 32 characters")
+
+        @app.middleware("http")
+        async def require_bearer(request: Request, call_next):
+            if request.url.path != "/healthz" and not bearer_matches(
+                request.headers.get("Authorization"), auth_token
+            ):
+                return JSONResponse(
+                    {"detail": "invalid or missing bearer token"},
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            return await call_next(request)
+
     app.include_router(create_search_router(search))
 
     @app.get("/healthz", response_model=HealthResponse)
     def health():
-        return catalog.health()
+        return {"status": "ready"}
 
     @app.post("/v1/uploads", status_code=status.HTTP_201_CREATED, response_model=UploadResponse)
     def create(
@@ -435,4 +453,23 @@ def create_app(
     app.state.models = models
     app.state.search = search
     app.state.ingest = service
+
+    def secured_openapi():
+        if app.openapi_schema is not None:
+            return app.openapi_schema
+        schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
+        schema.setdefault("components", {}).setdefault("securitySchemes", {})["bearerAuth"] = {
+            "type": "http",
+            "scheme": "bearer",
+        }
+        for path, item in schema["paths"].items():
+            if path == "/healthz":
+                continue
+            for operation in item.values():
+                if isinstance(operation, dict) and "responses" in operation:
+                    operation["security"] = [{"bearerAuth": []}]
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = secured_openapi
     return app
