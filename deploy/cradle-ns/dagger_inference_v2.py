@@ -216,6 +216,9 @@ class RemoteInferenceStatus:
     armed: bool = False
     health: str = "disabled"
     revision: str | None = None
+    checkpoint_sha256: str | None = None
+    sequence_length: int | None = None
+    warmup_frames: int = 0
     frames_sent: int = 0
     proposals: int = 0
     warming: int = 0
@@ -255,7 +258,11 @@ class RemoteInferenceWorker:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._proposal: Proposal | None = None
-        self._status = RemoteInferenceStatus(revision=client.revision["revision_id"])
+        self._status = RemoteInferenceStatus(
+            revision=client.revision["revision_id"],
+            checkpoint_sha256=client.revision["checkpoint_sha256"],
+            sequence_length=client.revision["compatibility"]["sequence_length"],
+        )
 
     def start(self) -> None:
         if self._thread is not None:
@@ -311,6 +318,9 @@ class RemoteInferenceWorker:
                 enabled=self._enabled.is_set(),
                 health=health,
                 revision=self.client.revision["revision_id"],
+                checkpoint_sha256=self.client.revision["checkpoint_sha256"],
+                sequence_length=self.client.revision["compatibility"]["sequence_length"],
+                warmup_frames=old.warmup_frames,
                 frames_sent=old.frames_sent,
                 proposals=old.proposals,
                 warming=old.warming,
@@ -336,6 +346,10 @@ class RemoteInferenceWorker:
                             ready=True,
                             health="warming",
                             revision=self.client.revision["revision_id"],
+                            checkpoint_sha256=self.client.revision["checkpoint_sha256"],
+                            sequence_length=self.client.revision["compatibility"][
+                                "sequence_length"
+                            ],
                             frames_sent=old.frames_sent,
                             proposals=old.proposals,
                             warming=old.warming,
@@ -374,6 +388,12 @@ class RemoteInferenceWorker:
                         ready=True,
                         health="healthy" if result.action is not None else "warming",
                         revision=self.client.revision["revision_id"],
+                        checkpoint_sha256=self.client.revision["checkpoint_sha256"],
+                        sequence_length=self.client.revision["compatibility"]["sequence_length"],
+                        warmup_frames=min(
+                            warming,
+                            self.client.revision["compatibility"]["sequence_length"] - 1,
+                        ),
                         frames_sent=old.frames_sent + 1,
                         proposals=proposal_count,
                         warming=warming,

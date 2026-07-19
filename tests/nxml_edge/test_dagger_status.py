@@ -171,6 +171,73 @@ def test_validated_revision_is_handed_to_off_thread_runtime_unarmed():
     assert response.json()["armed"] is False
 
 
+def test_validated_configured_remote_revision_starts_readiness_not_arm():
+    revision = {
+        "revision_id": "validated-r1",
+        "checkpoint_sha256": "a" * 64,
+        "state": "validated",
+    }
+
+    class Status:
+        def __init__(self):
+            self.cluster = {"revisions": {"revisions": [revision]}}
+
+        def wire(self):
+            return {"spool": {}, "cluster": self.cluster, "errors": {}}
+
+    class Operations:
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def snapshot(self):
+            return Status()
+
+    class Remote:
+        enabled = False
+        client = SimpleNamespace(revision=revision)
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def enable(self):
+            self.enabled = True
+
+        def status(self):
+            return {
+                "enabled": self.enabled,
+                "ready": False,
+                "armed": False,
+                "health": "warming" if self.enabled else "disabled",
+                "revision": "validated-r1",
+                "checkpoint_sha256": "a" * 64,
+                "sequence_length": 32,
+                "warmup_frames": 0,
+                "error": None,
+            }
+
+    remote = Remote()
+    app = minui.create_app(
+        Orchestrator(),
+        "/dev/null",
+        Operations(),
+        inference=remote,
+        remote_inference=remote,
+    )
+    with TestClient(app) as client:
+        response = client.post("/api/models/load/validated-r1")
+        status = client.get("/api/ops/status").json()
+    assert response.status_code == 202
+    assert remote.enabled is True
+    assert response.json()["armed"] is False
+    assert status["model_readiness"]["phase"] == "warming"
+
+
 @pytest.mark.parametrize("host", ["0.0.0.0", "127.0.0.1", "192.168.1.2", "::1", "cradle-ns"])
 def test_bind_rejects_non_tailnet_interfaces(host):
     with pytest.raises(ValueError, match="Tailscale"):

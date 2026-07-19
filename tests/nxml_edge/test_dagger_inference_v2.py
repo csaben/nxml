@@ -260,3 +260,34 @@ def test_unvalidated_revision_cannot_construct_transport():
         assert "validated" in str(error)
     else:
         raise AssertionError("candidate transport was constructed")
+
+
+def test_33ms_freshness_budget_never_reuses_old_proposal():
+    class Clock:
+        value = 1_000_000_000
+
+        def __call__(self):
+            return self.value
+
+    clock = Clock()
+    source = Source([Frame(0, clock.value)])
+    result = RemoteResult(
+        np.ones(26, np.float32),
+        "proposal",
+        clock.value,
+        clock.value,
+        1_000_000,
+        500_000,
+        1,
+    )
+    worker = RemoteInferenceWorker(
+        source=source, client=Client([result]), stale_ns=33_000_000, clock_ns=clock
+    )
+    worker.start()
+    worker.enable()
+    wait_for(lambda: worker.status()["proposals"] == 1)
+    assert worker.latest_proposal() is not None
+    clock.value += 33_000_001
+    assert worker.latest_proposal() is None
+    assert worker.status()["health"] == "stale"
+    worker.stop()

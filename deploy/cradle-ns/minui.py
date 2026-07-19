@@ -24,6 +24,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from pathlib import Path
 
 import uvicorn
@@ -33,6 +34,7 @@ from nxml_capture.backends.ffmpeg_v4l2 import v4l2_mjpeg_stream_command
 
 sys.path.insert(0, str(Path(__file__).parent))
 from dagger_inference import InferenceStatus
+from dagger_inference_v2 import InferenceV2Client, RemoteInferenceWorker
 from dagger_models import AtomicModelRuntime
 from dagger_recording import HumanRecordingSession
 from dagger_status import OperationsReader
@@ -115,8 +117,8 @@ PAGE = """<!doctype html>
       const p=s.spool; $('spool').textContent=p?`${p.pending_episodes||0} pending · ${p.episodes_shipped||0} shipped · ${((p.local_buffered_bytes||0)/1e9).toFixed(2)} GB buffered · ${p.disk_free_gb||'?'} GB free · ${p.receipt_state||'unknown'}${p.blocked_reason?' · blocked: '+p.blocked_reason:''}`:`unavailable: ${s.errors.spool||'unknown'}`;
       const c=s.cluster; $('cluster').textContent=c?`${(c.datasets.datasets||[]).length} datasets · ${(c.snapshots.snapshots||[]).length} snapshots`:`unavailable: ${s.errors.cluster||'unknown'}`;
       const d=c&&c.deployment; $('model').textContent=d&&d.active_revision?`active ${d.active_revision.slice(0,8)} · gen ${d.generation}`:'none active';
-      const m=s.model_readiness||{}; $('readiness').textContent=`model readiness: ${m.phase||'unloaded'} · ${m.armed?'armed':'unarmed'}${m.active?' · active '+m.active.slice(0,8):''}${m.previous?' · previous '+m.previous.slice(0,8):''}${m.blocked_reason?' · '+m.blocked_reason:''}${m.error?' · '+m.error:''}`;
-      const i=s.inference||{}; $('inference').textContent=`inference: ${i.health||'unloaded'} · ${i.armed?'armed':'unarmed'}${i.revision?' · '+i.revision.slice(0,8):''}${i.inference_latency_ms!=null?' · '+i.inference_latency_ms.toFixed(1)+'ms':''}${i.proposal_age_ms!=null?' · proposal '+i.proposal_age_ms.toFixed(0)+'ms old':''}${i.error?' · '+i.error:''}`;
+      const m=s.model_readiness||{}; $('readiness').textContent=`model readiness: ${m.phase||'unloaded'} · ${m.armed?'armed':'unarmed'}${m.active?' · revision '+m.active.slice(0,8):''}${m.checkpoint_sha256?' · sha '+m.checkpoint_sha256.slice(0,8):''}${m.warmup_frames!=null&&m.sequence_length?' · warmup '+m.warmup_frames+'/'+m.sequence_length:''}${m.blocked_reason?' · '+m.blocked_reason:''}${m.error?' · '+m.error:''}`;
+      const i=s.inference||{}; $('inference').textContent=`inference: ${i.health||'unloaded'} · ${i.armed?'armed':'unarmed'}${i.revision?' · '+i.revision.slice(0,8):''}${i.processing_latency_ms!=null?' · cluster '+i.processing_latency_ms.toFixed(1)+'ms':''}${i.transport_latency_ms!=null?' · RTT '+i.transport_latency_ms.toFixed(1)+'ms':''}${i.proposal_age_ms!=null?' · proposal '+i.proposal_age_ms.toFixed(0)+'ms old':''}${i.error?' · '+i.error:''}`;
       const revisions=c&&c.revisions&&c.revisions.revisions||[]; const validated=revisions.filter(r=>r.state==='validated'); $('model-select').innerHTML=validated.length?'<option value="">Select validated revision</option>'+validated.map(r=>`<option value="${r.revision_id}">${r.model_id} · ${r.revision_id.slice(0,8)} · validated</option>`).join(''):'<option value="">No validated revisions</option>'; $('model-load').disabled=!validated.length||m.loading||!m.load_available;
       const jobs=c&&c.jobs&&c.jobs.jobs||[]; $('jobs').textContent=jobs.length?jobs.map(j=>`${j.state} ${j.job_id.slice(0,8)}`).join(' · '):'no training jobs';
     } catch(e) { $('cluster').textContent='operations status unavailable'; }
@@ -167,6 +169,24 @@ def disabled_model_readiness() -> dict:
     }
 
 
+def remote_model_readiness(inference: RemoteInferenceWorker) -> dict:
+    status = inference.status()
+    return {
+        "schema_version": "nxml.dagger-model-readiness.v1",
+        "phase": "ready" if status["ready"] else status["health"],
+        "armed": False,
+        "ready": status["ready"],
+        "load_available": True,
+        "active": status["revision"] if status["enabled"] else None,
+        "previous": None,
+        "loading": status["revision"] if status["enabled"] and not status["ready"] else None,
+        "checkpoint_sha256": status["checkpoint_sha256"],
+        "sequence_length": status["sequence_length"],
+        "warmup_frames": status["warmup_frames"],
+        "blocked_reason": None if status["ready"] else status["error"],
+    }
+
+
 def create_app(
     orchestrator: OrchestratorClient,
     capture_device: str,
@@ -175,6 +195,7 @@ def create_app(
     recorder: HumanRecordingSession | None = None,
     inference=None,
     model_runtime: AtomicModelRuntime | None = None,
+    remote_inference: RemoteInferenceWorker | None = None,
 ) -> FastAPI:
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -223,6 +244,8 @@ def create_app(
                 "model_readiness": (
                     model_runtime.state().wire()
                     if model_runtime is not None
+                    else remote_model_readiness(remote_inference)
+                    if remote_inference is not None
                     else disabled_model_readiness()
                 ),
                 "errors": {"operations": "not configured"},
@@ -235,14 +258,16 @@ def create_app(
         wire["model_readiness"] = (
             model_runtime.state().wire()
             if model_runtime is not None
+            else remote_model_readiness(remote_inference)
+            if remote_inference is not None
             else disabled_model_readiness()
         )
         return wire
 
     @app.post("/api/models/load/{revision_id}", status_code=202)
     def model_load(revision_id: str) -> dict:
-        if model_runtime is None or operations is None:
-            raise HTTPException(503, "local model runtime is not configured")
+        if operations is None:
+            raise HTTPException(503, "operations catalog is not configured")
         cluster = operations.snapshot().cluster or {}
         revisions = (cluster.get("revisions") or {}).get("revisions") or []
         revision = next(
@@ -252,6 +277,17 @@ def create_app(
             raise HTTPException(404, "revision is not present in the polled cluster catalog")
         if revision.get("state") != "validated":
             raise HTTPException(409, "revision has not passed authoritative cluster validation")
+        if remote_inference is not None:
+            configured = remote_inference.client.revision
+            if (
+                revision_id != configured["revision_id"]
+                or revision.get("checkpoint_sha256") != configured["checkpoint_sha256"]
+            ):
+                raise HTTPException(409, "revision does not match configured inference endpoint")
+            remote_inference.enable()
+            return remote_model_readiness(remote_inference)
+        if model_runtime is None:
+            raise HTTPException(503, "model runtime boundary is not configured")
         try:
             model_runtime.load_async(revision)
         except (RuntimeError, ValueError) as error:
@@ -392,6 +428,10 @@ def main() -> None:
     parser.add_argument(
         "--capture-output", type=Path, default=Path("~/captures/pokemon-za").expanduser()
     )
+    parser.add_argument("--inference-endpoint")
+    parser.add_argument("--inference-revision")
+    parser.add_argument("--inference-digest")
+    parser.add_argument("--inference-timeout-ms", type=int, default=100)
     args = parser.parse_args()
     try:
         validate_tailnet_bind(args.host)
@@ -406,8 +446,35 @@ def main() -> None:
     )
     fanout = MjpegFanoutSource(args.capture)
     recorder = HumanRecordingSession(fanout, output_dir=args.capture_output)
+    remote_inference = None
+    if any((args.inference_endpoint, args.inference_revision, args.inference_digest)):
+        if not all((args.inference_endpoint, args.inference_revision, args.inference_digest)):
+            parser.error("inference endpoint, revision, and digest must be configured together")
+        token = args.cluster_token.read_text().strip()
+        request = urllib.request.Request(
+            f"{args.cluster_url.rstrip('/')}/v1/models/revisions/{args.inference_revision}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            revision = json.load(response)
+        if revision.get("checkpoint_sha256") != args.inference_digest:
+            parser.error("configured inference digest differs from validated revision")
+        inference_client = InferenceV2Client(
+            args.inference_endpoint, revision, timeout_ms=args.inference_timeout_ms
+        )
+        remote_inference = RemoteInferenceWorker(
+            source=fanout, client=inference_client, stale_ns=33_000_000
+        )
     uvicorn.run(
-        create_app(client, args.capture, operations, fanout, recorder),
+        create_app(
+            client,
+            args.capture,
+            operations,
+            fanout,
+            recorder,
+            inference=remote_inference,
+            remote_inference=remote_inference,
+        ),
         host=args.host,
         port=args.port,
     )
