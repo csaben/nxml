@@ -3,6 +3,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -56,6 +57,18 @@ def info(**updates):
 def test_authoritatively_active_revision_retains_validated_runtime_eligibility():
     client = InferenceV2Client("tcp://127.0.0.1:5557", revision("active"))
     assert client.revision["state"] == "active"
+
+
+def test_disarm_callback_failure_does_not_escape_worker_clear():
+    worker = RemoteInferenceWorker(
+        source=object(),
+        client=SimpleNamespace(
+            revision=revision(),
+        ),
+        on_disarm=lambda _reason: (_ for _ in ()).throw(RuntimeError("callback failed")),
+    )
+    worker._clear("stale", health="stale")
+    assert worker.status()["health"] == "stale"
 
 
 def proposal(timestamp=10, state="proposal", **updates):

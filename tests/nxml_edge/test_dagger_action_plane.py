@@ -72,3 +72,12 @@ def test_mute_takeover_release_and_eject_records_complete_history():
     assert not plane.status()["armed"] and plane.status()["mode"] == "human"
     assert plane.status()["last_disarm_reason"] == "emergency_eject"
     assert not output.actions[-1].any()
+
+
+def test_unarmed_inference_failure_cannot_claim_or_emit_action_authority():
+    output, inference = Orchestrator(), Inference()
+    plane = ActionPlane(output, inference)
+    plane.inference_failure("stale remote proposal")
+    assert plane.status()["armed"] is False
+    assert plane.status()["mode"] == "human"
+    assert output.actions == []

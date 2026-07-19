@@ -75,6 +75,14 @@ class ActionPlane:
             self.orchestrator.post_action([0.0] * 26)
             self._append(boundary, human, None)
 
+    def inference_failure(self, reason: str):
+        """Neutral-disarm only if inference owned an armed action plane."""
+        with self._lock:
+            if not self._armed:
+                self._last_reason = reason
+                return
+        self.disarm(reason)
+
     def eject(self):
         now = time.monotonic_ns()
         with self._lock:

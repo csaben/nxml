@@ -587,7 +587,7 @@ def main() -> None:
         )
     action_plane = ActionPlane(client, remote_inference)
     if remote_inference is not None:
-        remote_inference.on_disarm = action_plane.disarm
+        remote_inference.on_disarm = action_plane.inference_failure
     recorder = HumanRecordingSession(
         fanout,
         output_dir=args.capture_output,

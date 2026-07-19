@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import struct
 import threading
@@ -310,7 +311,10 @@ class RemoteInferenceWorker:
         return value
 
     def _clear(self, reason: str, *, health: str) -> None:
-        self.on_disarm(reason)
+        # Safety notification must never be able to terminate the transport
+        # owner thread. The action plane independently remains fail-closed.
+        with contextlib.suppress(Exception):
+            self.on_disarm(reason)
         with self._lock:
             old = self._status
             self._proposal = None
