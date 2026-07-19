@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import sqlite3
 from dataclasses import dataclass
@@ -30,7 +32,7 @@ class PreparedCandidate:
 
 class DeploymentRuntime(Protocol):
     def prepare(self, revision: dict) -> PreparedCandidate: ...
-    def smoke(self, candidate: PreparedCandidate) -> None: ...
+    def smoke(self, candidate: PreparedCandidate) -> dict[str, Any] | None: ...
     def activate(self, candidate: PreparedCandidate) -> None: ...
 
 
@@ -52,6 +54,7 @@ class FakePolicyRuntime:
     def smoke(self, candidate):
         if candidate.info.get("smoke_fail"):
             raise RuntimeError("smoke inference failed")
+        return {"runtime": "fake", "finite_output": True}
 
     def activate(self, candidate):
         if candidate.revision_id in self.fail_activate:
@@ -87,7 +90,8 @@ class ModelRegistry:
             CREATE TABLE IF NOT EXISTS model_revisions(
               revision_id TEXT PRIMARY KEY,model_id TEXT NOT NULL,checkpoint_path TEXT NOT NULL,checkpoint_sha256 TEXT NOT NULL,
               source_snapshot_id TEXT NOT NULL,source_config_json TEXT NOT NULL,source_commit_id TEXT NOT NULL,
-              compatibility_json TEXT NOT NULL,evaluation_json TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN('candidate','validated','active','rejected','retired')),created_at TEXT NOT NULL);
+              compatibility_json TEXT NOT NULL,evaluation_json TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN('candidate','validated','active','rejected','retired')),created_at TEXT NOT NULL,
+              validation_json TEXT);
             CREATE TABLE IF NOT EXISTS deployment_state(singleton INTEGER PRIMARY KEY CHECK(singleton=1),active_revision TEXT,previous_revision TEXT,generation INTEGER NOT NULL);
             INSERT OR IGNORE INTO deployment_state VALUES(1,NULL,NULL,0);
             CREATE TABLE IF NOT EXISTS activation_requests(idempotency_key TEXT PRIMARY KEY,operation TEXT NOT NULL,target_revision TEXT NOT NULL,expected_revision TEXT,expected_generation INTEGER,result_json TEXT NOT NULL);
@@ -95,6 +99,11 @@ class ModelRegistry:
             columns = {row[1] for row in db.execute("PRAGMA table_info(activation_requests)")}
             if "expected_generation" not in columns:
                 db.execute("ALTER TABLE activation_requests ADD COLUMN expected_generation INTEGER")
+            revision_columns = {
+                row[1] for row in db.execute("PRAGMA table_info(model_revisions)")
+            }
+            if "validation_json" not in revision_columns:
+                db.execute("ALTER TABLE model_revisions ADD COLUMN validation_json TEXT")
             db.commit()
         finally:
             db.close()
@@ -116,7 +125,10 @@ class ModelRegistry:
         db = self._connect()
         try:
             db.execute(
-                "INSERT INTO model_revisions VALUES(?,?,?,?,?,?,?,?,?,\x27candidate\x27,?)",
+                """INSERT INTO model_revisions(
+                revision_id,model_id,checkpoint_path,checkpoint_sha256,source_snapshot_id,
+                source_config_json,source_commit_id,compatibility_json,evaluation_json,state,
+                created_at,validation_json) VALUES(?,?,?,?,?,?,?,?,?,'candidate',?,NULL)""",
                 (
                     revision_id,
                     model_id,
@@ -148,6 +160,8 @@ class ModelRegistry:
         item = dict(row)
         for field in ("source_config", "compatibility", "evaluation"):
             item[field] = json.loads(item.pop(field + "_json"))
+        raw_validation = item.pop("validation_json")
+        item["validation"] = json.loads(raw_validation) if raw_validation else None
         return item
 
     def list_revisions(
@@ -195,11 +209,11 @@ class ModelRegistry:
                 or int(candidate.info.get("action_dim", -1)) != self.action_dim
             ):
                 raise CandidateError("action-spec compatibility failed")
-            self.runtime.smoke(candidate)
+            evidence = self.runtime.smoke(candidate) or {}
         except Exception as error:
             self._set_state(revision_id, "rejected")
             raise CandidateError(str(error)) from error
-        self._set_state(revision_id, "validated")
+        self._set_validation(revision_id, evidence)
         return self.get(revision_id)
 
     def promote(
@@ -316,6 +330,17 @@ class ModelRegistry:
         finally:
             db.close()
 
+    def _set_validation(self, revision_id, evidence):
+        db = self._connect()
+        try:
+            db.execute(
+                "UPDATE model_revisions SET state='validated',validation_json=? WHERE revision_id=?",
+                (json.dumps(evidence, sort_keys=True), revision_id),
+            )
+            db.commit()
+        finally:
+            db.close()
+
 
 class PolicyServerRuntime:
     """Atomic holder around separately preloaded nxrl PolicyServer instances."""
@@ -332,6 +357,13 @@ class PolicyServerRuntime:
             return self._server
 
     def prepare(self, revision):
+        digest = hashlib.sha256()
+        with Path(revision["checkpoint_path"]).open("rb") as source:
+            while chunk := source.read(1024 * 1024):
+                digest.update(chunk)
+        actual_digest = digest.hexdigest()
+        if not hmac.compare_digest(actual_digest, revision["checkpoint_sha256"]):
+            raise RuntimeError("checkpoint digest does not match immutable revision")
         if self._factory is None:
             from nxrl.serve.server import PolicyServer
 
@@ -344,6 +376,26 @@ class PolicyServerRuntime:
 
         info = asdict(raw) if is_dataclass(raw) else dict(raw)
         info.setdefault("action_spec_id", revision["compatibility"].get("action_spec_id"))
+        compatibility = revision["compatibility"]
+        expected = {
+            "architecture": compatibility.get("architecture"),
+            "action_spec_id": compatibility.get("action_spec_id"),
+            "action_dim": int(compatibility.get("action_dim", -1)),
+            "sequence_length": int(compatibility.get("sequence_length", -1)),
+            "latent_shape": tuple(compatibility.get("latent_shape", ())),
+        }
+        actual = {
+            "architecture": info.get("architecture"),
+            "action_spec_id": info.get("action_spec_id"),
+            "action_dim": int(info.get("action_dim", -1)),
+            "sequence_length": int(info.get("sequence_length", -1)),
+            "latent_shape": tuple(info.get("latent_shape", ())),
+        }
+        if expected != actual:
+            raise RuntimeError(f"checkpoint compatibility mismatch: {actual} != {expected}")
+        if expected["architecture"] != "bc_transformer_v1":
+            raise RuntimeError("production validator only accepts bc_transformer_v1")
+        info["checkpoint_sha256"] = actual_digest
         return PreparedCandidate(revision["revision_id"], revision["checkpoint_path"], info, server)
 
     def smoke(self, candidate):
@@ -351,11 +403,28 @@ class PolicyServerRuntime:
 
         info = candidate.info
         shape = (int(info["sequence_length"]), *(int(v) for v in info["latent_shape"]))
-        action = candidate.handle.predict(np.zeros(shape, dtype=np.float32))
+        history = np.zeros(shape, dtype=np.float32)
+        action = candidate.handle.predict(history)
+        repeated = candidate.handle.predict(history)
         if tuple(action.shape) != (int(info.get("action_dim", -1)),):
             raise RuntimeError("smoke inference returned incompatible action shape")
         if not np.isfinite(action).all():
             raise RuntimeError("smoke inference returned non-finite action")
+        if not np.array_equal(action, repeated):
+            raise RuntimeError("smoke inference is not deterministic")
+        return {
+            "schema_id": "nxml.model-validation.v1",
+            "runtime": "nxrl.PolicyServer",
+            "device": str(self.device),
+            "checkpoint_sha256": info["checkpoint_sha256"],
+            "architecture": info["architecture"],
+            "action_spec_id": info["action_spec_id"],
+            "action_dim": int(info["action_dim"]),
+            "sequence_length": int(info["sequence_length"]),
+            "latent_shape": list(info["latent_shape"]),
+            "finite_output": True,
+            "deterministic": True,
+        }
 
     def activate(self, candidate):
         with self._runtime_lock:

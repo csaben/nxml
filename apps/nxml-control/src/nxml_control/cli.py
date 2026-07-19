@@ -72,6 +72,7 @@ def main() -> None:
     import uvicorn
 
     from nxml_control.api import create_app
+    from nxml_control.models import PolicyServerRuntime
 
     app = create_app(
         state_dir=state_dir,
@@ -79,6 +80,8 @@ def main() -> None:
         checkpoint_dir=checkpoint_dir,
         training_executor=training_executor,
         training_async=training_async,
+        deployment_runtime=PolicyServerRuntime(device="cpu"),
+        allow_fake_deployment_runtime=False,
     )
     app.state.checkpoint_dir = checkpoint_dir
     app.state.log_dir = log_dir

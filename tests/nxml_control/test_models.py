@@ -104,17 +104,27 @@ def test_runtime_activation_failure_and_failed_rollback_preserve_active(tmp_path
     assert registry.deployment()["active_revision"] == two["revision_id"]
 
 
-def test_policy_server_runtime_preloads_smokes_then_swaps():
+def test_policy_server_runtime_verifies_digest_compatibility_and_deterministic_smoke(tmp_path):
+    import hashlib
+
     import numpy as np
     from nxml_control.models import PolicyServerRuntime
 
     class Info:
+        architecture = "bc_transformer_v1"
         sequence_length = 2
         latent_shape = (1, 2, 2)
         action_dim = 26
 
         def __iter__(self):
-            return iter({"sequence_length": 2, "latent_shape": (1, 2, 2), "action_dim": 26}.items())
+            return iter(
+                {
+                    "architecture": "bc_transformer_v1",
+                    "sequence_length": 2,
+                    "latent_shape": (1, 2, 2),
+                    "action_dim": 26,
+                }.items()
+            )
 
     class Server:
         def __init__(self, model_path, device):
@@ -128,15 +138,42 @@ def test_policy_server_runtime_preloads_smokes_then_swaps():
             return np.zeros(26, dtype=np.float32)
 
     runtime = PolicyServerRuntime(device="cpu", server_factory=Server)
+    checkpoint = tmp_path / "policy.pt"
+    checkpoint.write_bytes(b"verified-checkpoint")
     revision = {
         "revision_id": "r1",
-        "checkpoint_path": "fake.pt",
-        "compatibility": {"action_spec_id": "switch_packets.v1"},
+        "checkpoint_path": str(checkpoint),
+        "checkpoint_sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
+        "compatibility": {
+            "architecture": "bc_transformer_v1",
+            "action_spec_id": "switch_packets.v1",
+            "action_dim": 26,
+            "sequence_length": 2,
+            "latent_shape": [1, 2, 2],
+        },
     }
     candidate = runtime.prepare(revision)
-    runtime.smoke(candidate)
+    evidence = runtime.smoke(candidate)
+    assert evidence["deterministic"] is evidence["finite_output"] is True
+    checkpoint.write_bytes(b"corrupt")
+    with pytest.raises(RuntimeError, match="digest"):
+        runtime.prepare(revision)
+    checkpoint.write_bytes(b"verified-checkpoint")
     runtime.activate(candidate)
-    assert runtime.server.path == "fake.pt"
+    assert runtime.server.path == str(checkpoint)
+
+
+def test_production_app_rejects_fake_or_missing_deployment_runtime(tmp_path):
+    from nxml_control.api import create_app
+
+    with pytest.raises(RuntimeError, match="real deployment"):
+        create_app(state_dir=tmp_path / "missing", allow_fake_deployment_runtime=False)
+    with pytest.raises(RuntimeError, match="forbidden"):
+        create_app(
+            state_dir=tmp_path / "fake",
+            deployment_runtime=FakePolicyRuntime(),
+            allow_fake_deployment_runtime=False,
+        )
 
 
 def test_model_api_response_loss_retry_and_conflict(tmp_path):

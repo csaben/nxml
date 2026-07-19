@@ -93,6 +93,7 @@ class ModelRevisionResponse(BaseModel):
     source_commit_id: str
     compatibility: dict[str, Any]
     evaluation: dict[str, Any]
+    validation: dict[str, Any] | None
     state: str
     created_at: str
 
@@ -255,6 +256,7 @@ def create_app(
     auth_token: str | None = None,
     training_async: bool = False,
     checkpoint_dir: str | Path | None = None,
+    allow_fake_deployment_runtime: bool = True,
 ) -> FastAPI:
     state = Path(state_dir)
     artifact_root = Path(checkpoint_dir or state / "checkpoints").resolve()
@@ -265,7 +267,13 @@ def create_app(
         training_executor or FakeTrainingExecutor(),
         run_async=training_async,
     )
-    models = ModelRegistry(state / "catalog.sqlite3", deployment_runtime or FakePolicyRuntime())
+    if deployment_runtime is None:
+        if not allow_fake_deployment_runtime:
+            raise RuntimeError("production requires a real deployment validation runtime")
+        deployment_runtime = FakePolicyRuntime()
+    if not allow_fake_deployment_runtime and isinstance(deployment_runtime, FakePolicyRuntime):
+        raise RuntimeError("FakePolicyRuntime is forbidden in production")
+    models = ModelRegistry(state / "catalog.sqlite3", deployment_runtime)
     search = SearchCatalog(state / "catalog.sqlite3")
     app = FastAPI(title="NXML ML Control Plane", version="1.0.0")
 
