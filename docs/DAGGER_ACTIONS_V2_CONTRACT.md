@@ -70,7 +70,7 @@ distributions.
 
 ## Parser compatibility notes
 
-The complete v2 table currently contains 45 columns. In addition to the nine
+The complete v2 table currently contains 44 columns. In addition to the nine
 fields above, validators must accept `frame_timestamp_ns`,
 `action_timestamp_ns`, `action_age_ns`, `applied_action`, `human_action`,
 `human_mask`, `policy_action`, `ownership`, `policy_revision`, `policy_digest`,
