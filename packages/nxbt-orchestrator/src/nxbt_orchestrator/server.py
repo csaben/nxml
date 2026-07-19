@@ -20,14 +20,15 @@ shutdown.
 
 from __future__ import annotations
 
-import asyncio
 import json
+import os
+import socket
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, Field
 from nx_packets import ACTION_DIM, Packet
+from pydantic import BaseModel, Field
 
 from nxbt_orchestrator.controller import ActionSource, NxbtController
 from nxbt_orchestrator.state_stream import StateStream
@@ -74,6 +75,21 @@ class ControlRequest(BaseModel):
     path: str | None = None
 
 
+def _sd_notify(message: str) -> None:
+    """Tell systemd about our lifecycle when running under Type=notify."""
+    addr = os.environ.get("NOTIFY_SOCKET")
+    if not addr:
+        return
+    if addr.startswith("@"):
+        addr = "\0" + addr[1:]
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+            sock.connect(addr)
+            sock.send(message.encode())
+    except OSError:
+        pass
+
+
 def create_app(config: ServerConfig) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -84,12 +100,17 @@ def create_app(config: ServerConfig) -> FastAPI:
             recording_output_path=config.recording_output_path,
             debug=config.debug,
         )
-        await asyncio.to_thread(controller.start)
+        # Connects in the background: the API (and /health) must be reachable
+        # while the Switch is still pairing so systemd and the edge dashboard
+        # can watch progress instead of guessing.
+        controller.start()
         app.state.controller = controller
         app.state.stream = StateStream(controller)
+        _sd_notify("READY=1")
         try:
             yield
         finally:
+            _sd_notify("STOPPING=1")
             controller.stop()
 
     app = FastAPI(title="nxbt-orchestrator", version="0.1.0", lifespan=lifespan)
@@ -100,6 +121,7 @@ def create_app(config: ServerConfig) -> FastAPI:
         return {
             "running": c.is_running,
             "connected": c.is_connected,
+            "switch_state": c.switch_state,
             "update_rate": c.update_rate,
             "override_window": c.override_window,
             "recording": c.recording_active,

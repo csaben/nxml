@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# nsctl — one entrypoint for the cradle-ns Switch stack.
+#
+#   nsctl up       start Bluetooth orchestrator (systemd) + edge UI, verify health
+#   nsctl down     stop the Bluetooth orchestrator (edge UI stays up)
+#   nsctl status   audit processes, ports, services, health, capture device
+#   nsctl logs     follow the orchestrator journal
+#   nsctl manual   run the orchestrator manually in the foreground (service stopped first)
+#
+# The orchestrator API on 127.0.0.1:7777 is the authoritative readiness
+# signal: systemd "active" now means the API is serving; /health's
+# switch_state says whether the Switch itself is connected.
+set -euo pipefail
+
+ORCH_BIN=/home/arelius/.local/bin/nxbt-orchestrator
+ORCH_PORT=7777
+EDGE_PORT=8090
+SWITCH_MAC=58:2F:40:23:3C:CA
+CAPTURE=/dev/v4l/by-id/usb-MACROSILICON_Hagibis_20210623-video-index0
+
+orch_health() { curl -fsS -m 2 "http://127.0.0.1:${ORCH_PORT}/health" 2>/dev/null; }
+
+audit_processes() {
+  # Exactly one orchestrator process tree, owned the way we expect, or none.
+  if pgrep -f "nxbt-orchestrator serve" >/dev/null 2>&1; then
+    if ! systemctl is-active --quiet nxml-bt.service; then
+      echo "nsctl: an orchestrator process is running OUTSIDE nxml-bt.service:" >&2
+      pgrep -af "nxbt-orchestrator serve" >&2
+      echo "nsctl: stop it first (it owns the Bluetooth adapter), then re-run." >&2
+      return 1
+    fi
+  fi
+}
+
+cmd_status() {
+  echo "== orchestrator processes"
+  pgrep -af "nxbt-orchestrator serve" || echo "(none)"
+  echo "== listeners"
+  ss -ltn "( sport = :${ORCH_PORT} or sport = :${EDGE_PORT} )" | tail -n +2
+  echo "== nxml-bt.service: $(systemctl is-active nxml-bt.service 2>/dev/null || true)"
+  echo "== nxml-edge.service (user): $(systemctl --user is-active nxml-edge.service 2>/dev/null || true)"
+  echo "== orchestrator /health"
+  orch_health || echo "unreachable"
+  echo
+  echo "== capture device"
+  if [ -e "${CAPTURE}" ]; then echo "present: ${CAPTURE} -> $(readlink -f "${CAPTURE}")"; else echo "MISSING: ${CAPTURE}"; fi
+}
+
+cmd_up() {
+  audit_processes
+  sudo systemctl start nxml-bt.service
+  echo "nsctl: waiting for orchestrator API on :${ORCH_PORT} ..."
+  for _ in $(seq 1 30); do
+    if health=$(orch_health); then
+      echo "nsctl: orchestrator up: ${health}"
+      break
+    fi
+    sleep 1
+  done
+  if ! orch_health >/dev/null; then
+    echo "nsctl: orchestrator API did not come up; check 'nsctl logs'" >&2
+    exit 1
+  fi
+  systemctl --user start nxml-edge.service || echo "nsctl: nxml-edge user service not started (run 'systemctl --user status nxml-edge')"
+  if orch_health | grep -q '"switch_state": *"connected"'; then
+    echo "nsctl: Switch is connected."
+  else
+    echo "nsctl: Switch not connected yet — wake it (or open Controllers → Change Grip/Order once);"
+    echo "       progress: watch 'nsctl logs' or curl http://127.0.0.1:${ORCH_PORT}/health"
+  fi
+}
+
+cmd_down() {
+  sudo systemctl stop nxml-bt.service
+  if pgrep -f "nxbt-orchestrator serve" >/dev/null 2>&1; then
+    echo "nsctl: WARNING — orchestrator processes remain after stop:" >&2
+    pgrep -af "nxbt-orchestrator serve" >&2
+    exit 1
+  fi
+  echo "nsctl: orchestrator stopped cleanly."
+}
+
+cmd_logs() { sudo journalctl -u nxml-bt.service -f; }
+
+cmd_manual() {
+  if systemctl is-active --quiet nxml-bt.service; then
+    echo "nsctl: stopping nxml-bt.service so the manual run owns the adapter"
+    sudo systemctl stop nxml-bt.service
+  fi
+  audit_processes
+  exec sudo "${ORCH_BIN}" serve --host 127.0.0.1 --port "${ORCH_PORT}" --reconnect-address "${SWITCH_MAC}"
+}
+
+case "${1:-status}" in
+  up) cmd_up ;;
+  down) cmd_down ;;
+  status) cmd_status ;;
+  logs) cmd_logs ;;
+  manual) cmd_manual ;;
+  *) sed -n '2,10p' "$0"; exit 64 ;;
+esac

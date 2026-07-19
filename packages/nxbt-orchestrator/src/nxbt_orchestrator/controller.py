@@ -30,11 +30,26 @@ StateCallback = Callable[[dict[str, Any]], None]
 ActionSource = Literal["human", "inference"]
 
 _BUTTON_NAMES = (
-    "A", "B", "X", "Y",
-    "L", "R", "ZL", "ZR",
-    "PLUS", "MINUS", "HOME", "CAPTURE",
-    "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT",
-    "JCL_SR", "JCL_SL", "JCR_SR", "JCR_SL",
+    "A",
+    "B",
+    "X",
+    "Y",
+    "L",
+    "R",
+    "ZL",
+    "ZR",
+    "PLUS",
+    "MINUS",
+    "HOME",
+    "CAPTURE",
+    "DPAD_UP",
+    "DPAD_DOWN",
+    "DPAD_LEFT",
+    "DPAD_RIGHT",
+    "JCL_SR",
+    "JCL_SL",
+    "JCR_SR",
+    "JCR_SL",
 )
 
 
@@ -78,39 +93,73 @@ class NxbtController:
         self._subscribers: list[StateCallback] = []
         self._subscribers_lock = Lock()
 
+        self._switch_state = "connecting"
+
         self._update_thread = Thread(
             target=self._continuous_update_loop,
             daemon=True,
             name="nxbt-update-loop",
         )
+        self._connect_thread = Thread(
+            target=self._wait_for_connection_then_stream,
+            daemon=True,
+            name="nxbt-connect",
+        )
 
     # ── lifecycle ─────────────────────────────────────────────────────
 
-    def start(self, *, wait_for_connection: bool = True) -> None:
-        if wait_for_connection:
-            print("[orchestrator] waiting for Switch to connect over Bluetooth...", flush=True)
-            self.nx.wait_for_connection(self.controller_idx)
-            print("[orchestrator] Switch connected", flush=True)
-            try:
-                addrs = self.nx.get_switch_addresses()
-                if addrs:
-                    print(
-                        f"[orchestrator] paired Switch address(es): {', '.join(addrs)} — "
-                        f"pass to --reconnect-address next run to skip the pairing dance",
-                        flush=True,
-                    )
-            except Exception as e:
-                if self.debug:
-                    print(f"[orchestrator] could not enumerate paired Switches: {e}", flush=True)
-        self._connected.set()
+    def start(self) -> None:
+        """Begin connecting in the background; returns immediately.
+
+        The HTTP API can come up (and report ``connected: false``) while the
+        Switch pairing/reconnect happens on this thread.
+        """
         self._running.set()
+        self._connect_thread.start()
+
+    def _wait_for_connection_then_stream(self) -> None:
+        # nxbt's own wait_for_connection() busy-spins with no sleep, pinning a
+        # core on manager-proxy round trips the whole time the Switch is
+        # disconnected. Poll the shared state gently instead.
+        print("[orchestrator] waiting for Switch to connect over Bluetooth...", flush=True)
+        while self._running.is_set():
+            snapshot = self.nx.state[self.controller_idx]
+            state = snapshot["state"]
+            if state == "connected":
+                break
+            if state == "crashed":
+                self._switch_state = "crashed"
+                print(
+                    f"[orchestrator] controller crashed: {snapshot['errors']}",
+                    flush=True,
+                )
+                return
+            time.sleep(0.25)
+        if not self._running.is_set():
+            return
+        self._switch_state = "connected"
+        print("[orchestrator] Switch connected", flush=True)
+        try:
+            addrs = self.nx.get_switch_addresses()
+            if addrs:
+                print(
+                    f"[orchestrator] paired Switch address(es): {', '.join(addrs)} — "
+                    f"pass to --reconnect-address next run to skip the pairing dance",
+                    flush=True,
+                )
+        except Exception as e:
+            if self.debug:
+                print(f"[orchestrator] could not enumerate paired Switches: {e}", flush=True)
+        self._connected.set()
         self._update_thread.start()
 
     def stop(self) -> None:
         self._running.clear()
         if self._recording_active:
             self._save_recording()
-        self._update_thread.join(timeout=2.0)
+        self._connect_thread.join(timeout=2.0)
+        if self._update_thread.is_alive():
+            self._update_thread.join(timeout=2.0)
         self.nx.remove_controller(self.controller_idx)
 
     @property
@@ -120,6 +169,11 @@ class NxbtController:
     @property
     def is_connected(self) -> bool:
         return self._connected.is_set()
+
+    @property
+    def switch_state(self) -> str:
+        """One of ``connecting``, ``connected``, ``crashed``."""
+        return self._switch_state
 
     # ── stick init (preserves nxbt quirks) ────────────────────────────
 
@@ -147,6 +201,8 @@ class NxbtController:
 
     def _continuous_update_loop(self) -> None:
         sleep_time = 1.0 / self.update_rate
+        last_sent: dict[str, Any] | None = None
+        last_sent_at = 0.0
 
         while self._running.is_set():
             with self._state_lock:
@@ -154,7 +210,16 @@ class NxbtController:
                 if self._recording_active:
                     self._packet_history.append(_deep_copy_packet(snapshot))
 
-            self.nx.set_controller_input(self.controller_idx, snapshot)
+            # nxbt keeps re-applying the last direct-input packet on its own
+            # 132 Hz loop, and every set_controller_input call is a pickled
+            # round trip through the multiprocessing manager. Only pay that
+            # cost when the state actually changed (refreshed at 1 Hz as
+            # insurance against a dropped write).
+            now = time.monotonic()
+            if snapshot != last_sent or now - last_sent_at >= 1.0:
+                self.nx.set_controller_input(self.controller_idx, snapshot)
+                last_sent = snapshot
+                last_sent_at = now
 
             self._notify_subscribers(snapshot)
             time.sleep(sleep_time)

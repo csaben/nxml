@@ -4,13 +4,22 @@ After=bluetooth.service
 Requires=bluetooth.service
 
 [Service]
-Type=simple
+# The orchestrator sd_notifies READY=1 once the API is serving; the Switch
+# keeps connecting in the background and /health reports switch_state.
+# "active" therefore means "port 7777 is up", not "Switch is connected".
+Type=notify
+NotifyAccess=main
 User=root
 Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStart=/home/arelius/.local/bin/nxbt-orchestrator serve --host 127.0.0.1 --port 7777 --reconnect-address 58:2F:40:23:3C:CA
 Restart=on-failure
 RestartSec=5
-TimeoutStartSec=90
+TimeoutStartSec=30
+# SIGTERM to the main process triggers graceful nxbt cleanup; any wedged
+# worker still holding the HCI socket is SIGKILLed 20 s later instead of
+# stalling in final-sigterm for 90 s.
+TimeoutStopSec=20
+KillMode=mixed
 KillSignal=SIGTERM
 
 [Install]

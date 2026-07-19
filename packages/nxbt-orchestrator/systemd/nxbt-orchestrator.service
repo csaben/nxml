@@ -4,14 +4,18 @@ After=bluetooth.service network.target
 Requires=bluetooth.service
 
 [Service]
-Type=simple
+# READY=1 is sd_notified once the API is serving; the Switch connects in the
+# background and /health reports switch_state.
+Type=notify
+NotifyAccess=main
 # nxbt requires root to open the BlueZ HCI socket.
 User=root
 ExecStart=/usr/local/bin/nxbt-orchestrator serve --host 127.0.0.1 --port 7777
 Restart=on-failure
 RestartSec=2
-# Bluetooth pairing can take several seconds on a cold boot.
-TimeoutStartSec=60
+TimeoutStartSec=30
+TimeoutStopSec=20
+KillMode=mixed
 
 [Install]
 WantedBy=multi-user.target
