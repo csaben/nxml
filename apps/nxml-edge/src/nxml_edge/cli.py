@@ -102,6 +102,7 @@ def main(config_path: Path, token_file: Path, fixture_adapters: bool) -> None:
         host=config.bind_host,
         port=config.edge_port,
         proxy_headers=False,
+        timeout_graceful_shutdown=5,
     )
 
 
