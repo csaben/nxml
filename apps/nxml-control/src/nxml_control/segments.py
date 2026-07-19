@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -20,6 +21,41 @@ from nxml_control.storage import ObjectStorage
 
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 ID_PATTERN = r"^sha256:[0-9a-f]{64}$"
+EPISODE_ID_PATTERN = (
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
+STAGED_OBJECT_PATTERN = re.compile(
+    r"^uploads/segments/(?P<episode_id>[0-9a-f-]{36})/"
+    r"(?P<sequence_index>[0-9]{6})-(?P<sha256>[0-9a-f]{64})\.tar$"
+)
+DEFAULT_RECONSTRUCTION_CHUNK_BYTES = 1024 * 1024
+SEGMENT_ROUTE_CONTRACTS = (
+    ("POST", "/v1/segment-bundles/{upload_id}/commit"),
+    ("GET", "/v1/segment-receipts/{receipt_id}"),
+    ("GET", "/v1/segments/{segment_id}"),
+    ("POST", "/v1/segments/{segment_id}/quality-dispositions"),
+    ("GET", "/v1/segments/{segment_id}/quality-dispositions"),
+    ("POST", "/v1/datasets/{dataset_id}/episodes/{episode_id}/close"),
+    ("GET", "/v1/episode-closes/{close_id}"),
+    ("POST", "/v1/datasets/{dataset_id}/segment-snapshots"),
+    ("GET", "/v1/segment-snapshots/{snapshot_id}"),
+    ("GET", "/v1/datasets/{dataset_id}/segment-status"),
+)
+
+
+class SegmentContractError(ValueError):
+    status_code = 422
+    error_code = "segment_invalid"
+
+
+class SegmentConflictError(SegmentContractError):
+    status_code = 409
+    error_code = "segment_conflict"
+
+
+class SegmentNotFoundError(KeyError):
+    status_code = 404
+    error_code = "segment_not_found"
 
 
 class SegmentMemberV1(BaseModel):
@@ -41,7 +77,7 @@ class SegmentBundleV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     schema_id: Literal["nxml.segment-bundle.v1"]
     dataset_id: str = Field(min_length=1)
-    episode_id: str = Field(min_length=1)
+    episode_id: str = Field(pattern=EPISODE_ID_PATTERN)
     segment_id: str = Field(pattern=ID_PATTERN)
     sequence_index: int = Field(ge=0)
     clock_id: str = Field(min_length=1)
@@ -63,6 +99,13 @@ class SegmentBundleV1(BaseModel):
         paths = [member.path for member in self.members]
         if len(paths) != len(set(paths)):
             raise ValueError("segment member paths must be unique")
+        expected_prefix = f"{self.episode_id}.{self.sequence_index:06d}"
+        if any(
+            not path.rsplit("/", 1)[-1].startswith(expected_prefix + ".") for path in paths
+        ):
+            raise ValueError(
+                "segment member basenames must reuse episode UUID and sequence index"
+            )
         by_role = {member.role: member.path for member in self.members}
         if not by_role["video"].endswith((".mkv", ".mp4")):
             raise ValueError("video member must be MKV or MP4")
@@ -86,7 +129,7 @@ class EpisodeCloseV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     schema_id: Literal["nxml.episode-close.v1"]
     dataset_id: str = Field(min_length=1)
-    episode_id: str = Field(min_length=1)
+    episode_id: str = Field(pattern=EPISODE_ID_PATTERN)
     clock_id: str = Field(min_length=1)
     timeline_start_ns: int = Field(ge=0)
     timeline_end_ns: int = Field(gt=0)
@@ -135,7 +178,9 @@ class SegmentCatalog:
             CREATE TABLE IF NOT EXISTS segment_quality_dispositions(
               disposition_id TEXT PRIMARY KEY,idempotency_key TEXT NOT NULL UNIQUE,segment_id TEXT NOT NULL,
               training_eligible INTEGER NOT NULL,reason TEXT NOT NULL,validator TEXT NOT NULL,
-              validator_version TEXT NOT NULL,created_at TEXT NOT NULL);
+              validator_version TEXT NOT NULL,
+              validator_state TEXT NOT NULL CHECK(validator_state IN('passed','failed')),
+              created_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS episode_closes(
               close_id TEXT PRIMARY KEY,idempotency_key TEXT NOT NULL UNIQUE,dataset_id TEXT NOT NULL,
               episode_id TEXT NOT NULL UNIQUE,manifest_json TEXT NOT NULL,created_at TEXT NOT NULL);
@@ -148,8 +193,26 @@ class SegmentCatalog:
             """)
 
     def commit_segment(self, upload_id: str, manifest: dict) -> SegmentReceipt:
-        parsed = SegmentBundleV1.model_validate(manifest)
-        upload = self.catalog.get(upload_id)
+        try:
+            parsed = SegmentBundleV1.model_validate(manifest)
+        except ValueError as error:
+            raise SegmentContractError(str(error)) from error
+        try:
+            upload = self.catalog.get(upload_id)
+        except KeyError as error:
+            raise SegmentNotFoundError("upload not found") from error
+        staged = STAGED_OBJECT_PATTERN.fullmatch(upload.object_key)
+        if staged is None:
+            raise SegmentContractError(
+                "segment upload object_key must use uploads/segments/"
+                "{episode_uuid}/{sequence_index:06d}-{object_sha256}.tar"
+            )
+        if (
+            staged["episode_id"],
+            int(staged["sequence_index"]),
+            staged["sha256"],
+        ) != (parsed.episode_id, parsed.sequence_index, parsed.object_sha256):
+            raise SegmentContractError("staged object key does not match segment identity")
         canonical = json.dumps(
             parsed.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
         )
@@ -159,21 +222,30 @@ class SegmentCatalog:
                     "SELECT r.receipt_id FROM segment_receipts r WHERE r.upload_id=?", (upload_id,)
                 ).fetchone()
                 if row is None:
-                    raise ValueError("upload was committed by a different ingest contract")
+                    raise SegmentConflictError(
+                        "upload was committed by a different ingest contract"
+                    )
                 stored = db.execute(
                     "SELECT manifest_json FROM segment_bundles WHERE upload_id=?", (upload_id,)
                 ).fetchone()
                 if stored is None or stored[0] != canonical:
-                    raise ValueError("immutable segment commit conflicts with original manifest")
+                    raise SegmentConflictError(
+                        "immutable segment commit conflicts with original manifest"
+                    )
             return self.get_receipt(row[0])
         if upload.state != "uploaded":
-            raise ValueError("segment upload must be checksum-verified before commit")
+            raise SegmentContractError("segment upload must be checksum-verified before commit")
         if (upload.actual_size_bytes, upload.actual_sha256) != (
             parsed.object_size_bytes,
             parsed.object_sha256,
         ):
-            raise ValueError("segment object identity does not match verified upload")
-        self.ingest.verify_members(upload_id, parsed.model_dump(mode="json"))
+            raise SegmentContractError(
+                "segment object identity does not match verified upload"
+            )
+        try:
+            self.ingest.verify_members(upload_id, parsed.model_dump(mode="json"))
+        except ValueError as error:
+            raise SegmentContractError(str(error)) from error
         now = datetime.now(UTC).isoformat()
         receipt_id = str(uuid4())
         with self.catalog.connect() as db:
@@ -211,7 +283,9 @@ class SegmentCatalog:
                     (upload_id,),
                 ).fetchone()
                 if row is None or row["manifest_json"] != canonical:
-                    raise ValueError("segment identity, order, or upload already committed") from None
+                    raise SegmentConflictError(
+                        "segment identity, order, or upload already committed"
+                    ) from None
                 return self.get_receipt(row["receipt_id"])
         return self.get_receipt(receipt_id)
 
@@ -225,8 +299,23 @@ class SegmentCatalog:
                 (receipt_id,),
             ).fetchone()
         if row is None:
-            raise KeyError(receipt_id)
+            raise SegmentNotFoundError("segment receipt not found")
         return SegmentReceipt(**dict(row), state="committed")
+
+    def get_segment(self, segment_id: str) -> dict:
+        with self.catalog.connect() as db:
+            row = db.execute(
+                """SELECT b.*,r.receipt_id FROM segment_bundles b
+                JOIN segment_receipts r ON r.segment_id=b.segment_id
+                WHERE b.segment_id=?""",
+                (segment_id,),
+            ).fetchone()
+        if row is None:
+            raise SegmentNotFoundError("segment not found")
+        return {
+            "manifest": json.loads(row["manifest_json"]),
+            "receipt": self.get_receipt(row["receipt_id"]).__dict__,
+        }
 
     def set_quality(
         self,
@@ -237,6 +326,7 @@ class SegmentCatalog:
         reason: str,
         validator: str,
         validator_version: str,
+        validator_state: Literal["passed", "failed"],
     ) -> dict:
         payload = (
             segment_id,
@@ -244,6 +334,7 @@ class SegmentCatalog:
             reason,
             validator,
             validator_version,
+            validator_state,
         )
         with self.catalog.connect() as db:
             if (
@@ -252,12 +343,12 @@ class SegmentCatalog:
                 ).fetchone()
                 is None
             ):
-                raise KeyError(segment_id)
+                raise SegmentNotFoundError("segment not found")
             try:
                 disposition_id = str(uuid4())
                 now = datetime.now(UTC).isoformat()
                 db.execute(
-                    "INSERT INTO segment_quality_dispositions VALUES(?,?,?,?,?,?,?,?)",
+                    "INSERT INTO segment_quality_dispositions VALUES(?,?,?,?,?,?,?,?,?)",
                     (disposition_id, idempotency_key, *payload, now),
                 )
             except sqlite3.IntegrityError:
@@ -275,16 +366,24 @@ class SegmentCatalog:
                             "reason",
                             "validator",
                             "validator_version",
+                            "validator_state",
                         )
                     )
                     != payload
                 ):
-                    raise ValueError("segment quality idempotency conflict") from None
+                    raise SegmentConflictError("segment quality idempotency conflict") from None
                 return dict(row)
         return self.quality(segment_id)[-1]
 
     def quality(self, segment_id: str) -> list[dict]:
         with self.catalog.connect() as db:
+            if (
+                db.execute(
+                    "SELECT 1 FROM segment_bundles WHERE segment_id=?", (segment_id,)
+                ).fetchone()
+                is None
+            ):
+                raise SegmentNotFoundError("segment not found")
             rows = db.execute(
                 "SELECT * FROM segment_quality_dispositions WHERE segment_id=? ORDER BY created_at,disposition_id",
                 (segment_id,),
@@ -295,19 +394,22 @@ class SegmentCatalog:
         return result
 
     def close_episode(self, close: dict, *, idempotency_key: str) -> dict:
-        parsed = EpisodeCloseV1.model_validate(close)
+        try:
+            parsed = EpisodeCloseV1.model_validate(close)
+        except ValueError as error:
+            raise SegmentContractError(str(error)) from error
         refs = sorted(parsed.segments, key=lambda item: item.sequence_index)
         if [item.sequence_index for item in refs] != list(range(len(refs))):
-            raise ValueError("episode segment sequence must be contiguous from zero")
+            raise SegmentContractError("episode segment sequence must be contiguous from zero")
         if (
             refs[0].timeline_start_ns != parsed.timeline_start_ns
             or refs[-1].timeline_end_ns != parsed.timeline_end_ns
         ):
-            raise ValueError("episode timeline bounds do not match segment bounds")
+            raise SegmentContractError("episode timeline bounds do not match segment bounds")
         for left, right in pairwise(refs):
             if left.timeline_end_ns != right.timeline_start_ns:
                 relation = "overlap" if left.timeline_end_ns > right.timeline_start_ns else "gap"
-                raise ValueError(f"episode segment timeline {relation}")
+                raise SegmentContractError(f"episode segment timeline {relation}")
         normalized = parsed.model_dump(mode="json")
         normalized["segments"] = [item.model_dump(mode="json") for item in refs]
         canonical = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
@@ -318,7 +420,9 @@ class SegmentCatalog:
                     "SELECT * FROM segment_bundles WHERE segment_id=?", (ref.segment_id,)
                 ).fetchone()
                 if row is None:
-                    raise ValueError(f"episode close references missing segment {ref.segment_id}")
+                    raise SegmentNotFoundError(
+                        f"episode close references missing segment {ref.segment_id}"
+                    )
                 expected = (
                     parsed.dataset_id,
                     parsed.episode_id,
@@ -341,7 +445,9 @@ class SegmentCatalog:
                     )
                 )
                 if actual != expected:
-                    raise ValueError(f"episode close segment metadata mismatch: {ref.segment_id}")
+                    raise SegmentContractError(
+                        f"episode close segment metadata mismatch: {ref.segment_id}"
+                    )
             try:
                 now = datetime.now(UTC).isoformat()
                 db.execute(
@@ -364,7 +470,7 @@ class SegmentCatalog:
                     "SELECT * FROM episode_closes WHERE idempotency_key=?", (idempotency_key,)
                 ).fetchone()
                 if row is None or row["manifest_json"] != canonical:
-                    raise ValueError("episode close idempotency conflict") from None
+                    raise SegmentConflictError("episode close idempotency conflict") from None
                 return self.get_close(row["close_id"])
         return self.get_close(close_id)
 
@@ -374,7 +480,7 @@ class SegmentCatalog:
                 "SELECT * FROM episode_closes WHERE close_id=?", (close_id,)
             ).fetchone()
         if row is None:
-            raise KeyError(close_id)
+            raise SegmentNotFoundError("episode close not found")
         item = dict(row)
         item["manifest"] = json.loads(item.pop("manifest_json"))
         return item
@@ -388,7 +494,8 @@ class SegmentCatalog:
             ).fetchall()
             for close in closes:
                 segments = db.execute(
-                    """SELECT b.*,q.training_eligible,q.reason,q.validator,q.validator_version,q.disposition_id
+                    """SELECT b.*,q.training_eligible,q.reason,q.validator,q.validator_version,
+                    q.validator_state,q.disposition_id
                     FROM episode_close_segments x JOIN segment_bundles b ON b.segment_id=x.segment_id
                     LEFT JOIN segment_quality_dispositions q ON q.disposition_id=(
                       SELECT disposition_id FROM segment_quality_dispositions
@@ -396,7 +503,11 @@ class SegmentCatalog:
                     WHERE x.close_id=? ORDER BY x.ordinal""",
                     (close["close_id"],),
                 ).fetchall()
-                failures = [row for row in segments if row["training_eligible"] == 0]
+                failures = [
+                    row
+                    for row in segments
+                    if row["training_eligible"] != 1 or row["validator_state"] != "passed"
+                ]
                 if failures:
                     excluded.append(
                         {
@@ -404,9 +515,10 @@ class SegmentCatalog:
                             "segments": [
                                 {
                                     "segment_id": row["segment_id"],
-                                    "reason": row["reason"],
+                                    "reason": row["reason"] or "missing_quality_disposition",
                                     "validator": row["validator"],
                                     "validator_version": row["validator_version"],
+                                    "validator_state": row["validator_state"] or "missing",
                                     "disposition_id": row["disposition_id"],
                                 }
                                 for row in failures
@@ -447,14 +559,20 @@ class SegmentCatalog:
                 "SELECT * FROM segment_snapshots WHERE snapshot_id=?", (snapshot_id,)
             ).fetchone()
         if row is None:
-            raise KeyError(snapshot_id)
+            raise SegmentNotFoundError("segment snapshot not found")
         return {
             **json.loads(row["manifest_json"]),
             "snapshot_id": row["snapshot_id"],
             "created_at": row["created_at"],
         }
 
-    def iter_reconstruction(self, close_id: str) -> Iterator[tuple[dict, bytes]]:
+    def iter_reconstruction(
+        self, close_id: str, *, chunk_size: int = DEFAULT_RECONSTRUCTION_CHUNK_BYTES
+    ) -> Iterator[tuple[dict, bytes]]:
+        if chunk_size < 1 or chunk_size > DEFAULT_RECONSTRUCTION_CHUNK_BYTES:
+            raise SegmentContractError(
+                f"chunk_size must be between 1 and {DEFAULT_RECONSTRUCTION_CHUNK_BYTES}"
+            )
         with self.catalog.connect() as db:
             rows = db.execute(
                 """SELECT b.* FROM episode_close_segments x JOIN segment_bundles b
@@ -462,13 +580,17 @@ class SegmentCatalog:
                 (close_id,),
             ).fetchall()
         if not rows:
-            raise KeyError(close_id)
+            raise SegmentNotFoundError("episode close not found")
         for row in rows:
             info = self.storage.inspect(row["storage_key"])
             if info is None or (info.size_bytes, info.sha256) != (row["size_bytes"], row["sha256"]):
-                raise ValueError(f"durable segment object mismatch: {row['segment_id']}")
+                raise SegmentContractError(
+                    f"durable segment object mismatch: {row['segment_id']}"
+                )
             with self.storage.open(row["storage_key"]) as source:
-                yield json.loads(row["manifest_json"]), source.read()
+                manifest = json.loads(row["manifest_json"])
+                while chunk := source.read(chunk_size):
+                    yield manifest, chunk
 
     def status(self, dataset_id: str) -> dict:
         with self.catalog.connect() as db:
