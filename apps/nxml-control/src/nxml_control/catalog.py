@@ -125,6 +125,11 @@ class Catalog:
           commit_id TEXT PRIMARY KEY,upload_id TEXT NOT NULL UNIQUE REFERENCES uploads(id),checksum TEXT NOT NULL,
           size_bytes INTEGER NOT NULL,storage_key TEXT NOT NULL,state TEXT NOT NULL CHECK(state="committed"),
           committed_at TEXT NOT NULL,dataset_id TEXT NOT NULL,shard_id TEXT NOT NULL UNIQUE);
+        CREATE TABLE IF NOT EXISTS episode_quality_dispositions(
+          disposition_id TEXT PRIMARY KEY,idempotency_key TEXT NOT NULL UNIQUE,dataset_id TEXT NOT NULL,episode_id TEXT NOT NULL,
+          schema_id TEXT NOT NULL,training_eligible INTEGER NOT NULL,reason TEXT NOT NULL,validator TEXT NOT NULL,validator_version TEXT NOT NULL,created_at TEXT NOT NULL,
+          FOREIGN KEY(dataset_id,episode_id) REFERENCES episodes(dataset_id,id));
+        CREATE INDEX IF NOT EXISTS episode_quality_latest_idx ON episode_quality_dispositions(dataset_id,episode_id,created_at,disposition_id);
         CREATE TABLE IF NOT EXISTS snapshots(
           snapshot_id TEXT PRIMARY KEY,dataset_id TEXT NOT NULL REFERENCES datasets(id),created_at TEXT NOT NULL,
           control_source TEXT NOT NULL,manifest_json TEXT NOT NULL);
@@ -272,20 +277,141 @@ class Catalog:
             raise KeyError(commit_id)
         return _receipt(row)
 
+    def list_receipts(
+        self, *, dataset_id: str | None = None, shard_id: str | None = None, limit=100, offset=0
+    ) -> list[CommitReceipt]:
+        clauses = []
+        params = []
+        if dataset_id is not None:
+            clauses.append("dataset_id=?")
+            params.append(dataset_id)
+        if shard_id is not None:
+            clauses.append("shard_id=?")
+            params.append(shard_id)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        with self.connect() as db:
+            rows = db.execute(
+                f"SELECT * FROM commit_receipts{where} ORDER BY committed_at,commit_id LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            ).fetchall()
+        return [_receipt(row) for row in rows]
+
+    def set_episode_quality(
+        self,
+        dataset_id: str,
+        episode_id: str,
+        *,
+        idempotency_key: str,
+        training_eligible: bool,
+        reason: str,
+        validator: str,
+        validator_version: str,
+    ) -> dict:
+        payload = (
+            dataset_id,
+            episode_id,
+            "nxml.episode-quality.v1",
+            int(training_eligible),
+            reason,
+            validator,
+            validator_version,
+        )
+        with self.connect() as db:
+            if (
+                db.execute(
+                    "SELECT 1 FROM episodes WHERE dataset_id=? AND id=?",
+                    (dataset_id, episode_id),
+                ).fetchone()
+                is None
+            ):
+                raise KeyError(episode_id)
+            try:
+                disposition_id = str(uuid4())
+                db.execute(
+                    "INSERT INTO episode_quality_dispositions VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (disposition_id, idempotency_key, *payload, datetime.now(UTC).isoformat()),
+                )
+            except sqlite3.IntegrityError:
+                row = db.execute(
+                    "SELECT * FROM episode_quality_dispositions WHERE idempotency_key=?",
+                    (idempotency_key,),
+                ).fetchone()
+                assert row is not None
+                actual = tuple(
+                    row[name]
+                    for name in (
+                        "dataset_id",
+                        "episode_id",
+                        "schema_id",
+                        "training_eligible",
+                        "reason",
+                        "validator",
+                        "validator_version",
+                    )
+                )
+                if actual != payload:
+                    raise ValueError("quality disposition idempotency key reused") from None
+                return _quality(row)
+            row = db.execute(
+                "SELECT * FROM episode_quality_dispositions WHERE disposition_id=?",
+                (disposition_id,),
+            ).fetchone()
+            return _quality(row)
+
+    def episode_quality(self, dataset_id: str, episode_id: str) -> list[dict]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT * FROM episode_quality_dispositions WHERE dataset_id=? AND episode_id=? ORDER BY created_at,disposition_id",
+                (dataset_id, episode_id),
+            ).fetchall()
+        return [_quality(row) for row in rows]
+
     def create_snapshot(self, dataset_id: str, *, control_source: str = "all") -> Snapshot:
         if control_source not in {"all", "human", "policy"}:
             raise ValueError("control_source must be all, human, or policy")
         with self.connect() as db:
-            rows = db.execute(
+            shard_rows = db.execute(
                 "SELECT id,sha256,size_bytes,object_key FROM shards WHERE dataset_id=? ORDER BY id",
                 (dataset_id,),
             ).fetchall()
-            if not rows:
+            if not shard_rows:
                 raise KeyError(dataset_id)
+            episode_rows = db.execute(
+                "SELECT id,shard_id FROM episodes WHERE dataset_id=? ORDER BY shard_id,ordinal",
+                (dataset_id,),
+            ).fetchall()
+            eligible_by_shard = {row["id"]: [] for row in shard_rows}
+            exclusions = []
+            for episode in episode_rows:
+                quality = db.execute(
+                    "SELECT * FROM episode_quality_dispositions WHERE dataset_id=? AND episode_id=? ORDER BY created_at DESC,disposition_id DESC LIMIT 1",
+                    (dataset_id, episode["id"]),
+                ).fetchone()
+                if quality is not None and not bool(quality["training_eligible"]):
+                    exclusions.append(
+                        {
+                            "episode_id": episode["id"],
+                            "reason": quality["reason"],
+                            "validator": quality["validator"],
+                            "validator_version": quality["validator_version"],
+                            "disposition_id": quality["disposition_id"],
+                        }
+                    )
+                else:
+                    eligible_by_shard[episode["shard_id"]].append(episode["id"])
+            shards = [
+                {**dict(row), "episode_ids": eligible_by_shard[row["id"]]}
+                for row in shard_rows
+                if eligible_by_shard[row["id"]]
+            ]
+            if not shards:
+                raise ValueError("dataset has no training-eligible episodes")
             manifest = {
+                "schema_id": "nxml.dataset-snapshot.v1",
                 "dataset_id": dataset_id,
                 "control_source": control_source,
-                "shards": [dict(row) for row in rows],
+                "shards": shards,
+                "excluded_episodes": exclusions,
             }
             canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
             snapshot_id = "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
@@ -294,7 +420,7 @@ class Catalog:
                 "INSERT OR IGNORE INTO snapshots VALUES(?,?,?,?,?)",
                 (snapshot_id, dataset_id, created_at, control_source, canonical),
             )
-            for ordinal, row in enumerate(rows):
+            for ordinal, row in enumerate(shards):
                 db.execute(
                     "INSERT OR IGNORE INTO snapshot_shards VALUES(?,?,?)",
                     (snapshot_id, row["id"], ordinal),
@@ -425,3 +551,9 @@ def _snapshot(row: sqlite3.Row) -> Snapshot:
         row["control_source"],
         json.loads(row["manifest_json"]),
     )
+
+
+def _quality(row: sqlite3.Row) -> dict:
+    item = dict(row)
+    item["training_eligible"] = bool(item["training_eligible"])
+    return item

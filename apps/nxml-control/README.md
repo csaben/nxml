@@ -12,6 +12,8 @@ An exact create retry returns the same upload. Reusing an idempotency key with c
 
 Storage is behind `ObjectStorage`. `LocalObjectStorage` supports credential-free tests; S3/HF Storage Buckets implement the same `put_if_absent`, `inspect`, and `open` operations without coupling catalog state to Git history.
 
+Training job and worker details are versioned in [`TRAINING_WORKER.md`](TRAINING_WORKER.md). Production startup requires a configured real worker; the fake executor is opt-in development behavior.
+
 Episode v2 Parquet ownership is integer encoded: `0` unowned, `1` human, `2` policy. `human_action_mask` separately indicates explicit human inputs.
 
 ## Strict commit manifest
@@ -34,3 +36,9 @@ A successful commit returns and persists `commit_id`, `upload_id`, `checksum`, `
 Search indexing is strictly asynchronous and downstream of committed episodes. `index_versions`, `derived_artifacts`, and `annotations` are never consulted by upload commit/receipt acknowledgement, edge source deletion, inference, snapshot training, model promotion, or rollback. No embedding compute or vector database is included.
 
 Canonical clip references are `{dataset_id, episode_id, window_start_ns, window_end_ns}` with a half-open `[start_ns, end_ns)` window. Artifact episode-level references omit both window fields; annotations require both. Indexes and artifacts use explicit `pending -> running -> complete|failed` transitions and exact idempotency keys. Reserved artifact metadata includes `artifact_type`, `embedding_model`, `embedding_version`, `labels`, `derived_features`, `source_snapshot_id`, `index_version`, and `status`.
+
+## Training eligibility and edge cleanup
+
+Episode quality is append-only server-side metadata under `nxml.episode-quality.v1`. Set it with authenticated `POST /v1/datasets/{dataset_id}/episodes/{episode_id}/quality-dispositions` and an `Idempotency-Key`; audit it with the matching GET. Snapshot creation uses the latest disposition, excludes `training_eligible=false` episodes by default, records exclusions in the immutable `nxml.dataset-snapshot.v1` manifest, and returns 422 when nothing remains eligible. Raw shard and receipt bytes are never mutated.
+
+A verified commit receipt is sufficient for edge cleanup. The authoritative bytes are under the control-plane object root (`/var/lib/nxml-control/objects/<storage_key>` in the cradle deployment), while receipt, episode, quality, and snapshot evidence persist in `/var/lib/nxml-control/catalog.sqlite3`. Training consumes these cluster objects only. See [`HUGGING_FACE_ARCHITECTURE.md`](HUGGING_FACE_ARCHITECTURE.md) for asynchronous replication design.

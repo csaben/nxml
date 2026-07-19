@@ -29,7 +29,10 @@ def select_training_rows(
 
 
 def iter_webdataset_rows(
-    stream, *, control_source: ControlSource = "all"
+    stream,
+    *,
+    control_source: ControlSource = "all",
+    episode_ids: set[str] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Read action Parquet members from a WebDataset tar in lexical member order."""
     import io
@@ -45,6 +48,10 @@ def iter_webdataset_rows(
                 if item.isfile()
                 and item.name.endswith(".parquet")
                 and not item.name.endswith(".events.parquet")
+                and (
+                    episode_ids is None
+                    or item.name.removesuffix(".parquet").split("/")[-1] in episode_ids
+                )
             ),
             key=lambda item: item.name,
         )

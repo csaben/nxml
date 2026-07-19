@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 from nxml_control.auth import load_service_token
+from nxml_control.training import FakeTrainingExecutor, SubprocessTrainingExecutor
 
 CRADLE_TAILNET_IP = "100.80.98.4"
 DEFAULT_PORT = 8787
@@ -29,12 +30,35 @@ def main() -> None:
     parser.add_argument(
         "--token-file", help="0600 Bearer token file; defaults to NXML_CONTROL_TOKEN_FILE"
     )
+    parser.add_argument(
+        "--bc-worker-command",
+        default=os.environ.get("NXML_BC_WORKER_COMMAND"),
+        help="worker command implementing nxml.bc-job.v1; defaults to NXML_BC_WORKER_COMMAND",
+    )
+    parser.add_argument("--job-dir", default="/var/lib/nxml-control/jobs")
+    parser.add_argument(
+        "--allow-fake-training",
+        action="store_true",
+        help="development only: use the synchronous fake BC executor",
+    )
     args = parser.parse_args()
 
     token = load_service_token(token_file=args.token_file)
     state_dir = _directory(args.state_dir)
     checkpoint_dir = _directory(args.checkpoint_dir)
     log_dir = _directory(args.log_dir)
+    job_dir = _directory(args.job_dir)
+    if args.bc_worker_command:
+        training_executor = SubprocessTrainingExecutor(args.bc_worker_command, job_dir)
+        training_async = True
+    elif args.allow_fake_training:
+        training_executor = FakeTrainingExecutor()
+        training_async = False
+    else:
+        parser.error(
+            "production startup requires --bc-worker-command/NXML_BC_WORKER_COMMAND "
+            "(or explicit development-only --allow-fake-training)"
+        )
     log_path = log_dir / "control.log"
     logging.basicConfig(
         level=logging.INFO,
@@ -47,7 +71,12 @@ def main() -> None:
 
     from nxml_control.api import create_app
 
-    app = create_app(state_dir=state_dir, auth_token=token)
+    app = create_app(
+        state_dir=state_dir,
+        auth_token=token,
+        training_executor=training_executor,
+        training_async=training_async,
+    )
     app.state.checkpoint_dir = checkpoint_dir
     app.state.log_dir = log_dir
     uvicorn.run(app, host=args.host, port=args.port, proxy_headers=False, server_header=False)

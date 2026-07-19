@@ -119,6 +119,10 @@ class DeploymentListResponse(BaseModel):
     deployments: list[DeploymentResponse]
 
 
+class CommitReceiptListResponse(BaseModel):
+    receipts: list[CommitReceiptResponse]
+
+
 class DatasetListResponse(BaseModel):
     datasets: list[dict[str, Any]]
 
@@ -139,6 +143,17 @@ class MetricsResponse(BaseModel):
     metrics: dict[str, float]
 
 
+class TrainingArtifactResponse(BaseModel):
+    artifact_type: str
+    uri: str
+    sha256: str
+    status: str
+
+
+class TrainingArtifactsResponse(BaseModel):
+    artifacts: list[TrainingArtifactResponse]
+
+
 class CreateUploadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     object_key: str = Field(pattern=r"^uploads/[A-Za-z0-9._/-]+\.tar$")
@@ -156,6 +171,7 @@ class RegisterModelRequest(BaseModel):
     source_commit_id: str
     compatibility: dict[str, Any]
     evaluation: dict[str, Any]
+    training_job_id: str | None = None
 
 
 class ActivationRequest(BaseModel):
@@ -175,6 +191,34 @@ class SnapshotRequest(BaseModel):
     control_source: str = Field(default="all", pattern=r"^(all|human|policy)$")
 
 
+class EpisodeQualityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_id: str = Field(
+        default="nxml.episode-quality.v1", pattern=r"^nxml\.episode-quality\.v1$"
+    )
+    training_eligible: bool
+    reason: str = Field(min_length=1)
+    validator: str = Field(min_length=1)
+    validator_version: str = Field(min_length=1)
+
+
+class EpisodeQualityResponse(BaseModel):
+    disposition_id: str
+    idempotency_key: str
+    dataset_id: str
+    episode_id: str
+    schema_id: str
+    training_eligible: bool
+    reason: str
+    validator: str
+    validator_version: str
+    created_at: str
+
+
+class EpisodeQualityListResponse(BaseModel):
+    dispositions: list[EpisodeQualityResponse]
+
+
 class CommitRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     dataset_id: str = Field(min_length=1)
@@ -192,11 +236,16 @@ def create_app(
     training_executor: TrainingExecutor | None = None,
     deployment_runtime: DeploymentRuntime | None = None,
     auth_token: str | None = None,
+    training_async: bool = False,
 ) -> FastAPI:
     state = Path(state_dir)
     catalog = Catalog(state / "catalog.sqlite3")
     service = IngestService(catalog, LocalObjectStorage(state / "objects"))
-    training = TrainingJobs(state / "catalog.sqlite3", training_executor or FakeTrainingExecutor())
+    training = TrainingJobs(
+        state / "catalog.sqlite3",
+        training_executor or FakeTrainingExecutor(),
+        run_async=training_async,
+    )
     models = ModelRegistry(state / "catalog.sqlite3", deployment_runtime or FakePolicyRuntime())
     search = SearchCatalog(state / "catalog.sqlite3")
     app = FastAPI(title="NXML ML Control Plane", version="1.0.0")
@@ -284,6 +333,55 @@ def create_app(
     def episodes(dataset_id: str):
         return {"episodes": [item.__dict__ for item in catalog.list_episodes(dataset_id)]}
 
+    @app.post(
+        "/v1/datasets/{dataset_id}/episodes/{episode_id}/quality-dispositions",
+        status_code=201,
+        response_model=EpisodeQualityResponse,
+    )
+    def set_episode_quality(
+        dataset_id: str,
+        episode_id: str,
+        body: EpisodeQualityRequest,
+        idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1)],
+    ):
+        try:
+            fields = body.model_dump()
+            fields.pop("schema_id")
+            return catalog.set_episode_quality(
+                dataset_id, episode_id, idempotency_key=idempotency_key, **fields
+            )
+        except KeyError as error:
+            raise HTTPException(404, "committed episode not found") from error
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+
+    @app.get(
+        "/v1/datasets/{dataset_id}/episodes/{episode_id}/quality-dispositions",
+        response_model=EpisodeQualityListResponse,
+    )
+    def episode_quality(dataset_id: str, episode_id: str):
+        return {"dispositions": catalog.episode_quality(dataset_id, episode_id)}
+
+    @app.get("/v1/commits", response_model=CommitReceiptListResponse)
+    def receipts(
+        dataset_id: str | None = None,
+        shard_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ):
+        limit = min(max(limit, 1), 500)
+        return {
+            "receipts": [
+                item.__dict__
+                for item in catalog.list_receipts(
+                    dataset_id=dataset_id,
+                    shard_id=shard_id,
+                    limit=limit,
+                    offset=max(offset, 0),
+                )
+            ]
+        }
+
     @app.get("/v1/commits/{commit_id}", response_model=CommitReceiptResponse)
     def receipt(commit_id: str):
         try:
@@ -299,6 +397,8 @@ def create_app(
             return catalog.create_snapshot(dataset_id, control_source=body.control_source).__dict__
         except KeyError as error:
             raise HTTPException(404, "dataset not found") from error
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
 
     @app.get("/v1/snapshots", response_model=SnapshotListResponse)
     def snapshots(
@@ -372,6 +472,22 @@ def create_app(
         except KeyError as error:
             raise HTTPException(404, "training job not found") from error
 
+    @app.get("/v1/training/jobs/{job_id}/artifacts", response_model=TrainingArtifactsResponse)
+    def training_artifacts(job_id: str):
+        try:
+            return {"artifacts": training.artifacts(job_id)}
+        except KeyError as error:
+            raise HTTPException(404, "training job not found") from error
+
+    @app.post("/v1/training/jobs/{job_id}/cancel", response_model=TrainingJobResponse)
+    def cancel_training(job_id: str):
+        try:
+            return training.cancel(job_id)
+        except KeyError as error:
+            raise HTTPException(404, "training job not found") from error
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+
     @app.get("/v1/models/revisions", response_model=ModelRevisionListResponse)
     def model_revisions(
         model_id: str | None = None, state: str | None = None, limit: int = 100, offset: int = 0
@@ -385,7 +501,22 @@ def create_app(
 
     @app.post("/v1/models/revisions", status_code=201, response_model=ModelRevisionResponse)
     def register_model(body: RegisterModelRequest):
-        return models.register(**body.model_dump())
+        fields = body.model_dump()
+        training_job_id = fields.pop("training_job_id")
+        if training_job_id is not None:
+            try:
+                job = training.get(training_job_id)
+            except KeyError as error:
+                raise HTTPException(404, "training job not found") from error
+            if job["state"] != "succeeded":
+                raise HTTPException(409, "training job has not succeeded")
+            if (
+                job["snapshot_id"] != body.source_snapshot_id
+                or job["checkpoint_path"] != body.checkpoint_path
+                or job["checkpoint_sha256"] != body.checkpoint_sha256
+            ):
+                raise HTTPException(422, "model revision does not match verified training artifact")
+        return models.register(**fields)
 
     @app.get("/v1/models/revisions/{revision_id}", response_model=ModelRevisionResponse)
     def model_revision(revision_id: str):
