@@ -1,0 +1,67 @@
+# CPU smoke test: tiny shapes, fake data, random frozen backbone, no wandb.
+# Modeled on MIRA's tests/codec/conftest.py::tiny_raev2_config.
+#   uv run nxwm-mira train configs/codec/tiny_smoke.yaml
+
+run:
+  seed: 0
+  steps: 50
+  batch_size: 2
+  output_dir: checkpoints/codec/smoke
+  checkpoint_every: 25
+  checkpoint_keep_recent: 1
+  checkpoint_keep_permanent_every: 1000000
+  log_every: 5
+  viz_every: 10
+  compile: false
+  latents_ema_decay: 0.99
+  require_dino_weights: false # random frozen backbone; the gated weights aren't needed
+
+wandb:
+  project: nxwm-mira-codec-za
+  mode: disabled
+
+model:
+  loss:
+    loss_mae: 1.0
+    loss_lpips_perceptual: 0.0
+    loss_dino_latent_consistency: 0.0
+    compile_dino: false
+    auto_weight: false
+  config:
+    encoder:
+      latent_dim: 8
+      rae_model: dinov3_vitb16
+      aggregation_layers: [2, 5, 8, 11]
+      aspect_mode: stretch
+      bottleneck: { stride: 2, temporal_stride: 2, noise_tau: 0.0 }
+      compile_dino: false
+      video: { height: 64, width: 64, channels: 3, timesteps: 4, fps: 15 }
+    decoder:
+      latent_dim: 8
+      activation_checkpointing: false
+      bottleneck: { stride: 2 }
+      vit_width: 64
+      vit_depth: 2
+      vit_num_heads: 4
+      mlp_dim_multiplier: 2
+      qk_norm: layernorm
+      patch_size: 16
+      patch_size_t: 2
+      # video: inherited from encoder.video
+
+data:
+  source: fake # swap to `za` to smoke-test the real decode path on CPU
+  root: data/za-mp4
+  num_workers: 0
+  fake_n_clips: 16
+
+validation:
+  batch_size: 2
+  val_every: 25
+  val_first: true
+  val_n_samples: 4
+
+optim:
+  optimizer: { lr: 1.0e-4, betas: [0.9, 0.95], weight_decay: 0.1 }
+  scheduler: { warmup_steps: 5, constant_steps: 0, decay_steps: 40, min_lr: 1.0e-6 }
+  model_ema_decay: 0.9999

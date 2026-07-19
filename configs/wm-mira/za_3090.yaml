@@ -1,0 +1,69 @@
+# Latent world model on the Pokémon ZA corpus, sized for 2x RTX 3090.
+#   uv run torchrun --nproc-per-node=2 --module nxwm_mira.cli train-wm \
+#       configs/wm-mira/za_3090.yaml --output-dir checkpoints/wm-mira/run_001
+#
+# Requires a trained codec checkpoint (model.config.codec_checkpoint below).
+# ~220M trainable DiT (mira 1b.yaml scaled down: hidden 2048->1024). Trains end-to-end
+# from video: the frozen codec encodes each batch on the fly.
+
+run:
+  seed: 28
+  steps: 150000
+  batch_size: 3
+  output_dir: null # auto: checkpoints/wm-mira/run_NNN
+  checkpoint_every: 2500
+  checkpoint_keep_recent: 2
+  checkpoint_keep_permanent_every: 25000
+  log_every: 50
+  viz_every: 1000 # autoregressive rollouts are pricier than codec recons
+  compile: false
+  latents_ema_decay: 0.99 # unused by the WM trainer; kept for schema compat
+  require_dino_weights: true # unused by the WM trainer (codec ships its backbone)
+
+wandb:
+  project: nxwm-mira-wm-za
+  mode: online
+
+model:
+  config:
+    codec_checkpoint: checkpoints/codec/run_001 # resolves to the latest checkpoint
+    actions: { source_fps: 30, target_fps: 15 }
+    # 32 frames @15fps = 16 latent frames (~2.1 s) per training window.
+    video: { height: 288, width: 512, channels: 3, timesteps: 32, fps: 15 }
+    n_context_frames: 30 # inference: 15 latent context frames + 1 generated
+    hidden_dim: 1024
+    n_head: 16
+    n_kv_head: 4 # GQA, mira 1b.yaml
+    n_layers: 16
+    time_attention_every: 4 # temporal attention on layers 0/4/8/12 + last
+    patch_size: 1
+    causal: true
+    use_clean_past: true
+    learned_temporal_pool: true
+    attention_gating: true
+    ada_attn_ln: true
+    dropout_action_prob: 0.1
+    activation_checkpointing: true
+
+data:
+  source: za
+  root: data/za-mp4
+  num_workers: 6
+  source_fps: 30.0
+  holdout_per_folder: 1
+
+validation:
+  batch_size: 3
+  val_every: 2500
+  val_first: true
+  val_n_samples: 96
+
+viz:
+  n_diffusion_steps: 10
+  n_samples: 2
+
+optim:
+  # mira train_world_model.yaml: lr 1e-4, betas (0.9, 0.99), wd 0.1, no cosine decay.
+  optimizer: { lr: 1.0e-4, betas: [0.9, 0.99], weight_decay: 0.1 }
+  scheduler: { warmup_steps: 1000, constant_steps: 0, decay_steps: 0, min_lr: 1.0e-6 }
+  model_ema_decay: 0.9999

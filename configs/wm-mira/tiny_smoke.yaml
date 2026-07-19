@@ -1,0 +1,59 @@
+# CPU smoke test for the world-model trainer: tiny shapes, fake data, no wandb.
+# Requires a codec checkpoint; point codec_checkpoint at the codec smoke run first:
+#   uv run nxwm-mira train configs/codec/tiny_smoke.yaml
+#   uv run nxwm-mira train-wm configs/wm-mira/tiny_smoke.yaml
+
+run:
+  seed: 0
+  steps: 30
+  batch_size: 2
+  output_dir: checkpoints/wm-mira/smoke
+  checkpoint_every: 15
+  checkpoint_keep_recent: 1
+  checkpoint_keep_permanent_every: 1000000
+  log_every: 5
+  viz_every: 10
+  compile: false
+  require_dino_weights: false
+
+wandb:
+  project: nxwm-mira-wm-za
+  mode: disabled
+
+model:
+  config:
+    codec_checkpoint: checkpoints/codec/smoke
+    actions: { source_fps: 30, target_fps: 15 }
+    video: { height: 64, width: 64, channels: 3, timesteps: 8, fps: 15 }
+    n_context_frames: 6
+    hidden_dim: 64
+    n_head: 4
+    n_kv_head: 2
+    n_layers: 2
+    time_attention_every: 1
+    patch_size: 1
+    causal: true
+    use_clean_past: true
+    learned_temporal_pool: true
+    dropout_action_prob: 0.1
+
+data:
+  source: fake
+  root: data/za-mp4
+  num_workers: 0
+  fake_n_clips: 8
+
+validation:
+  batch_size: 2
+  val_every: 15
+  val_first: true
+  val_n_samples: 4
+
+viz:
+  n_diffusion_steps: 2
+  n_samples: 2
+
+optim:
+  optimizer: { lr: 1.0e-4, betas: [0.9, 0.99], weight_decay: 0.1 }
+  scheduler: { warmup_steps: 5, constant_steps: 0, decay_steps: 0, min_lr: 1.0e-6 }
+  model_ema_decay: 0.9999

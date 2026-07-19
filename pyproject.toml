@@ -40,6 +40,7 @@ ignore = ["E501", "N812"]  # N812: lowercase imports as uppercase (np, F, etc.)
 "tests/**" = ["B011"]
 "**/__init__.py" = ["F401"]
 "packages/nxwm/src/nxwm/training/**" = ["N802", "N803", "N806", "N817", "SIM108", "SIM112", "PTH123"]
+"packages/nxwm-mira/src/nxwm_mira/**" = ["N802", "N803", "N806", "N817", "SIM108", "SIM112", "PTH123"]
 "packages/nxrl/src/nxrl/training/**" = ["N802", "N803", "N806", "N817", "SIM108", "SIM112", "PTH123"]
 "packages/nxml-games/src/nxml_games/pokemon_za/rewards/composite.py" = ["N802", "N803", "N806", "SIM102", "SIM103", "SIM108", "SIM114", "SIM118"]
 

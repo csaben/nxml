@@ -1,0 +1,26 @@
+[project]
+name = "nxml-spool"
+version = "0.1.0"
+description = "Capture-machine spooler: episodes -> WebDataset tar shards -> HuggingFace, then verified local delete"
+requires-python = ">=3.14"
+authors = [{ name = "Clark Saben" }]
+license = { text = "MIT" }
+readme = "README.md"
+dependencies = [
+    "click>=8.1",
+    "huggingface-hub>=0.24",
+]
+
+[project.urls]
+Repository = "https://github.com/csaben/nxml"
+Issues = "https://github.com/csaben/nxml/issues"
+
+[project.scripts]
+nxml-spool = "nxml_spool.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nxml_spool"]

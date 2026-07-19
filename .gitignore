@@ -18,3 +18,8 @@ tools/*.py
 
 # Weights & Biases
 wandb/
+# Local env (RS_DINO_WEIGHTS_DIR, wandb keys)
+.env
+
+# Local reference clones of upstream repos (have their own .git)
+references/

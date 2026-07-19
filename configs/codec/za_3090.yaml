@@ -1,0 +1,76 @@
+# RAEv2 codec on the Pokémon ZA corpus, sized for one 24 GB RTX 3090.
+#   uv sync --all-packages --extra training   (wandb + lpips)
+#   uv run nxwm-mira train configs/codec/za_3090.yaml
+# Needs the gated DINOv3 vitb16 weights: set RS_DINO_WEIGHTS_DIR (see .env).
+#
+# ~160M trainable decoder (vs MIRA's 0.6B) on a DINOv3-B/16 frozen encoder.
+# OOM levers, in order: batch_size 3->2, timesteps 16->12, *frame_frac 0.25->0.125,
+# vit_depth 16->12.
+
+run:
+  seed: 28
+  steps: 100000 # x batch 3 x 32 source-frames/clip ~= 15 epochs of the 19k clip windows
+  batch_size: 3
+  output_dir: null # auto: checkpoints/codec/run_NNN
+  checkpoint_every: 2500
+  checkpoint_keep_recent: 2
+  checkpoint_keep_permanent_every: 25000
+  log_every: 50
+  viz_every: 500
+  compile: false # torch 2.11: inductor known-broken for this model past torch 2.8
+  latents_ema_decay: 0.99
+  require_dino_weights: true
+
+wandb:
+  project: nxwm-mira-codec-za
+  mode: online
+
+model:
+  loss:
+    loss_mae: 1.0
+    loss_lpips_perceptual: 1.0
+    lpips_perceptual_frame_frac: 0.25
+    loss_dino_latent_consistency: 1.0
+    dino_latent_consistency_frame_frac: 0.25
+    compile_dino: false
+    auto_weight: true
+  config:
+    encoder:
+      latent_dim: 32
+      rae_model: dinov3_vitb16
+      # aggregation_layers omitted -> dino.py's DEFAULT_DINO_LAYERS[vitb16] = (2, 5, 8, 11)
+      aspect_mode: stretch # ZA frames are 16:9 squashed into 4:3; stretch un-squashes
+      bottleneck: { stride: 2, temporal_stride: 2, noise_tau: 0.0 }
+      compile_dino: false
+      video: { height: 288, width: 512, channels: 3, timesteps: 16, fps: 15 }
+    decoder:
+      latent_dim: 32
+      activation_checkpointing: true
+      bottleneck: { stride: 2 }
+      vit_width: 768
+      vit_depth: 16
+      vit_num_heads: 12 # head_dim 64
+      vit_num_kv_heads: 4 # GQA
+      mlp_dim_multiplier: 4
+      qk_norm: layernorm
+      patch_size: 16
+      patch_size_t: 2
+      # video: inherited from encoder.video
+
+data:
+  source: za
+  root: data/za-mp4
+  num_workers: 6
+  source_fps: 30.0 # fps 15 model -> frame_stride 2
+  holdout_per_folder: 1
+
+validation:
+  batch_size: 3
+  val_every: 2500
+  val_first: true
+  val_n_samples: 96
+
+optim:
+  optimizer: { lr: 1.0e-4, betas: [0.9, 0.95], weight_decay: 0.1 }
+  scheduler: { warmup_steps: 1000, constant_steps: 0, decay_steps: 99000, min_lr: 1.0e-6 }
+  model_ema_decay: 0.9999

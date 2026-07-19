@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nxwm-mira watch</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; background: #14161a; color: #e6e6e6;
+    font: 14px/1.5 system-ui, sans-serif;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap;
+    padding: 0.8rem 1.2rem; background: #1c1f26; border-bottom: 1px solid #2a2e38;
+  }
+  header h1 { font-size: 1rem; margin: 0; font-weight: 600; }
+  header .muted { color: #8a93a5; font-size: 0.85rem; }
+  #progress-wrap { flex: 1 1 220px; max-width: 420px; height: 8px;
+    background: #2a2e38; border-radius: 4px; align-self: center; }
+  #progress { height: 100%; width: 0%; background: #4c9aff; border-radius: 4px;
+    transition: width 0.5s; }
+  main { padding: 1.2rem; display: grid; gap: 1.2rem;
+    grid-template-columns: minmax(0, 1fr); max-width: 1200px; margin: 0 auto; }
+  .stats { display: flex; gap: 2rem; flex-wrap: wrap; }
+  .stat .label { color: #8a93a5; font-size: 0.78rem; text-transform: uppercase;
+    letter-spacing: 0.05em; }
+  .stat .value { font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+  #recon-card { background: #1c1f26; border: 1px solid #2a2e38; border-radius: 8px;
+    padding: 1rem; }
+  #recon-card h2 { margin: 0 0 0.6rem; font-size: 0.9rem; color: #8a93a5;
+    font-weight: 600; }
+  #recon { width: 100%; image-rendering: auto; border-radius: 4px; background: #000; }
+  #recon-select { margin-top: 0.6rem; background: #14161a; color: #e6e6e6;
+    border: 1px solid #2a2e38; border-radius: 4px; padding: 0.3rem 0.5rem; }
+  #spark { width: 100%; height: 90px; }
+  a { color: #4c9aff; }
+  #error { color: #ff6b6b; padding: 1.2rem; display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="run-name">nxwm-mira</h1>
+  <span class="muted">{{RUN_DIR}}</span>
+  <div id="progress-wrap"><div id="progress"></div></div>
+  <span class="muted" id="step-label">–</span>
+  <a id="wandb-link" href="#" target="_blank" style="display:none">wandb ↗</a>
+</header>
+<div id="error"></div>
+<main>
+  <div class="stats">
+    <div class="stat"><div class="label">loss_total</div><div class="value" id="loss">–</div></div>
+    <div class="stat"><div class="label">learning rate</div><div class="value" id="lr">–</div></div>
+    <div class="stat"><div class="label">frames/s</div><div class="value" id="fps">–</div></div>
+    <div class="stat"><div class="label">eta</div><div class="value" id="eta">–</div></div>
+    <div class="stat"><div class="label">latent μ / σ</div><div class="value" id="latent">–</div></div>
+  </div>
+  <canvas id="spark" width="1200" height="90"></canvas>
+  <div id="recon-card">
+    <h2>reconstruction — ground truth | decoded (val clips, EMA weights)</h2>
+    <img id="recon" alt="waiting for first reconstruction…">
+    <div>
+      <select id="recon-select"><option value="latest.gif">latest</option></select>
+    </div>
+  </div>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  let pinned = "latest.gif";
+  let lastStep = -1;
+
+  $("recon-select").addEventListener("change", (e) => {
+    pinned = e.target.value;
+    $("recon").src = `/recons/${pinned}?v=${Date.now()}`;
+  });
+
+  function fmt(x, digits = 4) {
+    if (x === null || x === undefined) return "–";
+    if (Math.abs(x) >= 1000) return x.toFixed(0);
+    return x.toPrecision(digits);
+  }
+
+  async function drawSparkline() {
+    const res = await fetch("/api/history?n=800");
+    if (!res.ok) return;
+    const records = await res.json();
+    const pts = records
+      .filter((r) => r["train/loss_total"] !== undefined)
+      .map((r) => [r.step, r["train/loss_total"]]);
+    if (pts.length < 2) return;
+    const canvas = $("spark"), ctx = canvas.getContext("2d");
+    const W = canvas.width, H = canvas.height, pad = 6;
+    ctx.clearRect(0, 0, W, H);
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs);
+    const y0 = Math.min(...ys), y1 = Math.max(...ys);
+    ctx.strokeStyle = "#4c9aff"; ctx.lineWidth = 1.5; ctx.beginPath();
+    pts.forEach(([x, y], i) => {
+      const px = pad + ((x - x0) / (x1 - x0 || 1)) * (W - 2 * pad);
+      const py = H - pad - ((y - y0) / (y1 - y0 || 1)) * (H - 2 * pad);
+      i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    });
+    ctx.stroke();
+    ctx.fillStyle = "#8a93a5"; ctx.font = "11px system-ui";
+    ctx.fillText(`train/loss_total  [${fmt(y0)} … ${fmt(y1)}]`, pad + 2, 12);
+  }
+
+  async function refresh() {
+    let status;
+    try {
+      const res = await fetch("/api/status");
+      if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+      status = await res.json();
+      $("error").style.display = "none";
+    } catch (err) {
+      $("error").textContent = `⚠ ${err.message}`;
+      $("error").style.display = "block";
+      return;
+    }
+    $("run-name").textContent = status.run_name || "nxwm-mira";
+    $("step-label").textContent = `step ${status.step} / ${status.total_steps}`;
+    $("progress").style.width = `${(100 * status.step) / status.total_steps}%`;
+    const s = status.stats || {};
+    $("loss").textContent = fmt(s["train/loss_total"] ?? s["test/loss_total"]);
+    $("lr").textContent = fmt(s["train/learning_rate"], 3);
+    $("fps").textContent = fmt(s["System/throughput_fps_total"], 3);
+    $("eta").textContent = s["System/eta_hours"] ? `${s["System/eta_hours"].toFixed(1)} h` : "–";
+    $("latent").textContent =
+      `${fmt(s["train/latent_mean"], 3)} / ${fmt(s["train/latent_std"], 3)}`;
+    if (status.wandb_url) {
+      $("wandb-link").href = status.wandb_url;
+      $("wandb-link").style.display = "inline";
+    }
+
+    const select = $("recon-select");
+    const have = new Set([...select.options].map((o) => o.value));
+    for (const name of status.recons || []) {
+      if (!have.has(name)) select.add(new Option(name, name));
+    }
+    if (status.step !== lastStep) {
+      lastStep = status.step;
+      if (pinned === "latest.gif" && status.latest_recon) {
+        $("recon").src = `/recons/latest.gif?v=${status.updated_at}`;
+      }
+      drawSparkline();
+    }
+  }
+
+  refresh();
+  setInterval(refresh, 2000);
+</script>
+</body>
+</html>
