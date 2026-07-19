@@ -78,6 +78,8 @@ class SyncedFrame:
     gap_state: str = "none"
     gap_reason: str | None = None
     gap_duration_ns: int = 0
+    boundary_sequence: int | None = None
+    boundary_acknowledged: bool = False
     valid: bool = True
     invalid_reasons: tuple[str, ...] = ()
 

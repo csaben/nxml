@@ -30,6 +30,10 @@ class ArbitratorHistory:
         self._records: deque[ArbitrationRecord] = deque(maxlen=maxlen)
         self._lock = threading.Lock()
         self._first = threading.Event()
+        # Single-writer integer handoff: recorder writes acknowledgments and
+        # the 60 Hz action owner only reads. No lock or wait enters the fast path.
+        self.recording_active = False
+        self.boundary_ack_sequence = 0
 
     @property
     def is_connected(self) -> bool:
@@ -40,6 +44,16 @@ class ArbitratorHistory:
 
     def stop(self):
         pass
+
+    def begin_recording(self) -> None:
+        self.recording_active = True
+
+    def end_recording(self) -> None:
+        self.recording_active = False
+
+    def acknowledge_boundary(self, sequence: int) -> None:
+        if sequence > self.boundary_ack_sequence:
+            self.boundary_ack_sequence = sequence
 
     def wait_for_first(self, timeout: float = 5.0) -> bool:
         return self._first.wait(timeout)
@@ -113,6 +127,8 @@ class ArbitratorHistory:
             gap_state=applied.gap_state,
             gap_reason=applied.gap_reason,
             gap_duration_ns=applied.gap_duration_ns,
+            boundary_sequence=applied.boundary_sequence,
+            boundary_acknowledged=applied.boundary_acknowledged,
             valid=applied.valid,
             invalid_reasons=(applied.gap_reason,) if not applied.valid and applied.gap_reason else (),
         )

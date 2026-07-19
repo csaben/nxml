@@ -60,6 +60,8 @@ class Applied:
     gap_reason: str | None = None
     gap_duration_ns: int = 0
     valid: bool = True
+    boundary_sequence: int | None = None
+    boundary_acknowledged: bool = False
 
 
 class Arbitrator:

@@ -13,7 +13,15 @@ from dagger_history import ArbitrationRecord, ArbitratorHistory
 
 
 class ActionPlane:
-    def __init__(self, orchestrator, inference, *, hz: float = 60.0, stale_ns: int = 55_000_000):
+    def __init__(
+        self,
+        orchestrator,
+        inference,
+        *,
+        hz: float = 60.0,
+        stale_ns: int = 55_000_000,
+        boundary_ack_timeout_ns: int = 150_000_000,
+    ):
         self.orchestrator = orchestrator
         self.inference = inference
         self.period = 1.0 / hz
@@ -28,6 +36,11 @@ class ActionPlane:
         self._revision = inference.client.revision["revision_id"] if inference else None
         self._digest = inference.client.revision["checkpoint_sha256"] if inference else None
         self._last_applied = None
+        self._boundary_sequence = 0
+        self._pending_boundary = None
+        self._pending_boundary_started_ns: int | None = None
+        self._last_boundary_ack_sequence = 0
+        self.boundary_ack_timeout_ns = boundary_ack_timeout_ns
 
     def start(self):
         if self._thread is None:
@@ -70,6 +83,8 @@ class ActionPlane:
         now = time.monotonic_ns()
         with self._lock:
             self._armed = False
+            self._pending_boundary = None
+            self._pending_boundary_started_ns = None
             boundary = replace(self.arbitrator.transition(mode=Mode.HUMAN), monotonic_ns=now)
             self._last_reason = reason
             human = self._human
@@ -90,6 +105,8 @@ class ActionPlane:
             human = self._human
             applied = self.arbitrator.apply(now, human, None, eject=True)
             self._armed = False
+            self._pending_boundary = None
+            self._pending_boundary_started_ns = None
             self._last_reason = "emergency_eject"
             self.orchestrator.post_action(applied.action.tolist())
             self._append(applied, human, None)
@@ -167,6 +184,18 @@ class ActionPlane:
                     if self._last_applied is not None
                     else 0.0
                 ),
+                "pending_boundary_sequence": (
+                    self._pending_boundary.boundary_sequence
+                    if self._pending_boundary is not None
+                    else None
+                ),
+                "pending_boundary_age_ms": (
+                    (time.monotonic_ns() - self._pending_boundary_started_ns) / 1e6
+                    if self._pending_boundary_started_ns is not None
+                    else 0.0
+                ),
+                "last_boundary_ack_sequence": self._last_boundary_ack_sequence,
+                "boundary_ack_timeout_ms": self.boundary_ack_timeout_ns / 1e6,
                 **self.arbitrator.gap_status(),
             }
 
@@ -206,6 +235,46 @@ class ActionPlane:
         getter = getattr(self.inference, "proposal_for_arbitration", None)
         return getter() if getter is not None else self.inference.latest_proposal()
 
+    def _apply_with_boundary_ack(self, now, human, policy):
+        pending = self._pending_boundary
+        if pending is not None:
+            sequence = pending.boundary_sequence
+            assert sequence is not None
+            if self.history.boundary_ack_sequence >= sequence:
+                self._last_boundary_ack_sequence = sequence
+                self._pending_boundary = None
+                self._pending_boundary_started_ns = None
+                return self.arbitrator.apply(now, human, policy)
+            if not self.history.recording_active:
+                return replace(
+                    pending,
+                    monotonic_ns=now,
+                    boundary="neutral_boundary_recorder_lost",
+                    disarmed=True,
+                )
+            if (
+                self._pending_boundary_started_ns is not None
+                and now - self._pending_boundary_started_ns >= self.boundary_ack_timeout_ns
+            ):
+                return replace(
+                    pending,
+                    monotonic_ns=now,
+                    boundary="neutral_boundary_ack_timeout",
+                    disarmed=True,
+                )
+            return replace(pending, monotonic_ns=now)
+        applied = self.arbitrator.apply(now, human, policy)
+        if applied.boundary == "takeover_released" and self.history.recording_active:
+            self._boundary_sequence += 1
+            applied = replace(
+                applied,
+                boundary_sequence=self._boundary_sequence,
+                boundary_acknowledged=False,
+            )
+            self._pending_boundary = applied
+            self._pending_boundary_started_ns = now
+        return applied
+
     def _run(self):
         deadline = time.monotonic()
         while not self._stop.is_set():
@@ -216,7 +285,7 @@ class ActionPlane:
                         now = time.monotonic_ns()
                         human = self._human
                         policy = self._policy_for_arbitration()
-                        applied = self.arbitrator.apply(now, human, policy)
+                        applied = self._apply_with_boundary_ack(now, human, policy)
                         if self.arbitrator.mode is Mode.HUMAN:
                             gap_state, gap_reason, gap_duration, hard = (
                                 self.arbitrator.observe_policy(now, policy)

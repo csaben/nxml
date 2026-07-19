@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from dagger_history import ArbitrationSynchronizer, ArbitratorHistory
@@ -94,6 +94,8 @@ class HumanRecordingSession:
                 target=self._record, args=(writer,), daemon=True, name="dagger-human-recording"
             )
             self._writer = writer
+            if hasattr(self.history, "begin_recording"):
+                self.history.begin_recording()
             self._thread.start()
         return self.status()
 
@@ -134,7 +136,19 @@ class HumanRecordingSession:
             for synced in synchronizer.frames():
                 if self._stop.is_set():
                     break
+                boundary_sequence = getattr(synced, "boundary_sequence", None)
+                if boundary_sequence is not None:
+                    synced = replace(synced, boundary_acknowledged=True)
                 writer.append(synced)
+                if boundary_sequence is not None:
+                    self.history.acknowledge_boundary(boundary_sequence)
+                    writer.append_event(
+                        "neutral_boundary_acknowledged",
+                        timestamp=synced.timestamp,
+                        monotonic_ns=synced.action_monotonic_ns,
+                        source="dagger-recorder",
+                        payload={"boundary_sequence": boundary_sequence},
+                    )
                 if not synced.valid and synced.invalid_reasons != last_invalid_reasons:
                     writer.append_event(
                         "controller_sample_invalid",
@@ -204,6 +218,8 @@ class HumanRecordingSession:
                 payload={"error": error},
             )
         finally:
+            if hasattr(self.history, "end_recording"):
+                self.history.end_recording()
             writer.config["capture_integrity"] = {
                 "status": "failed" if error else "complete",
                 "error": error,

@@ -82,3 +82,39 @@ def test_unarmed_inference_failure_cannot_claim_or_emit_action_authority():
     assert plane.status()["armed"] is False
     assert plane.status()["mode"] == "human"
     assert output.actions == []
+
+
+def test_recording_boundary_is_held_until_exact_lock_free_ack():
+    plane = ActionPlane(Orchestrator(), Inference(), boundary_ack_timeout_ns=150)
+    plane.arbitrator.transition(mode=Mode.HYBRID)
+    plane.arbitrator.takeover_release_grace_ns = 1
+    plane.history.begin_recording()
+    active = Proposal(np.eye(1, 26, 24, dtype=np.float32)[0], 10)
+    policy = Proposal(np.ones(26, np.float32), 10, "rev-1")
+    assert plane._apply_with_boundary_ack(10, active, policy).takeover
+    neutral = Proposal(np.zeros(26, np.float32), 11)
+    boundary = plane._apply_with_boundary_ack(11, neutral, policy)
+    assert boundary.boundary_sequence == 1 and boundary.source == "none"
+    held = plane._apply_with_boundary_ack(12, neutral, policy)
+    assert held.boundary_sequence == 1 and held.source == "none"
+    plane.history.acknowledge_boundary(1)
+    resumed = plane._apply_with_boundary_ack(13, neutral, Proposal(np.ones(26), 13, "rev-1"))
+    assert resumed.source == "policy"
+    assert plane._last_boundary_ack_sequence == 1
+
+
+def test_recording_boundary_timeout_and_recorder_loss_fail_closed():
+    plane = ActionPlane(Orchestrator(), Inference(), boundary_ack_timeout_ns=10)
+    plane.arbitrator.transition(mode=Mode.HYBRID)
+    plane.arbitrator.takeover_release_grace_ns = 1
+    plane.history.begin_recording()
+    active = Proposal(np.eye(1, 26, 24, dtype=np.float32)[0], 10)
+    policy = Proposal(np.ones(26, np.float32), 10, "rev-1")
+    plane._apply_with_boundary_ack(10, active, policy)
+    plane._apply_with_boundary_ack(11, Proposal(np.zeros(26), 11), policy)
+    timeout = plane._apply_with_boundary_ack(21, Proposal(np.zeros(26), 21), policy)
+    assert timeout.disarmed and timeout.boundary == "neutral_boundary_ack_timeout"
+    plane._pending_boundary_started_ns = 21
+    plane.history.end_recording()
+    lost = plane._apply_with_boundary_ack(22, Proposal(np.zeros(26), 22), policy)
+    assert lost.disarmed and lost.boundary == "neutral_boundary_recorder_lost"

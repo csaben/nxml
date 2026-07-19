@@ -140,6 +140,8 @@ _PARQUET_SCHEMA = pa.schema(
         ("gap_state", pa.string()),
         ("gap_reason", pa.string()),
         ("gap_duration_ns", pa.int64()),
+        ("boundary_sequence", pa.int64()),
+        ("boundary_acknowledged", pa.bool_()),
         ("bc_training_eligible", pa.bool_()),
     ]
 )
@@ -375,6 +377,8 @@ class VideoParquetEpisodeWriter:
                     "gap_state": synced.gap_state,
                     "gap_reason": synced.gap_reason,
                     "gap_duration_ns": synced.gap_duration_ns,
+                    "boundary_sequence": synced.boundary_sequence,
+                    "boundary_acknowledged": synced.boundary_acknowledged,
                     "bc_training_eligible": bool(
                         synced.valid
                         and np.isfinite(synced.applied_action).all()
