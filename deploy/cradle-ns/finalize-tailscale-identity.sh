@@ -24,6 +24,9 @@ grep -Fq -- '--reconnect-address 58:2F:40:23:3C:CA' /etc/systemd/system/nxml-bt.
 # once so its watcher and the narrow nxml-bt authorization are authoritative.
 systemctl restart polkit.service
 systemctl is-active --quiet polkit.service
+runuser -u "$expected_user" -- \
+    systemctl --no-ask-password start nxml-bt.service
+systemctl is-active --quiet nxml-bt.service
 
 # Delegate only Tailscale CLI configuration to the logged-in operator, then
 # install a private Tailnet Serve proxy. This never enables Funnel.
