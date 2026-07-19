@@ -18,27 +18,48 @@ import argparse
 import asyncio
 import contextlib
 import http.client
+import ipaddress
 import json
 import subprocess
+import sys
 import threading
 import time
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, StreamingResponse
 from nxml_capture.backends.ffmpeg_v4l2 import v4l2_mjpeg_stream_command
 
+sys.path.insert(0, str(Path(__file__).parent))
+from dagger_status import OperationsReader
+
 ACTION_DIM = 26
 CAPTURE_DEVICE = "/dev/v4l/by-id/usb-MACROSILICON_Hagibis_20210623-video-index0"
+
+
+def validate_tailnet_bind(host: str) -> str:
+    """Accept only a direct Tailscale IPv4 interface address."""
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError as error:
+        raise ValueError("bind host must be a literal Tailscale IPv4 address") from error
+    if address.version != 4 or address not in ipaddress.ip_network("100.64.0.0/10"):
+        raise ValueError("bind host must be a Tailscale IPv4 address in 100.64.0.0/10")
+    return host
 
 PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NXML minui</title>
+<title>NXML DAgger</title>
 <style>
   body { margin:0; background:#0b0d10; color:#e8edf3; font:14px system-ui,sans-serif; }
   img { display:block; width:100vw; max-height:88vh; object-fit:contain; background:#000; }
   #bar { display:flex; gap:1.5rem; padding:.5rem 1rem; align-items:center; }
+  #ops { display:grid; grid-template-columns:repeat(4,minmax(10rem,1fr)); gap:.5rem; padding:0 1rem 1rem; }
+  .card { background:#171b21; border:1px solid #29313a; border-radius:.4rem; padding:.65rem; }
+  .label { color:#9aa7b5; font-size:.75rem; text-transform:uppercase; }
+  .value { margin-top:.25rem; }
   .on { color:#51cf66 } .off { color:#ff6b6b }
 </style></head><body>
 <img id="preview" src="/stream.mjpeg" alt="Switch capture">
@@ -47,6 +68,12 @@ PAGE = """<!doctype html>
   <span id="pad">pad: press any gamepad button</span>
   <span id="seq"></span>
 </div>
+<section id="ops">
+ <div class="card"><div class="label">Session</div><div class="value" id="session">human · idle</div></div>
+ <div class="card"><div class="label">Local spool</div><div class="value" id="spool">loading…</div></div>
+ <div class="card"><div class="label">Cluster</div><div class="value" id="cluster">loading…</div></div>
+ <div class="card"><div class="label">Model</div><div class="value" id="model">loading…</div></div>
+</section>
 <script>
   const HZ=60, DEADZONE=0.15, DIM=26;
   const MAP={10:4,11:5,12:6,14:7,15:8,13:9,4:10,6:11,5:12,7:13,9:18,8:19,16:20,2:22,3:23,0:24,1:25};
@@ -75,6 +102,15 @@ PAGE = """<!doctype html>
   window.addEventListener('blur',()=>teardown('paused (window blur)'));
   document.addEventListener('visibilitychange',()=>{if(document.hidden)teardown('paused (hidden)')});
   setInterval(()=>{if(!ws)connect()},1000);
+  async function pollOps(){
+    try { const s=await fetch('/api/ops/status',{cache:'no-store'}).then(r=>r.json());
+      $('session').textContent=`${s.session.mode} · ${s.session.recording_state}`;
+      const p=s.spool; $('spool').textContent=p?`${p.pending_episodes||0} pending · ${p.episodes_uploaded||0} shipped`:`unavailable: ${s.errors.spool||'unknown'}`;
+      const c=s.cluster; $('cluster').textContent=c?`${(c.datasets.datasets||[]).length} datasets · ${(c.snapshots.snapshots||[]).length} snapshots`:`unavailable: ${s.errors.cluster||'unknown'}`;
+      const d=c&&c.deployment; $('model').textContent=d&&d.active_revision?`active ${d.active_revision.slice(0,8)} · gen ${d.generation}`:'none active';
+    } catch(e) { $('cluster').textContent='operations status unavailable'; }
+  }
+  pollOps(); setInterval(pollOps,5000);
 </script></body></html>"""
 
 
@@ -103,14 +139,34 @@ class OrchestratorClient:
                         raise
 
 
-def create_app(orchestrator: OrchestratorClient, capture_device: str) -> FastAPI:
-    app = FastAPI(title="nxml-minui")
+def create_app(
+    orchestrator: OrchestratorClient,
+    capture_device: str,
+    operations: OperationsReader | None = None,
+) -> FastAPI:
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        if operations is not None:
+            operations.start()
+        try:
+            yield
+        finally:
+            if operations is not None:
+                operations.stop()
+
+    app = FastAPI(title="nxml-minui", lifespan=lifespan)
     stream_state: dict[str, subprocess.Popen | None] = {"proc": None}
     stream_lock = threading.Lock()
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
         return HTMLResponse(PAGE)
+
+    @app.get("/api/ops/status")
+    def ops_status() -> dict:
+        if operations is None:
+            return {"schema_version": "nxml.dagger-operations-status.v1", "observed_at": time.time(), "session": {"schema_version": "nxml.dagger-session-status.v1", "mode": "human", "recording_state": "idle", "recording_available": False, "recording_blocked_reason": "Operations polling is not configured"}, "spool": None, "cluster": None, "errors": {"operations": "not configured"}}
+        return operations.snapshot().wire()
 
     @app.websocket("/ws")
     async def ws_input(ws: WebSocket) -> None:
@@ -188,9 +244,21 @@ def main() -> None:
     parser.add_argument("--orchestrator-host", default="127.0.0.1")
     parser.add_argument("--orchestrator-port", type=int, default=7777)
     parser.add_argument("--capture", default=CAPTURE_DEVICE)
+    parser.add_argument("--spool-status", type=Path, default=Path("~/.local/state/nxml-spool/status.json").expanduser())
+    parser.add_argument("--cluster-url", default="http://100.80.98.4:8787")
+    parser.add_argument("--cluster-token", type=Path, default=Path("~/.config/nxml/cluster.token").expanduser())
     args = parser.parse_args()
+    try:
+        validate_tailnet_bind(args.host)
+    except ValueError as error:
+        parser.error(str(error))
     client = OrchestratorClient(args.orchestrator_host, args.orchestrator_port)
-    uvicorn.run(create_app(client, args.capture), host=args.host, port=args.port)
+    operations = OperationsReader(
+        spool_status_path=args.spool_status,
+        cluster_url=args.cluster_url,
+        cluster_token_path=args.cluster_token,
+    )
+    uvicorn.run(create_app(client, args.capture, operations), host=args.host, port=args.port)
 
 
 if __name__ == "__main__":
