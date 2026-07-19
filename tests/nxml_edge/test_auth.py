@@ -82,6 +82,15 @@ def test_spoofed_headers_on_direct_backend_connection_are_rejected() -> None:
     assert resolver.addresses == []
 
 
+def test_preview_from_wrong_tailnet_device_is_rejected() -> None:
+    auth, _ = authenticator(TailscaleIdentity("csaben@github", "wrong-device"))
+    preview_request = request()
+    preview_request.scope["path"] = "/api/preview.mjpeg"
+    with pytest.raises(HTTPException) as error:
+        auth(preview_request)
+    assert error.value.status_code == 403
+
+
 @pytest.mark.parametrize("origin", [None, "http://cradle-ns.tailb1b51d.ts.net", "https://evil.test"])
 def test_control_mutations_require_exact_https_origin(origin) -> None:
     auth, _ = authenticator()

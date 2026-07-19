@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 import time
 from collections import deque
@@ -48,6 +49,7 @@ class EdgeSupervisor:
             capture = self.devices.probe(self.config.capture_identity)
             policy = self.policy.probe(self.config.policy_uri)
             runtime = self.runtime.probe()
+            spool = self._spool_status()
             checks = [
                 Check(
                     dependency=Dependency.BLUETOOTH,
@@ -104,7 +106,9 @@ class EdgeSupervisor:
                 Check(
                     dependency=Dependency.POLICY,
                     ready=policy.ready,
-                    summary="Policy endpoint ready" if policy.ready else "Policy unavailable",
+                    summary="Policy available (not required for human capture)"
+                    if policy.ready
+                    else "Policy not required for human capture (off)",
                     detail={
                         "policy_id": policy.policy_id,
                         "revision": policy.revision,
@@ -114,10 +118,41 @@ class EdgeSupervisor:
                 Check(
                     dependency=Dependency.AUTOPILOT,
                     ready=runtime.ready,
-                    summary="Autopilot ready" if runtime.ready else "Autopilot unavailable",
+                    summary="Autopilot available (not required for human capture)"
+                    if runtime.ready
+                    else "Autopilot not required for human capture (off)",
                     detail={"error": runtime.error, "spool": runtime.spool},
                 ),
             ]
+            human_checks = [
+                checks[0],
+                checks[1],
+                checks[2],
+                Check(
+                    dependency=Dependency.SPOOL,
+                    ready=bool(spool.get("admission_open")),
+                    summary="Spool admission open"
+                    if spool.get("admission_open")
+                    else "Spool admission closed",
+                    detail={
+                        "pending_episodes": spool.get("pending_episodes"),
+                        "episodes_blocked": spool.get("episodes_blocked"),
+                        "disk_pressure": spool.get("disk_pressure"),
+                        "error": spool.get("last_cluster_error"),
+                    },
+                ),
+                Check(
+                    dependency=Dependency.CLUSTER,
+                    ready=bool(spool.get("cluster_connected")),
+                    summary="Receipt/catalog cluster connected"
+                    if spool.get("cluster_connected")
+                    else "Receipt/catalog cluster unavailable",
+                    detail={"error": spool.get("cluster_error")},
+                ),
+            ]
+            human_blocked = next(
+                (check.dependency for check in human_checks if not check.ready), None
+            )
             blocked = next((check.dependency for check in checks if not check.ready), None)
             if runtime.ejected:
                 state = SessionState.EJECTED
@@ -143,7 +178,19 @@ class EdgeSupervisor:
                 ejected=runtime.ejected,
                 tailnet_url=self.config.tailnet_url,
                 logs=list(self._logs),
+                capture_mode="human",
+                human_capture_ready=human_blocked is None,
+                human_blocked_on=human_blocked,
+                human_checks=human_checks,
             )
+
+    def _spool_status(self) -> dict[str, object]:
+        path = self.config.spool_state_path / "status.json"
+        try:
+            payload = json.loads(path.read_text())
+        except (OSError, ValueError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
 
     def start_session(self) -> EdgeStatus:
         with self._lock:

@@ -4,6 +4,13 @@ from nxml_edge.adapters import BluetoothProbe, CaptureProbe, PolicyProbe, Runtim
 from nxml_edge.models import Dependency, DriverState, SessionState
 
 
+def _healthy_spool(supervisor) -> None:
+    supervisor.config.spool_state_path.mkdir(parents=True, exist_ok=True)
+    (supervisor.config.spool_state_path / "status.json").write_text(
+        '{"admission_open": true, "cluster_connected": true}'
+    )
+
+
 def test_ready_status_has_unmistakable_driver(edge) -> None:
     supervisor, _, _ = edge
     status = supervisor.status()
@@ -12,6 +19,37 @@ def test_ready_status_has_unmistakable_driver(edge) -> None:
     assert status.driver is DriverState.HUMAN
     assert status.policy_revision == "rev-2"
     assert status.previous_policy_revision == "rev-1"
+
+
+def test_human_capture_readiness_ignores_policy_and_autopilot(edge) -> None:
+    supervisor, _, _ = edge
+    _healthy_spool(supervisor)
+    supervisor.policy.result = PolicyProbe(False, error="off")
+    supervisor.runtime.result = RuntimeProbe(False, error="off")
+
+    status = supervisor.status()
+
+    assert status.human_capture_ready is True
+    assert status.human_blocked_on is None
+    assert "not required" in next(
+        check.summary for check in status.checks if check.dependency is Dependency.POLICY
+    ).lower()
+    assert "not required" in next(
+        check.summary for check in status.checks if check.dependency is Dependency.AUTOPILOT
+    ).lower()
+
+
+def test_human_capture_reports_spool_or_cluster_blocker(edge) -> None:
+    supervisor, _, _ = edge
+    supervisor.config.spool_state_path.mkdir(parents=True, exist_ok=True)
+    (supervisor.config.spool_state_path / "status.json").write_text(
+        '{"admission_open": false, "cluster_connected": false}'
+    )
+
+    status = supervisor.status()
+
+    assert status.human_capture_ready is False
+    assert status.human_blocked_on is Dependency.SPOOL
 
 
 def test_start_stops_at_switch_and_guides_operator(edge) -> None:

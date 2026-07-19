@@ -6,6 +6,11 @@ from nxml_edge.web import create_app
 from starlette.requests import Request
 
 
+class _Preview:
+    def frames(self):
+        yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\nfixture\r\n"
+
+
 def _request(token: str | None = None, *, bearer: bool = False) -> Request:
     headers = []
     if token is not None:
@@ -77,3 +82,17 @@ def test_minimal_ui_renders(edge) -> None:
     assert "localStorage" not in html
     assert "URLSearchParams" not in html
     assert "Checking Tailnet identity" in html
+    assert "/api/preview.mjpeg" in html
+    assert "Human Capture" in html
+
+
+def test_preview_requires_same_auth_as_status(edge) -> None:
+    supervisor, _, _ = edge
+    app = create_app(supervisor, token="edge-secret", preview=_Preview())
+    endpoint = _endpoint(app, "/api/preview.mjpeg")
+
+    with pytest.raises(HTTPException) as error:
+        endpoint(_request())
+    assert error.value.status_code == 401
+    response = endpoint(_request("edge-secret"))
+    assert response.media_type == "multipart/x-mixed-replace; boundary=frame"

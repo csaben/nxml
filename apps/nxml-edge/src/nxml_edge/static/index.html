@@ -18,12 +18,16 @@
     pre { white-space:pre-wrap; max-height:16rem; overflow:auto; color:#adb5bd; }
     .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:.7rem }
     .metric { font-size:1.6rem; font-weight:800 } input { background:#11151b;color:white;border:1px solid #495057;padding:.5rem }
+    .preview { width:100%; max-width:760px; aspect-ratio:16/9; object-fit:contain; background:#050607; border-radius:.6rem }
+    .human-ready { border-left:5px solid #2f9e44 } .human-blocked { border-left:5px solid #f08c00 }
   </style>
 </head>
 <body>
   <header><div><h1>NXML Edge</h1><div id="state">Checking Tailnet identity…</div></div><div id="driver">unknown</div></header>
-  <p><button onclick="act('start')">Start session</button><button onclick="act('retry')">Retry</button><button onclick="act('stop')">Stop</button><button class="danger" onclick="act('eject')">EMERGENCY EJECT</button><button onclick="act('rearm')">Re-arm</button></p>
-  <main id="checks"></main><h2>Recent supervisor actions</h2><pre id="logs"></pre>
+  <p id="ai-controls"><button onclick="act('start')">Start AI session</button><button onclick="act('retry')">Retry AI</button><button onclick="act('stop')">Stop AI</button><button class="danger" onclick="act('eject')">EMERGENCY EJECT</button><button onclick="act('rearm')">Re-arm AI</button></p>
+  <section id="human-card" class="card human-blocked"><h2>Human Capture</h2><div id="human-state">Checking…</div><div id="human-checks"></div></section>
+  <div class="grid"><section class="card"><h2>Live Switch preview</h2><img class="preview" src="/api/preview.mjpeg" alt="Live read-only Nintendo Switch capture"></section><section class="card"><h2>NXBT controller</h2><pre id="controller-state">loading</pre></section></div>
+  <h2>Optional AI components</h2><main id="checks"></main><h2>Recent supervisor actions</h2><pre id="logs"></pre>
   <section><h2>Cluster <small id="cluster-state">loading</small></h2><p>Cluster failures never affect session or emergency controls.</p>
     <div class="grid"><div class="card"><div class="metric" id="dataset-count">—</div>datasets</div><div class="card"><div class="metric" id="shard-count">—</div>shards</div><div class="card"><div class="metric" id="episode-count">—</div>episodes</div></div>
     <div class="grid"><div class="card"><h3>Deployment</h3><pre id="deployment"></pre></div><div class="card"><h3>Snapshots</h3><pre id="snapshots"></pre></div><div class="card"><h3>Training / logs / metrics</h3><pre id="jobs"></pre></div><div class="card"><h3>Models</h3><pre id="revisions"></pre></div><div class="card"><h3>Receipts</h3><pre id="receipts"></pre></div></div>
@@ -36,14 +40,19 @@
       if (response.status===401||response.status===403) { document.querySelector('#state').textContent='Tailnet identity not authorized';return; }
       if (!response.ok) { document.querySelector('#state').textContent=`Status unavailable — HTTP ${response.status}`;return; }
       const s = await response.json();
-      document.querySelector('#state').textContent = `${s.state}${s.blocked_on ? ' — blocked on '+s.blocked_on : ''}`;
+      document.querySelector('#state').textContent = `Mode: human capture`;
+      document.querySelector('#ai-controls').style.display = s.capture_mode === 'human' ? 'none' : '';
+      const humanCard=document.querySelector('#human-card'); humanCard.className=`card ${s.human_capture_ready?'human-ready':'human-blocked'}`;
+      document.querySelector('#human-state').textContent=s.human_capture_ready?'READY — policy and autopilot are not required':`BLOCKED — ${s.human_blocked_on||'unknown'}`;
+      document.querySelector('#human-checks').innerHTML=(s.human_checks||[]).map(c=>`<div>${c.ready?'✓':'✗'} ${c.dependency}: ${c.summary}</div>`).join('');
       const d = document.querySelector('#driver'); d.textContent=s.driver.toUpperCase(); d.className=s.driver;
       document.querySelector('#checks').innerHTML=s.checks.map(c=>`<section class="card ${c.ready?'ok':'bad'}"><b>${c.dependency}: ${c.summary}</b>${(c.operator_steps||[]).map(x=>`<div>→ ${x}</div>`).join('')}${c.detail?.spool?`<pre>spool: ${JSON.stringify(c.detail.spool,null,2)}</pre>`:''}</section>`).join('');
       document.querySelector('#logs').textContent=(s.logs||[]).join('\n');
-      refreshCluster();
+      refreshCluster(); refreshController();
     }
     async function act(name) { const response=await fetch(`/api/session/${name}`, options('POST'));if(!response.ok)document.querySelector('#state').textContent=await response.text();await refresh(); }
     async function refreshCluster() { try { const r=await fetch('/api/cluster/status',options('GET')),c=await r.json(); document.querySelector('#cluster-state').textContent=c.connected?'connected':`unavailable — ${c.error||'unknown'}`; for(const k of ['dataset','shard','episode']) document.querySelector(`#${k}-count`).textContent=c[`${k}_count`]??'—'; for(const k of ['deployment','snapshots','jobs','revisions','receipts']) document.querySelector(`#${k}`).textContent=JSON.stringify(c[k]??[],null,2); } catch(e) { document.querySelector('#cluster-state').textContent=`unavailable — ${e}`; } }
+    async function refreshController() { try { const r=await fetch('/api/controller/state',options('GET')),c=await r.json(); document.querySelector('#controller-state').textContent=JSON.stringify(c,null,2); } catch(e) { document.querySelector('#controller-state').textContent=String(e); } }
     async function clusterAct(name) { const generation=Number(document.querySelector('#generation').value),key=crypto.randomUUID(); let path,body={}; if(name==='snapshot')path=`/api/cluster/datasets/${encodeURIComponent(document.querySelector('#dataset-id').value)}/human-snapshot`; if(name==='train'){path='/api/cluster/training/bc';body={snapshot_id:document.querySelector('#snapshot-id').value,config:{trainer:'bc'}}} if(name==='promote'){path=`/api/cluster/models/${encodeURIComponent(document.querySelector('#revision-id').value)}/promote`;body={expected_generation:generation}} if(name==='rollback'){path='/api/cluster/deployment/rollback';body={expected_generation:generation}} try{const r=await fetch(path,{method:'POST',headers:{'Idempotency-Key':key,'Content-Type':'application/json'},body:JSON.stringify(body)});document.querySelector('#cluster-action').textContent=await r.text()}catch(e){document.querySelector('#cluster-action').textContent=String(e)} refreshCluster() }
     refresh(); setInterval(refresh, 2000);
   </script>

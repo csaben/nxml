@@ -8,6 +8,7 @@ dependencies = [
     "fastapi>=0.115",
     "pydantic>=2.10",
     "uvicorn[standard]>=0.30",
+    "opencv-python>=4.9",
 ]
 
 [project.scripts]

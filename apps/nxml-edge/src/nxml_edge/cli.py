@@ -21,6 +21,7 @@ from nxml_edge.adapters import (
 from nxml_edge.auth import TailscaleAuthenticator, TailscaleWhoIsResolver
 from nxml_edge.cluster import ClusterClient, ClusterDashboard, HttpTransport
 from nxml_edge.config import ConfigStore
+from nxml_edge.preview import CapturePreview, NxbtStateClient
 from nxml_edge.supervisor import EdgeSupervisor
 from nxml_edge.web import create_app
 
@@ -85,7 +86,14 @@ def main(config_path: Path, token_file: Path, fixture_adapters: bool) -> None:
             resolver=TailscaleWhoIsResolver(),
         )
     uvicorn.run(
-        create_app(supervisor, token=token if auth is None else None, auth=auth, cluster=cluster),
+        create_app(
+            supervisor,
+            token=token if auth is None else None,
+            auth=auth,
+            cluster=cluster,
+            preview=CapturePreview(config.capture_identity),
+            controller=NxbtStateClient(f"http://127.0.0.1:{config.orchestrator_port}"),
+        ),
         host=config.bind_host,
         port=config.edge_port,
         proxy_headers=False,

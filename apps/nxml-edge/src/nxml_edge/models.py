@@ -11,6 +11,8 @@ class Dependency(StrEnum):
     CAPTURE = "capture"
     POLICY = "policy"
     AUTOPILOT = "autopilot"
+    SPOOL = "spool"
+    CLUSTER = "cluster"
 
 
 class SessionState(StrEnum):
@@ -54,3 +56,7 @@ class EdgeStatus(BaseModel):
     ejected: bool = False
     tailnet_url: str
     logs: list[str] = Field(default_factory=list)
+    capture_mode: str = "human"
+    human_capture_ready: bool = False
+    human_blocked_on: Dependency | None = None
+    human_checks: list[Check] = Field(default_factory=list)

@@ -5,9 +5,10 @@ from collections.abc import Callable
 from importlib.resources import files
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 
 from nxml_edge.cluster import ClusterDashboard, ClusterError
+from nxml_edge.preview import NxbtStateClient, PreviewSource
 from nxml_edge.supervisor import EdgeSupervisor
 
 
@@ -17,6 +18,8 @@ def create_app(
     token: str | None = None,
     auth: Callable[[Request], None] | None = None,
     cluster: ClusterDashboard | None = None,
+    preview: PreviewSource | None = None,
+    controller: NxbtStateClient | None = None,
 ) -> FastAPI:
     app = FastAPI(title="nxml-edge", version="0.1.0")
 
@@ -47,6 +50,24 @@ def create_app(
     def status(request: Request):
         require_token(request)
         return supervisor.status()
+
+    @app.get("/api/preview.mjpeg")
+    def capture_preview(request: Request) -> StreamingResponse:
+        require_token(request)
+        if preview is None:
+            raise HTTPException(503, "capture preview is not configured")
+        return StreamingResponse(
+            preview.frames(),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+            headers={"Cache-Control": "no-store, private"},
+        )
+
+    @app.get("/api/controller/state")
+    def controller_state(request: Request):
+        require_token(request)
+        if controller is None:
+            return {"reachable": False, "error": "controller state is not configured"}
+        return controller.status()
 
     @app.get("/api/cluster/status")
     def cluster_status(request: Request):
