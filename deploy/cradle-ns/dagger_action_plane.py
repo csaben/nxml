@@ -27,6 +27,7 @@ class ActionPlane:
         self._last_reason: str | None = None
         self._revision = inference.client.revision["revision_id"] if inference else None
         self._digest = inference.client.revision["checkpoint_sha256"] if inference else None
+        self._last_applied = None
 
     def start(self):
         if self._thread is None:
@@ -121,6 +122,11 @@ class ActionPlane:
 
     def status(self):
         with self._lock:
+            inference = (
+                self.inference.status()
+                if self.inference is not None and hasattr(self.inference, "status")
+                else {}
+            )
             return {
                 "schema_version": "nxml.dagger-action-plane-status.v1",
                 "armed": self._armed,
@@ -130,6 +136,21 @@ class ActionPlane:
                 "mute_mask": list(self.arbitrator.mute.values),
                 "mute_mask_version": self.arbitrator.mute.version,
                 "last_disarm_reason": self._last_reason,
+                "gap_state": (
+                    self._last_applied.gap_state
+                    if self._last_applied is not None
+                    else inference.get("freshness_state", "none")
+                ),
+                "gap_reason": (
+                    self._last_applied.gap_reason
+                    if self._last_applied is not None
+                    else inference.get("gap_reason")
+                ),
+                "gap_duration_ms": (
+                    self._last_applied.gap_duration_ns / 1e6
+                    if self._last_applied is not None
+                    else inference.get("gap_duration_ms", 0.0)
+                ),
             }
 
     def recording_state(self):
@@ -147,6 +168,7 @@ class ActionPlane:
         }
 
     def _append(self, applied, human, policy):
+        self._last_applied = applied
         self.history.append(
             ArbitrationRecord(
                 applied=applied,
@@ -161,6 +183,12 @@ class ActionPlane:
             )
         )
 
+    def _policy_for_arbitration(self):
+        if self.inference is None:
+            return None
+        getter = getattr(self.inference, "proposal_for_arbitration", None)
+        return getter() if getter is not None else self.inference.latest_proposal()
+
     def _run(self):
         deadline = time.monotonic()
         while not self._stop.is_set():
@@ -170,7 +198,7 @@ class ActionPlane:
                     if self._armed:
                         now = time.monotonic_ns()
                         human = self._human
-                        policy = self.inference.latest_proposal() if self.inference else None
+                        policy = self._policy_for_arbitration()
                         applied = self.arbitrator.apply(now, human, policy)
                         self.orchestrator.post_action(applied.action.tolist())
                         self._append(applied, human, policy)

@@ -133,6 +133,11 @@ _PARQUET_SCHEMA = pa.schema(
         ("takeover", pa.bool_()),
         ("proposal_valid", pa.bool_()),
         ("proposal_fresh", pa.bool_()),
+        ("proposal_sequence", pa.int64()),
+        ("proposal_age_ns", pa.int64()),
+        ("gap_state", pa.string()),
+        ("gap_reason", pa.string()),
+        ("gap_duration_ns", pa.int64()),
         ("bc_training_eligible", pa.bool_()),
     ]
 )
@@ -361,6 +366,11 @@ class VideoParquetEpisodeWriter:
                     "takeover": synced.takeover,
                     "proposal_valid": synced.proposal_valid,
                     "proposal_fresh": synced.proposal_fresh,
+                    "proposal_sequence": synced.proposal_sequence,
+                    "proposal_age_ns": synced.proposal_age_ns,
+                    "gap_state": synced.gap_state,
+                    "gap_reason": synced.gap_reason,
+                    "gap_duration_ns": synced.gap_duration_ns,
                     "bc_training_eligible": bool(
                         synced.valid
                         and np.isfinite(synced.applied_action).all()

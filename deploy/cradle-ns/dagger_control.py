@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 
 import numpy as np
@@ -34,6 +34,7 @@ class Proposal:
     monotonic_ns: int
     revision: str | None = None
     observation_monotonic_ns: int | None = None
+    sequence: int | None = None
 
 
 @dataclass(frozen=True)
@@ -52,15 +53,22 @@ class Applied:
     takeover: bool = False
     policy_monotonic_ns: int | None = None
     policy_observation_monotonic_ns: int | None = None
+    gap_state: str = "none"
+    gap_reason: str | None = None
+    gap_duration_ns: int = 0
+    valid: bool = True
 
 
 class Arbitrator:
-    def __init__(self, *, stale_ns: int = 250_000_000):
+    def __init__(self, *, stale_ns: int = 55_000_000, hard_stall_ns: int = 250_000_000):
         self.mode = Mode.HUMAN
         self.mute = MuteMask()
         self.stale_ns = stale_ns
+        self.hard_stall_ns = hard_stall_ns
         self._takeover = False
         self._neutral_boundary: str | None = None
+        self._gap_started_ns: int | None = None
+        self._recent_gaps: list[int] = []
 
     def transition(self, *, mode: Mode | None = None, mute: MuteMask | None = None) -> Applied:
         if mode is not None:
@@ -68,6 +76,7 @@ class Arbitrator:
         if mute is not None:
             self.mute = mute
         self._takeover = False
+        self._gap_started_ns = None
         return self._neutral(0, "configuration_changed")
 
     def apply(
@@ -88,44 +97,91 @@ class Arbitrator:
                 if fresh_h
                 else self._neutral(now_ns, "stale_human")
             )
-        if not fresh_p:
-            return self._neutral(now_ns, "stale_policy", disarmed=True)
-        assert policy is not None
-        original_policy = policy
-        muted = policy.action.copy()
-        muted[np.asarray(self.mute.values)] = 0
-        policy = Proposal(muted, policy.monotonic_ns, policy.revision)
-        if self.mode is Mode.PURE_AI:
-            return self._owned(
-                now_ns, policy, "policy", 2, human=human, original_policy=original_policy
-            )
         gesture = (
-            fresh_h
+            self.mode is Mode.HYBRID
+            and fresh_h
             and human is not None
             and human.action[L_STICK] > 0.5
             and human.action[R_STICK] > 0.5
         )
         if gesture:
             self._takeover = True
-        elif self._takeover:
+        elif self.mode is Mode.HYBRID and self._takeover and fresh_h:
             self._takeover = False
             self._neutral_boundary = None
             return self._neutral(now_ns, "takeover_released")
-        return (
-            self._owned(
+
+        # Explicit full-packet human takeover is independent of policy health.
+        # Eject was handled above and remains the highest-priority transition.
+        if self.mode is Mode.HYBRID and self._takeover and fresh_h:
+            assert human is not None
+            if fresh_p:
+                assert policy is not None
+                original_policy = policy
+                muted = policy.action.copy()
+                muted[np.asarray(self.mute.values)] = 0
+                policy = Proposal(
+                    muted,
+                    policy.monotonic_ns,
+                    policy.revision,
+                    policy.observation_monotonic_ns,
+                    policy.sequence,
+                )
+                return self._owned(
+                    now_ns,
+                    human,
+                    "human",
+                    1,
+                    policy=policy,
+                    original_policy=original_policy,
+                    takeover=True,
+                )
+            return self._owned(now_ns, human, "human", 1, takeover=True)
+
+        if not fresh_p:
+            if self._gap_started_ns is None:
+                self._gap_started_ns = (
+                    policy.monotonic_ns + self.stale_ns
+                    if policy is not None and policy.monotonic_ns <= now_ns
+                    else now_ns
+                )
+                self._recent_gaps = [x for x in self._recent_gaps if now_ns - x <= 10_000_000_000]
+                self._recent_gaps.append(now_ns)
+            duration = max(0, now_ns - self._gap_started_ns)
+            hard = duration >= self.hard_stall_ns or len(self._recent_gaps) >= 4
+            return self._neutral(
                 now_ns,
-                human,
-                "human",
-                1,
-                policy=policy,
-                original_policy=original_policy,
-                takeover=True,
+                "policy_stall" if hard else "policy_transient_gap",
+                disarmed=hard,
+                gap_state="disarmed" if hard else "transient_gap",
+                gap_duration_ns=duration,
             )
-            if self._takeover and fresh_h
-            else self._owned(
-                now_ns, policy, "policy", 2, human=human, original_policy=original_policy
-            )
+        assert policy is not None
+        recovered = self._gap_started_ns is not None
+        gap_duration = now_ns - self._gap_started_ns if recovered else 0
+        self._gap_started_ns = None
+        original_policy = policy
+        muted = policy.action.copy()
+        muted[np.asarray(self.mute.values)] = 0
+        policy = Proposal(
+            muted,
+            policy.monotonic_ns,
+            policy.revision,
+            policy.observation_monotonic_ns,
+            policy.sequence,
         )
+        result = self._owned(
+            now_ns, policy, "policy", 2, human=human, original_policy=original_policy
+        )
+        if recovered:
+            return replace(
+                result,
+                boundary="policy_gap_recovered",
+                gap_state="recovered",
+                gap_reason="policy_transient_gap",
+                gap_duration_ns=gap_duration,
+            )
+        return result
 
     def _owned(
         self,
@@ -163,7 +219,7 @@ class Arbitrator:
             ),
         )
 
-    def _neutral(self, now, reason, disarmed=False):
+    def _neutral(self, now, reason, disarmed=False, gap_state="none", gap_duration_ns=0):
         z = np.zeros(DIM, np.float32)
         return Applied(
             z,
@@ -177,4 +233,8 @@ class Arbitrator:
             now,
             disarmed,
             reason,
+            gap_state=gap_state,
+            gap_reason=reason if gap_state != "none" else None,
+            gap_duration_ns=gap_duration_ns,
+            valid=gap_state == "none",
         )

@@ -104,6 +104,15 @@ class ArbitratorHistory:
             takeover=applied.takeover,
             proposal_valid=record.proposal_valid,
             proposal_fresh=record.proposal_fresh,
+            proposal_sequence=policy.sequence if policy is not None else None,
+            proposal_age_ns=(
+                applied.monotonic_ns - policy.monotonic_ns if policy is not None else None
+            ),
+            gap_state=applied.gap_state,
+            gap_reason=applied.gap_reason,
+            gap_duration_ns=applied.gap_duration_ns,
+            valid=applied.valid,
+            invalid_reasons=(applied.gap_reason,) if not applied.valid and applied.gap_reason else (),
         )
 
     @staticmethod

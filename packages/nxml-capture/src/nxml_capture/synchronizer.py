@@ -71,6 +71,11 @@ class SyncedFrame:
     takeover: bool = False
     proposal_valid: bool = False
     proposal_fresh: bool = False
+    proposal_sequence: int | None = None
+    proposal_age_ns: int | None = None
+    gap_state: str = "none"
+    gap_reason: str | None = None
+    gap_duration_ns: int = 0
     valid: bool = True
     invalid_reasons: tuple[str, ...] = ()
 

@@ -129,6 +129,7 @@ class HumanRecordingSession:
         video_path: Path | None = None
         last_invalid_reasons: tuple[str, ...] | None = None
         last_takeover = False
+        last_gap_state = "none"
         try:
             for synced in synchronizer.frames():
                 if self._stop.is_set():
@@ -159,6 +160,26 @@ class HumanRecordingSession:
                         payload={"mode": synced.mode},
                     )
                 last_takeover = synced.takeover
+                gap_state = getattr(synced, "gap_state", "none")
+                if gap_state != last_gap_state:
+                    kind = {
+                        "transient_gap": "policy_gap_started",
+                        "recovered": "policy_gap_recovered",
+                        "disarmed": "policy_gap_disarmed",
+                    }.get(gap_state, "policy_gap_ended")
+                    writer.append_event(
+                        kind,
+                        timestamp=synced.timestamp,
+                        monotonic_ns=synced.action_monotonic_ns,
+                        source="dagger-arbitrator",
+                        payload={
+                            "proposal_sequence": getattr(synced, "proposal_sequence", None),
+                            "proposal_age_ns": getattr(synced, "proposal_age_ns", None),
+                            "reason": getattr(synced, "gap_reason", None),
+                            "duration_ns": getattr(synced, "gap_duration_ns", 0),
+                        },
+                    )
+                    last_gap_state = gap_state
                 with self._lock:
                     self._status = RecordingStatus(
                         **{

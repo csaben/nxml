@@ -72,6 +72,7 @@ def test_disarm_callback_failure_does_not_escape_worker_clear():
     )
     worker._clear("stale", health="stale")
     assert worker.status()["health"] == "stale"
+    assert worker.status()["freshness_state"] == "stale_stall"
 
 
 def test_wait_until_fresh_survives_stale_to_healthy_arm_gate_race():
@@ -361,7 +362,7 @@ def test_33ms_freshness_budget_never_reuses_old_proposal():
     assert worker.latest_proposal() is not None
     clock.value += 33_000_001
     assert worker.latest_proposal() is None
-    assert worker.status()["health"] == "stale"
+    assert worker.status()["health"] == "healthy"
     worker.stop()
 
 
@@ -404,7 +405,7 @@ def test_cadence_aware_fresh_hold_and_hard_stall_boundaries():
     clock.value += 21_999_999
     assert worker.latest_proposal() is not None  # exact 55 ms remains a bounded hold.
     clock.value += 1
-    assert worker.status()["freshness_state"] == "stale_stall"
+    assert worker.status()["freshness_state"] == "transient_gap"
     assert worker.latest_proposal() is None
 
 

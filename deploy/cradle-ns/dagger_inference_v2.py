@@ -8,7 +8,7 @@ import struct
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 import numpy as np
@@ -250,6 +250,10 @@ class RemoteInferenceStatus:
     transport_latency_ms: float | None = None
     processing_latency_ms: float | None = None
     error: str | None = None
+    gap_started_monotonic_ns: int | None = None
+    gap_duration_ms: float = 0.0
+    gap_reason: str | None = None
+    transient_gaps: int = 0
 
     def wire(self) -> dict[str, Any]:
         return asdict(self)
@@ -327,6 +331,13 @@ class RemoteInferenceWorker:
             return None
         return proposal
 
+    def proposal_for_arbitration(self) -> Proposal | None:
+        """Return the last observed proposal so the arbitrator can measure a gap causally."""
+        if not self._enabled.is_set():
+            return None
+        with self._lock:
+            return self._proposal
+
     def wait_until_fresh(self, timeout: float = 2.0) -> dict[str, Any] | None:
         """Require a new proposal, unless the cached one is under one 60 Hz tick old."""
         deadline = time.monotonic() + timeout
@@ -358,13 +369,35 @@ class RemoteInferenceWorker:
             age_ns = now - proposal.monotonic_ns
             value["proposal_age_ms"] = max(0, age_ns) / 1e6
             if age_ns > self.stale_ns:
-                value["health"], value["ready"] = "stale", False
-                value["freshness_state"] = "stale_stall"
+                value["freshness_state"] = "transient_gap"
+                value["gap_reason"] = value["gap_reason"] or "proposal_hold_exceeded"
+                started = value["gap_started_monotonic_ns"] or proposal.monotonic_ns + self.stale_ns
+                value["gap_started_monotonic_ns"] = started
+                value["gap_duration_ms"] = max(0, now - started) / 1e6
             elif age_ns > self.fresh_ns:
                 value["freshness_state"] = "cadence_hold"
             else:
                 value["freshness_state"] = "fresh"
         return value
+
+    def _mark_gap(self, reason: str) -> None:
+        """Expose a cadence gap without converting it into a transport failure."""
+        now = self.clock_ns()
+        with self._lock:
+            old = self._status
+            started = old.gap_started_monotonic_ns or now
+            self._status = replace(
+                old,
+                health="healthy",
+                ready=True,
+                freshness_state="transient_gap",
+                gap_started_monotonic_ns=started,
+                gap_duration_ms=max(0, now - started) / 1e6,
+                gap_reason=reason,
+                transient_gaps=old.transient_gaps
+                + int(old.gap_started_monotonic_ns is None),
+                error=None,
+            )
 
     def _clear(self, reason: str, *, health: str) -> None:
         # Safety notification must never be able to terminate the transport
@@ -429,7 +462,7 @@ class RemoteInferenceWorker:
                 now = self.clock_ns()
                 observation_age = now - frame.monotonic_ns
                 if observation_age < 0 or observation_age > self.stale_ns:
-                    self._clear("stale observation", health="stale")
+                    self._mark_gap("stale observation")
                     continue
                 inference_jpeg = prepare_inference_jpeg(frame.jpeg)
                 result = self.client.predict_frame(frame.monotonic_ns, inference_jpeg)
@@ -463,7 +496,7 @@ class RemoteInferenceWorker:
                                 transport_latency_ms=result.transport_latency_ns / 1e6,
                                 processing_latency_ms=(result.processing_latency_ns or 0) / 1e6,
                             )
-                    self._clear("stale remote proposal", health="stale")
+                    self._mark_gap("stale remote proposal")
                     continue
                 with self._lock:
                     old = self._status
@@ -478,6 +511,7 @@ class RemoteInferenceWorker:
                             result.received_monotonic_ns,
                             self.client.revision["revision_id"],
                             observation_monotonic_ns=frame.monotonic_ns,
+                            sequence=proposal_count + 1,
                         )
                         proposal_count += 1
                     self._status = RemoteInferenceStatus(
@@ -506,6 +540,10 @@ class RemoteInferenceWorker:
                             if result.processing_latency_ns is not None
                             else None
                         ),
+                        gap_started_monotonic_ns=None,
+                        gap_duration_ms=0.0,
+                        gap_reason=None,
+                        transient_gaps=old.transient_gaps,
                     )
             except Exception as error:
                 self.client.invalidate()
