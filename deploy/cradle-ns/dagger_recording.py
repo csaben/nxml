@@ -88,6 +88,10 @@ class HumanRecordingSession:
             mode = state.get("mode", "human")
             name = time.strftime(f"dagger-{mode}-%Y%m%d-%H%M%S", time.gmtime())
             episode_id = str(uuid.uuid4())
+            if self.segment_worker is not None and not self.segment_worker.reserve(
+                episode_id, 0, self.segment_max_bytes
+            ):
+                raise RuntimeError("rolling segment byte admission is closed")
             writer_name = f"{episode_id}.000000" if self.segment_worker else name
             writer = VideoParquetEpisodeWriter(
                 self.output_dir,
@@ -155,6 +159,7 @@ class HumanRecordingSession:
         segment_index = 0
         segment_start_ns: int | None = None
         last_frame_ns: int | None = None
+        total_frames = 0
         try:
             for synced in synchronizer.frames():
                 if self._stop.is_set():
@@ -182,6 +187,11 @@ class HumanRecordingSession:
                     assert frame_ns is not None and segment_start_ns is not None
                     self._finalize_segment(writer, segment_index, segment_start_ns, frame_ns)
                     segment_index += 1
+                    if not self.segment_worker.reserve(
+                        writer.episode_id, segment_index, self.segment_max_bytes
+                    ):
+                        self._close_rolling_episode(writer.episode_id, segment_index, None)
+                        raise RuntimeError("rolling segment byte admission is closed")
                     writer = self._new_segment_writer(writer, segment_index)
                     with self._lock:
                         self._writer = writer
@@ -200,6 +210,7 @@ class HumanRecordingSession:
                 if claim_ack:
                     synced = replace(synced, boundary_acknowledged=True)
                 writer.append(synced)
+                total_frames += 1
                 if self.segment_worker is not None:
                     last_frame_ns = frame_ns
                 if claim_ack:
@@ -266,7 +277,7 @@ class HumanRecordingSession:
                     self._status = RecordingStatus(
                         **{
                             **asdict(self._status),
-                            "frames": len(writer),
+                            "frames": total_frames,
                             "invalid_actions": synchronizer.invalid_samples,
                         }
                     )

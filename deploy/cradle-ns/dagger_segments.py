@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import queue
+import re
 import tarfile
 import threading
 import time
@@ -205,13 +206,22 @@ class SegmentJournal:
                 "pending": {},
                 "cleanup": {},
                 "receipts": {},
-                "close_request": None,
-                "close": None,
+                "reservations": {},
+                "close_requests": {},
+                "closes": {},
             }
         )
         self.value.setdefault("pending", {})
         self.value.setdefault("cleanup", {})
-        self.value.setdefault("close_request", None)
+        legacy_request = self.value.pop("close_request", None)
+        legacy_close = self.value.pop("close", None)
+        self.value.setdefault("close_requests", {})
+        self.value.setdefault("closes", {})
+        if legacy_request:
+            self.value["close_requests"][legacy_request["episode_id"]] = legacy_request
+        if legacy_close:
+            self.value["closes"][legacy_close["episode_id"]] = legacy_close
+        self.value.setdefault("reservations", {})
 
     @staticmethod
     def _key(episode_id: str, sequence_index: int) -> str:
@@ -227,14 +237,40 @@ class SegmentJournal:
             }
             self._sync()
 
-    def store_source(self, source: SegmentSource) -> None:
+    def reserve(self, episode_id: str, sequence_index: int, size_bytes: int) -> None:
         with self._lock:
-            self.value["pending"][self._key(source.episode_id, source.sequence_index)] = {
+            self.value["reservations"][self._key(episode_id, sequence_index)] = size_bytes
+            self._sync()
+
+    def store_source(self, source: SegmentSource, *, recovered: bool = False) -> None:
+        with self._lock:
+            key = self._key(source.episode_id, source.sequence_index)
+            if not recovered and key not in self.value["reservations"]:
+                raise RuntimeError("segment source was closed without a durable byte reservation")
+            self.value["pending"][key] = {
                 "source": self._source_wire(source),
                 "tar_path": None,
                 "bundle": None,
             }
+            self.value["reservations"].pop(key, None)
             self._sync()
+
+    def buffered_bytes(self) -> int:
+        with self._lock:
+            total = sum(int(value) for value in self.value["reservations"].values())
+            for group in ("pending", "cleanup"):
+                for item in self.value[group].values():
+                    bundle = item.get("bundle")
+                    if bundle is not None:
+                        total += int(bundle["object_size_bytes"])
+                    else:
+                        raw = item["source"]
+                        total += sum(
+                            Path(raw[name]).stat().st_size
+                            for name in ("video", "actions", "events")
+                            if Path(raw[name]).exists()
+                        )
+            return total
 
     @staticmethod
     def _source_wire(source: SegmentSource) -> dict[str, Any]:
@@ -316,13 +352,17 @@ class SegmentJournal:
 
     def store_close(self, close: dict[str, Any]) -> None:
         with self._lock:
-            self.value["close"] = close
-            self.value["close_request"] = None
+            episode_id = close["episode_id"]
+            self.value["closes"][episode_id] = close
+            self.value["close_requests"].pop(episode_id, None)
             self._sync()
 
     def store_close_request(self, episode_id: str, count: int) -> None:
         with self._lock:
-            self.value["close_request"] = {"episode_id": episode_id, "segment_count": count}
+            self.value["close_requests"][episode_id] = {
+                "episode_id": episode_id,
+                "segment_count": count,
+            }
             self._sync()
 
     def _sync(self) -> None:
@@ -349,11 +389,15 @@ class SegmentDeliveryWorker:
         journal: SegmentJournal,
         *,
         staging_dir: Path | None = None,
+        source_dir: Path | None = None,
+        max_pending_bytes: int = 32 * 1024 * 1024 * 1024,
         max_pending: int = 3,
     ):
         self.client, self.journal = client, journal
         self.staging_dir = staging_dir
-        self.queue: queue.Queue[PreparedSegment | SegmentSource | None] = queue.Queue(max_pending)
+        self.source_dir = source_dir
+        self.max_pending_bytes = max_pending_bytes
+        self.queue: queue.Queue[PreparedSegment | SegmentSource | None] = queue.Queue()
         self.receipts: list[dict[str, Any]] = list(journal.value["receipts"].values())
         self.error: str | None = None
         self.uploaded_bytes = 0
@@ -362,6 +406,8 @@ class SegmentDeliveryWorker:
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._active: PreparedSegment | SegmentSource | None = None
+        self._active_started: float | None = None
+        self._admission_closed = False
 
     def start(self) -> None:
         if self._thread is None:
@@ -369,14 +415,14 @@ class SegmentDeliveryWorker:
                 for path in paths:
                     path.unlink(missing_ok=True)
                 self.journal.mark_deleted(key)
+            self._recover_unjournaled_sources()
             for item in self.journal.pending_sources():
                 self.queue.put_nowait(item)
             for item in self.journal.pending():
                 self.queue.put_nowait(item)
             self._thread = threading.Thread(target=self._run, daemon=True, name="segment-delivery")
             self._thread.start()
-            request = self.journal.value.get("close_request")
-            if request:
+            for request in self.journal.value["close_requests"].values():
                 threading.Thread(
                     target=self.close_episode,
                     args=(request["episode_id"], request["segment_count"]),
@@ -385,7 +431,11 @@ class SegmentDeliveryWorker:
                 ).start()
 
     def submit(self, item: PreparedSegment) -> bool:
-        if self.queue.full():
+        if (
+            self.journal.buffered_bytes() + int(item.bundle["object_size_bytes"])
+            > self.max_pending_bytes
+        ):
+            self._admission_closed = True
             return False
         try:
             self.journal.store_pending(item)
@@ -395,14 +445,68 @@ class SegmentDeliveryWorker:
             return False
 
     def submit_source(self, source: SegmentSource) -> bool:
-        if self.queue.full():
-            return False
         try:
             self.journal.store_source(source)
             self.queue.put_nowait(source)
             return True
-        except queue.Full:
+        except RuntimeError:
             return False
+
+    def reserve(self, episode_id: str, sequence_index: int, size_bytes: int) -> bool:
+        if size_bytes <= 0:
+            return False
+        buffered = self.journal.buffered_bytes()
+        if self._admission_closed and buffered <= self.max_pending_bytes * 0.75:
+            self._admission_closed = False
+        if self._admission_closed or buffered + size_bytes > self.max_pending_bytes:
+            self._admission_closed = True
+            return False
+        self.journal.reserve(episode_id, sequence_index, size_bytes)
+        return True
+
+    def _recover_unjournaled_sources(self) -> None:
+        if self.source_dir is None or not self.source_dir.is_dir():
+            return
+        pattern = re.compile(r"^(?P<episode>[0-9a-f-]{36})\.(?P<index>\d{6})\.manifest\.json$")
+        known = set(self.journal.value["pending"]) | set(self.journal.value["receipts"])
+        manifests: dict[tuple[str, int], tuple[Path, dict[str, Any]]] = {}
+        for path in self.source_dir.glob("*.manifest.json"):
+            match = pattern.match(path.name)
+            if match:
+                manifests[(match["episode"], int(match["index"]))] = (
+                    path,
+                    json.loads(path.read_text()),
+                )
+        for (episode_id, index), (manifest_path, manifest) in sorted(manifests.items()):
+            key = self.journal._key(episode_id, index)
+            if key in known:
+                continue
+            base = self.source_dir / f"{episode_id}.{index:06d}"
+            paths = {
+                "video": Path(f"{base}.mkv"),
+                "actions": Path(f"{base}.parquet"),
+                "events": Path(f"{base}.events.parquet"),
+            }
+            if not all(path.is_file() for path in paths.values()):
+                continue
+            next_manifest = manifests.get((episode_id, index + 1))
+            end_ns = (
+                int(next_manifest[1]["first_frame_timestamp_ns"])
+                if next_manifest is not None
+                else int(manifest["last_frame_timestamp_ns"])
+                + max(1, round(1e9 / float(manifest["fps_nominal"])))
+            )
+            source = SegmentSource(
+                episode_id,
+                index,
+                int(manifest["first_frame_timestamp_ns"]),
+                end_ns,
+                paths["video"],
+                paths["actions"],
+                paths["events"],
+                manifest_path,
+            )
+            self.journal.store_source(source, recovered=True)
 
     def stop(self, *, timeout: float = 30.0) -> None:
         self._stop.set()
@@ -431,6 +535,7 @@ class SegmentDeliveryWorker:
                     return
             with self._lock:
                 self._active = item
+                self._active_started = time.monotonic()
             while not self._stop.is_set():
                 try:
                     receipt = self.client.publish(item)
@@ -460,6 +565,7 @@ class SegmentDeliveryWorker:
                         return
             with self._lock:
                 self._active = None
+                self._active_started = None
 
     def wait_receipts(
         self, episode_id: str, count: int, *, timeout: float = 120.0
@@ -483,30 +589,18 @@ class SegmentDeliveryWorker:
         return close
 
     def status(self) -> dict[str, Any]:
-        with self.queue.mutex:
-            queued = list(self.queue.queue)
         with self._lock:
             active = self._active
+            active_started = self._active_started
             receipt_count = len(self.receipts)
+        pending_count = len(self.journal.value["pending"])
+        buffered_bytes = self.journal.buffered_bytes()
+        elapsed = max(time.monotonic() - self.started_at, 1e-6)
         return {
             "state": "error" if self.error else "running",
-            "segment_backlog_count": sum(item is not None for item in queued),
-            "segment_backlog_bytes": sum(
-                (
-                    item.tar_path.stat().st_size
-                    if isinstance(item, PreparedSegment) and item.tar_path.exists()
-                    else sum(
-                        path.stat().st_size
-                        for path in (item.video, item.actions, item.events)
-                        if path.exists()
-                    )
-                    if isinstance(item, SegmentSource)
-                    else 0
-                )
-                for item in queued
-                if item is not None
-            ),
-            "backpressure": self.queue.full(),
+            "segment_backlog_count": pending_count,
+            "segment_backlog_bytes": buffered_bytes,
+            "backpressure": self._admission_closed,
             "blocked_reason": self.error,
             "active_sequence_index": (
                 active.source.sequence_index
@@ -517,4 +611,11 @@ class SegmentDeliveryWorker:
             ),
             "receipted_segments": receipt_count,
             "receipted_bytes": self.uploaded_bytes,
+            "upload_rate_bytes_per_second": self.uploaded_bytes / elapsed,
+            "oldest_active_age_seconds": (
+                time.monotonic() - active_started if active_started is not None else None
+            ),
+            "pending_byte_budget": self.max_pending_bytes,
+            "pending_byte_low_watermark": int(self.max_pending_bytes * 0.75),
+            "reserved_and_buffered_bytes": buffered_bytes,
         }

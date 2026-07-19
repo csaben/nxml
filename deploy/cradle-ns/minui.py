@@ -20,6 +20,7 @@ import contextlib
 import http.client
 import ipaddress
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -126,7 +127,7 @@ PAGE = """<!doctype html>
       $('mode').value=a.mode||'human'; [...$('mode').options].forEach(o=>o.disabled=controlsBusy||(o.value!=='human'&&!a.armed)); $('arm').disabled=controlsBusy||!!a.armed; $('disarm').disabled=controlsBusy||!a.armed; $('mute-set').disabled=controlsBusy||!a.armed; $('record').disabled=controlsBusy;
       const p=s.spool,ls=p&&p.local_storage,vol=ls&&ls.capture_filesystem; $('spool').textContent=p&&ls&&ls.state==='ready'?`${bytes(vol.available_bytes)} available / ${bytes(vol.total_bytes)} · ${bytes(ls.source_buffered_bytes)} source · ${bytes(ls.staged_bytes)} staged · ${p.pending_episodes||0} pending · ${p.receipt_state||'unknown'}${ls.recording_blocked_reason?' · BLOCKED: '+ls.recording_blocked_reason:ls.warning?' · low-space warning':''}`:`storage unavailable: ${(ls&&ls.error)||(s.errors&&s.errors.spool)||'unknown'}`;
       $('local-disk').value=vol?vol.used_fraction:0;$('local-disk').className=ls&&!ls.recording_admission_open?'stop':ls&&ls.warning?'warn':'';$('local-rate').textContent=ls&&ls.state==='ready'?`write ${rate(ls.capture_write_rate_bytes_per_second)} · upload ${ls.upload_rate_bytes_per_second==null?'unavailable':rate(ls.upload_rate_bytes_per_second)} · receipts ${rate(ls.receipt_rate_bytes_per_second)} · remaining ${ls.estimated_recording_seconds_remaining==null?'measuring':(ls.estimated_recording_seconds_remaining/60).toFixed(1)+' min'} · ${bytes(ls.receipted_bytes)} receipted`:'';
-      const seg=p&&p.rolling_segments;$('segment-backlog').textContent=seg?`segments: ${seg.state}${seg.segment_backlog_count==null?'':` · ${seg.segment_backlog_count} queued · ${bytes(seg.segment_backlog_bytes)}`}${seg.backpressure?' · BACKPRESSURE':''}${seg.blocked_reason?' · '+seg.blocked_reason:''}`:'segments: unavailable';
+      const seg=p&&p.rolling_segments;$('segment-backlog').textContent=seg?`segments: ${seg.state}${r.current_segment==null?'':` · current ${r.current_segment}`}${r.segment_count==null?'':` · ${r.segment_count} finalized`}${seg.segment_backlog_count==null?'':` · ${seg.segment_backlog_count} queued · ${bytes(seg.segment_backlog_bytes)}`}${seg.pending_byte_budget==null?'':` / ${bytes(seg.pending_byte_budget)} budget`}${seg.upload_rate_bytes_per_second==null?'':` · upload ${rate(seg.upload_rate_bytes_per_second)}`}${seg.oldest_active_age_seconds==null?'':` · receipt lag ${seg.oldest_active_age_seconds.toFixed(1)}s`}${seg.backpressure?' · BACKPRESSURE':''}${seg.blocked_reason?' · '+seg.blocked_reason:''}`:'segments: unavailable';
       const c=s.cluster,cs=c&&c.storage; $('cluster').textContent=c?`${(c.datasets.datasets||[]).length} datasets · ${(c.snapshots.snapshots||[]).length} snapshots`:`unavailable: ${s.errors.cluster||'unknown'}`;$('cluster-storage').textContent=cs&&cs.state==='ready'?`${bytes(cs.available_bytes)} available / ${bytes(cs.total_bytes)}`:`storage unavailable${cs&&cs.reason?' · '+cs.reason:''}`;$('cluster-disk').value=cs&&cs.used_fraction||0;$('cluster-disk').className=cs&&cs.warning?'warn':'';
       const d=c&&c.deployment; $('model').textContent=d&&d.active_revision?`active ${d.active_revision.slice(0,8)} · gen ${d.generation}`:'none active';
       const m=s.model_readiness||{}; $('readiness').textContent=`model readiness: ${m.phase||'unloaded'} · ${m.armed?'armed':'unarmed'}${m.active?' · revision '+m.active.slice(0,8):''}${m.checkpoint_sha256?' · sha '+m.checkpoint_sha256.slice(0,8):''}${m.warmup_frames!=null&&m.sequence_length?' · warmup '+m.warmup_frames+'/'+m.sequence_length:''}${m.blocked_reason?' · '+m.blocked_reason:''}${m.error?' · '+m.error:''}`;
@@ -603,6 +604,7 @@ def main() -> None:
     parser.add_argument("--segment-duration-seconds", type=float, default=30.0)
     parser.add_argument("--segment-max-bytes", type=int, default=512 * 1024 * 1024)
     parser.add_argument("--segment-max-pending", type=int, default=3)
+    parser.add_argument("--segment-max-pending-bytes", type=int, default=32 * 1024**3)
     args = parser.parse_args()
     try:
         validate_tailnet_bind(args.host)
@@ -647,10 +649,21 @@ def main() -> None:
     segment_worker = None
     if args.rolling_segments:
         token = args.cluster_token.read_text().strip()
+        rolling_root.mkdir(parents=True, exist_ok=True)
+        stat = os.statvfs(rolling_root)
+        total_bytes = stat.f_frsize * stat.f_blocks
+        used_bytes = total_bytes - stat.f_frsize * stat.f_bfree
+        disk_budget = max(
+            4 * 1024**3,
+            min(64 * 1024**3, int(max(0, total_bytes * 0.85 - used_bytes) * 0.5)),
+        )
+        pending_budget = min(args.segment_max_pending_bytes, disk_budget)
         segment_worker = SegmentDeliveryWorker(
             SegmentClient(args.cluster_url, token, "nxml-pokemon-za-v2"),
             SegmentJournal(rolling_root / "journal.json"),
             staging_dir=rolling_root / "staging",
+            source_dir=rolling_root / "source",
+            max_pending_bytes=pending_budget,
             max_pending=args.segment_max_pending,
         )
     recorder = HumanRecordingSession(

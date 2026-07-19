@@ -142,13 +142,13 @@ def test_restart_recovers_close_intent_after_segment_receipt(tmp_path):
     worker.start()
     deadline = time.monotonic() + 2
     state = json.loads(journal.path.read_text())
-    while state["close_request"] is not None and time.monotonic() < deadline:
+    while state["close_requests"] and time.monotonic() < deadline:
         time.sleep(0.01)
         state = json.loads(journal.path.read_text())
     worker.stop()
     assert client.closed is not None
-    assert state["close_request"] is None
-    assert state["close"]["state"] == "closed"
+    assert state["close_requests"] == {}
+    assert state["closes"][prepared.source.episode_id]["state"] == "closed"
 
 
 def test_journal_keys_segment_zero_by_episode_uuid(tmp_path):
@@ -165,7 +165,9 @@ def test_journal_keys_segment_zero_by_episode_uuid(tmp_path):
         second.events,
         second.manifest,
     )
+    journal.reserve(first.episode_id, 0, 10)
     journal.store_source(first)
+    journal.reserve(second.episode_id, 0, 10)
     journal.store_source(second)
     assert len(journal.value["pending"]) == 2
     assert all(key.endswith(":0") for key in journal.value["pending"])
@@ -175,13 +177,53 @@ def test_bounded_backpressure_never_deletes_unreceipted(tmp_path):
     first = segments.prepare_segment(source(tmp_path, index=0), tmp_path / "stage", "dataset")
     second = segments.prepare_segment(source(tmp_path, index=1), tmp_path / "stage", "dataset")
     worker = segments.SegmentDeliveryWorker(
-        Client(), segments.SegmentJournal(tmp_path / "j.json"), max_pending=1
+        Client(),
+        segments.SegmentJournal(tmp_path / "j.json"),
+        max_pending_bytes=first.bundle["object_size_bytes"],
     )
     assert worker.submit(first)
     assert not worker.submit(second)
     assert first.source.video.exists()
     assert second.source.video.exists()
     assert worker.status()["backpressure"] is True
+
+
+def test_startup_discovers_complete_unjournaled_triplet(tmp_path):
+    item = source(tmp_path / "source")
+    item.manifest.write_text(
+        json.dumps(
+            {
+                "episode_id": item.episode_id,
+                "first_frame_timestamp_ns": 100,
+                "last_frame_timestamp_ns": 199,
+                "fps_nominal": 30,
+            }
+        )
+    )
+    journal = segments.SegmentJournal(tmp_path / "journal.json")
+    worker = segments.SegmentDeliveryWorker(
+        Client(), journal, source_dir=tmp_path / "source", staging_dir=tmp_path / "stage"
+    )
+    worker._recover_unjournaled_sources()
+    recovered = journal.pending_sources()
+    assert len(recovered) == 1
+    assert recovered[0].timeline_start_ns == 100
+    assert recovered[0].timeline_end_ns == 33_333_532
+
+
+def test_two_minute_faster_producer_hits_byte_gate_before_opening_next_segment(tmp_path):
+    journal = segments.SegmentJournal(tmp_path / "journal.json")
+    worker = segments.SegmentDeliveryWorker(Client(), journal, max_pending_bytes=1_000)
+    episode = "3f37b81c-15d7-4118-aa3e-690295f162c5"
+    # Simulate 120 seconds of 10-second rotations with a producer faster than delivery.
+    admitted = 0
+    for index in range(12):
+        if not worker.reserve(episode, index, 300):
+            break
+        admitted += 1
+    assert admitted == 3
+    assert journal.buffered_bytes() == 900
+    assert not worker.reserve(episode, admitted, 300)
 
 
 def test_recorder_rotates_on_frame_boundaries_with_contiguous_timeline(tmp_path, monkeypatch):
@@ -222,6 +264,9 @@ def test_recorder_rotates_on_frame_boundaries_with_contiguous_timeline(tmp_path,
             self.items.append(item)
             return True
 
+        def reserve(self, _episode_id, _index, _size):
+            return True
+
         def close_episode(self, episode_id, count):
             assert count == 3
             assert all(item.episode_id == episode_id for item in self.items)
@@ -247,6 +292,7 @@ def test_recorder_rotates_on_frame_boundaries_with_contiguous_timeline(tmp_path,
     )
     session._record(writer)
     assert worker.closed.wait(2)
+    assert session.status()["frames"] == 6
     bounds = [(item.timeline_start_ns, item.timeline_end_ns) for item in worker.items]
     assert bounds == [(0, 80), (80, 160), (160, 33_333_533)]
     assert [item.sequence_index for item in worker.items] == [0, 1, 2]

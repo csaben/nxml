@@ -362,7 +362,8 @@ def test_33ms_freshness_budget_never_reuses_old_proposal():
     assert worker.latest_proposal() is not None
     clock.value += 33_000_001
     assert worker.latest_proposal() is None
-    assert worker.status()["health"] == "healthy"
+    assert worker.status()["health"] == "degraded"
+    assert worker.status()["ready"] is False
     worker.stop()
 
 

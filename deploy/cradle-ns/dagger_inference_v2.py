@@ -369,6 +369,8 @@ class RemoteInferenceWorker:
             age_ns = now - proposal.monotonic_ns
             value["proposal_age_ms"] = max(0, age_ns) / 1e6
             if age_ns > self.stale_ns:
+                value["health"] = "degraded"
+                value["ready"] = False
                 value["freshness_state"] = "transient_gap"
                 value["gap_reason"] = value["gap_reason"] or "proposal_hold_exceeded"
                 started = value["gap_started_monotonic_ns"] or proposal.monotonic_ns + self.stale_ns
@@ -394,8 +396,7 @@ class RemoteInferenceWorker:
                 gap_started_monotonic_ns=started,
                 gap_duration_ms=max(0, now - started) / 1e6,
                 gap_reason=reason,
-                transient_gaps=old.transient_gaps
-                + int(old.gap_started_monotonic_ns is None),
+                transient_gaps=old.transient_gaps + int(old.gap_started_monotonic_ns is None),
                 error=None,
             )
 
