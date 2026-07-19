@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from importlib.resources import files
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 
 from nxml_edge.cluster import ClusterDashboard, ClusterError
+from nxml_edge.human_control import HumanActionRequest, HumanControlBridge, HumanControlError
 from nxml_edge.preview import NxbtStateClient, PreviewSource
 from nxml_edge.supervisor import EdgeSupervisor
 
@@ -20,8 +22,17 @@ def create_app(
     cluster: ClusterDashboard | None = None,
     preview: PreviewSource | None = None,
     controller: NxbtStateClient | None = None,
+    human_control: HumanControlBridge | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="nxml-edge", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        try:
+            yield
+        finally:
+            if human_control is not None:
+                human_control.close()
+
+    app = FastAPI(title="nxml-edge", version="0.1.0", lifespan=lifespan)
 
     def require_token(request: Request) -> None:
         if auth is not None:
@@ -75,6 +86,34 @@ def create_app(
         if preview is None:
             return {"ok": False, "error": "capture preview is not configured"}
         return preview.status()
+
+    def require_human_control(request: Request) -> HumanControlBridge:
+        require_token(request)
+        if human_control is None:
+            raise HTTPException(503, "human control is not configured")
+        return human_control
+
+    @app.get("/api/human/status")
+    def human_status(request: Request):
+        return require_human_control(request).status()
+
+    @app.post("/api/human/enable")
+    def human_enable(request: Request):
+        try:
+            return require_human_control(request).enable()
+        except RuntimeError as error:
+            raise HTTPException(502, str(error)) from error
+
+    @app.post("/api/human/action")
+    def human_action(payload: HumanActionRequest, request: Request):
+        try:
+            return require_human_control(request).apply(payload)
+        except HumanControlError as error:
+            raise HTTPException(error.status_code, str(error)) from error
+
+    @app.post("/api/human/disable")
+    def human_disable(request: Request):
+        return require_human_control(request).disable("client_disabled")
 
     @app.get("/api/cluster/status")
     def cluster_status(request: Request):

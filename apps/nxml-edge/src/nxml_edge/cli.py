@@ -21,6 +21,7 @@ from nxml_edge.adapters import (
 from nxml_edge.auth import TailscaleAuthenticator, TailscaleWhoIsResolver
 from nxml_edge.cluster import ClusterClient, ClusterDashboard, HttpTransport
 from nxml_edge.config import ConfigStore
+from nxml_edge.human_control import HumanControlBridge, NxbtActionClient
 from nxml_edge.preview import CapturePreview, NxbtStateClient
 from nxml_edge.supervisor import EdgeSupervisor
 from nxml_edge.web import create_app
@@ -77,6 +78,9 @@ def main(config_path: Path, token_file: Path, fixture_adapters: bool) -> None:
         ClusterClient(HttpTransport(config.cluster_url, cluster_token)),
         stale_after=config.cluster_stale_after_seconds,
     )
+    human_control = HumanControlBridge(
+        NxbtActionClient(f"http://127.0.0.1:{config.orchestrator_port}")
+    )
     auth = None
     if config.auth_mode == "tailscale":
         auth = TailscaleAuthenticator(
@@ -93,6 +97,7 @@ def main(config_path: Path, token_file: Path, fixture_adapters: bool) -> None:
             cluster=cluster,
             preview=CapturePreview(config.capture_identity),
             controller=NxbtStateClient(f"http://127.0.0.1:{config.orchestrator_port}"),
+            human_control=human_control,
         ),
         host=config.bind_host,
         port=config.edge_port,

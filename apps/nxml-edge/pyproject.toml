@@ -10,6 +10,7 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "opencv-python>=4.9",
     "nxml-capture",
+    "nx-packets",
 ]
 
 [project.scripts]
@@ -27,3 +28,4 @@ packages = ["src/nxml_edge"]
 
 [tool.uv.sources]
 nxml-capture = { workspace = true }
+nx-packets = { workspace = true }

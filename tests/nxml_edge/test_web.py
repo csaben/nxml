@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi import HTTPException
+from nxml_edge.human_control import HumanControlBridge
 from nxml_edge.web import create_app
 from starlette.requests import Request
 
@@ -9,6 +10,11 @@ from starlette.requests import Request
 class _Preview:
     def frames(self):
         yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\nfixture\r\n"
+
+
+class _Actions:
+    def post_human(self, vector: list[float]) -> None:
+        pass
 
 
 def _request(token: str | None = None, *, bearer: bool = False) -> Request:
@@ -96,3 +102,27 @@ def test_preview_requires_same_auth_as_status(edge) -> None:
     assert error.value.status_code == 401
     response = endpoint(_request("edge-secret"))
     assert response.media_type == "multipart/x-mixed-replace; boundary=frame"
+
+
+def test_ui_has_explicit_human_enable_and_known_standard_mapping(edge) -> None:
+    supervisor, _, _ = edge
+    app = create_app(supervisor, token="edge-secret")
+    html = _endpoint(app, "/")(_request("edge-secret")).body.decode()
+
+    assert "Connect / Enable Human Control" in html
+    assert "HUMAN CONTROL OFF" in html
+    assert "STICK_DEADZONE=0.15" in html
+    assert "0:24,1:25" in html  # standard south/east -> Switch B/A
+    assert "2:22,3:23" in html  # standard west/north -> Switch Y/X
+    assert "source: 'policy'" not in html
+
+
+def test_human_enable_route_is_not_reachable_without_edge_auth(edge) -> None:
+    supervisor, _, _ = edge
+    bridge = HumanControlBridge(_Actions(), start_watchdog=False)
+    app = create_app(supervisor, token="edge-secret", human_control=bridge)
+
+    with pytest.raises(HTTPException) as error:
+        _endpoint(app, "/api/human/enable")(_request())
+    assert error.value.status_code == 401
+    assert bridge.status()["enabled"] is False
