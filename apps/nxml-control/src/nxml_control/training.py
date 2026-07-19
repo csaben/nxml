@@ -35,12 +35,16 @@ class TrainingResult:
 
 
 class TrainingExecutor(Protocol):
+    available: bool
+
     def execute(self, job_id: str, spec: TrainingSpec) -> TrainingResult: ...
     def cancel(self, job_id: str) -> bool: ...
 
 
 class FakeTrainingExecutor:
     """Deterministic test-only executor; production CLI never selects it."""
+
+    available = True
 
     def execute(self, job_id, spec):
         payload = json.dumps(
@@ -64,6 +68,18 @@ class TrainingExecutionError(RuntimeError):
         self.logs = logs
 
 
+class DisabledTrainingExecutor:
+    """Production-safe executor state: job submission is unavailable, never faked."""
+
+    available = False
+
+    def execute(self, job_id, spec):
+        raise RuntimeError("training executor is not configured")
+
+    def cancel(self, job_id):
+        return False
+
+
 class SubprocessTrainingExecutor:
     """Real worker protocol: COMMAND --request PATH --result PATH.
 
@@ -71,6 +87,8 @@ class SubprocessTrainingExecutor:
     writes result JSON containing checkpoint_path, checkpoint_sha256, metrics,
     and optional logs. Checkpoint existence and SHA-256 are verified here.
     """
+
+    available = True
 
     def __init__(self, command: str | list[str], work_root: str | Path):
         self.command = shlex.split(command) if isinstance(command, str) else list(command)
@@ -150,6 +168,7 @@ class TrainingJobs:
     def __init__(self, db_path: str | Path, executor: TrainingExecutor, *, run_async: bool = False):
         self.db_path = Path(db_path)
         self.executor = executor
+        self.available = getattr(executor, "available", True)
         self.run_async = run_async
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="nxml-bc")
         self._init()

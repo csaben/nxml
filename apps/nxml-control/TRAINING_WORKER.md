@@ -1,6 +1,6 @@
 # BC worker contract (`nxml.bc-job.v1`)
 
-Production `nxml-control` starts training asynchronously through a configured subprocess. It refuses the deterministic fake executor unless an operator explicitly passes `--allow-fake-training`; that switch is for tests and local development only.
+Production `nxml-control` starts training asynchronously through a configured subprocess. Without a configured worker it starts with training unavailable and returns HTTP 503 on submission; it never silently runs fake training. The deterministic fake executor requires explicit `--allow-fake-training` and is for tests and local development only.
 
 Configure the real worker with `NXML_BC_WORKER_COMMAND` or `--bc-worker-command`. The command is invoked as:
 

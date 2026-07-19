@@ -443,6 +443,8 @@ def create_app(
         body: TrainingRequest,
         idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1)],
     ):
+        if not training.available:
+            raise HTTPException(503, "training executor is not configured")
         try:
             catalog.get_snapshot(body.snapshot_id)
             return training.submit(TrainingSpec(body.snapshot_id, body.config, idempotency_key))

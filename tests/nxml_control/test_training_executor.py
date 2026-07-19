@@ -3,7 +3,6 @@ import json
 import sys
 import threading
 
-import pytest
 from fastapi.testclient import TestClient
 from nxml_control.api import create_app
 from nxml_control.training import SubprocessTrainingExecutor, TrainingJobs, TrainingSpec
@@ -141,33 +140,18 @@ def test_api_artifacts_cancel_and_revision_lineage(tmp_path):
     assert "/v1/training/jobs/{job_id}/artifacts" in paths
 
 
-def test_production_cli_refuses_implicit_fake_executor(tmp_path, monkeypatch):
-    from nxml_control import cli
+def test_production_can_disable_training_without_using_fake(tmp_path):
+    from nxml_control.training import DisabledTrainingExecutor
 
-    token = tmp_path / "token"
-    token.write_text("a" * 64)
-    token.chmod(0o600)
-    monkeypatch.delenv("NXML_BC_WORKER_COMMAND", raising=False)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "nxml-control",
-            "--token-file",
-            str(token),
-            "--state-dir",
-            str(tmp_path / "state"),
-            "--checkpoint-dir",
-            str(tmp_path / "checkpoints"),
-            "--log-dir",
-            str(tmp_path / "logs"),
-            "--job-dir",
-            str(tmp_path / "jobs"),
-        ],
+    app = create_app(state_dir=tmp_path, training_executor=DisabledTrainingExecutor())
+    assert app.state.training.available is False
+    client = TestClient(app)
+    response = client.post(
+        "/v1/training/jobs",
+        headers={"Idempotency-Key": "disabled"},
+        json={"snapshot_id": "sha256:" + "0" * 64, "config": {}},
     )
-    with pytest.raises(SystemExit) as error:
-        cli.main()
-    assert error.value.code == 2
+    assert response.status_code == 503
 
 
 def test_quality_disposition_excludes_episode_and_is_snapshot_lineage(tmp_path):

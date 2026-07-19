@@ -6,7 +6,11 @@ import os
 from pathlib import Path
 
 from nxml_control.auth import load_service_token
-from nxml_control.training import FakeTrainingExecutor, SubprocessTrainingExecutor
+from nxml_control.training import (
+    DisabledTrainingExecutor,
+    FakeTrainingExecutor,
+    SubprocessTrainingExecutor,
+)
 
 CRADLE_TAILNET_IP = "100.80.98.4"
 DEFAULT_PORT = 8787
@@ -55,10 +59,8 @@ def main() -> None:
         training_executor = FakeTrainingExecutor()
         training_async = False
     else:
-        parser.error(
-            "production startup requires --bc-worker-command/NXML_BC_WORKER_COMMAND "
-            "(or explicit development-only --allow-fake-training)"
-        )
+        training_executor = DisabledTrainingExecutor()
+        training_async = False
     log_path = log_dir / "control.log"
     logging.basicConfig(
         level=logging.INFO,

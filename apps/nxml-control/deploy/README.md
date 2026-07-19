@@ -12,7 +12,7 @@ sudo install -o nxml-control -g nxml-control -m 0600 /dev/null /etc/nxml-control
 openssl rand -hex 32 | sudo tee /etc/nxml-control/token >/dev/null
 sudo install -o root -g nxml-control -m 0640 apps/nxml-control/deploy/nxml-control.env.example /etc/nxml-control/nxml-control.env
 sudo install -o root -g root -m 0644 apps/nxml-control/deploy/nxml-control.service /etc/systemd/system/nxml-control.service
-Before starting, install a worker that implements `TRAINING_WORKER.md` and set `NXML_BC_WORKER_COMMAND` in the environment file. The controller now refuses implicit fake training. Startup migrates the SQLite training-state constraint to add internal `cancelling` and terminal `cancelled` states; back up `catalog.sqlite3` before the first upgraded start. Existing job rows, logs, and metrics are preserved.
+Before starting, install a worker that implements `TRAINING_WORKER.md` and set `NXML_BC_WORKER_COMMAND` in the environment file. Without a worker the controller starts safely but returns 503 for training submission; it never selects fake training implicitly. Startup migrates the SQLite training-state constraint to add internal `cancelling` and terminal `cancelled` states; back up `catalog.sqlite3` before the first upgraded start. Existing job rows, logs, and metrics are preserved.
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now nxml-control.service
