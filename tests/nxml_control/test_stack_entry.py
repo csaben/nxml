@@ -25,3 +25,10 @@ def test_training_capacity_is_explicitly_separate():
     assert "warming: readiness attempt" in text
     assert "readiness timed out; left running for diagnosis" in text
     assert "trap - ERR INT TERM" in text
+    validator = VALIDATOR.read_text()
+    assert "mode=ro" in validator
+    assert "source.read(CHUNK)" in validator
+    assert "len(members) != 3" in validator
+    assert "DaggerActionRecordV2.model_validate" in validator
+    assert "video_frames != len(rows)" in validator
+    assert "INSERT" not in validator and "UPDATE" not in validator and "DELETE" not in validator
