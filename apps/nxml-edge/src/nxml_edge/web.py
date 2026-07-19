@@ -16,7 +16,14 @@ def create_app(
     app = FastAPI(title="nxml-edge", version="0.1.0")
 
     def require_token(request: Request) -> None:
-        supplied = request.headers.get("x-nxml-edge-token") or request.query_params.get("token")
+        supplied = request.headers.get("x-nxml-edge-token")
+        authorization = request.headers.get("authorization", "")
+        scheme, _, credential = authorization.partition(" ")
+        if not supplied and scheme.lower() == "bearer":
+            supplied = credential.strip()
+        # Kept for API compatibility. The browser UI deliberately never puts
+        # credentials in URLs or persistent storage.
+        supplied = supplied or request.query_params.get("token")
         if not supplied or not secrets.compare_digest(supplied, token):
             raise HTTPException(status_code=401, detail="bad or missing edge token")
 
