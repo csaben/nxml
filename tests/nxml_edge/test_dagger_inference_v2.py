@@ -53,6 +53,11 @@ def info(**updates):
     return value
 
 
+def test_authoritatively_active_revision_retains_validated_runtime_eligibility():
+    client = InferenceV2Client("tcp://127.0.0.1:5557", revision("active"))
+    assert client.revision["state"] == "active"
+
+
 def proposal(timestamp=10, state="proposal", **updates):
     value = {
         "schema_id": "nxml.policy-proposal.v2",

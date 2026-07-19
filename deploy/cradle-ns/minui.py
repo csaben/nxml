@@ -122,7 +122,7 @@ PAGE = """<!doctype html>
       const d=c&&c.deployment; $('model').textContent=d&&d.active_revision?`active ${d.active_revision.slice(0,8)} · gen ${d.generation}`:'none active';
       const m=s.model_readiness||{}; $('readiness').textContent=`model readiness: ${m.phase||'unloaded'} · ${m.armed?'armed':'unarmed'}${m.active?' · revision '+m.active.slice(0,8):''}${m.checkpoint_sha256?' · sha '+m.checkpoint_sha256.slice(0,8):''}${m.warmup_frames!=null&&m.sequence_length?' · warmup '+m.warmup_frames+'/'+m.sequence_length:''}${m.blocked_reason?' · '+m.blocked_reason:''}${m.error?' · '+m.error:''}`;
       const i=s.inference||{}; $('inference').textContent=`inference: ${i.health||'unloaded'} · ${i.armed?'armed':'unarmed'}${i.revision?' · '+i.revision.slice(0,8):''}${i.processing_latency_ms!=null?' · cluster '+i.processing_latency_ms.toFixed(1)+'ms':''}${i.transport_latency_ms!=null?' · RTT '+i.transport_latency_ms.toFixed(1)+'ms':''}${i.proposal_age_ms!=null?' · proposal '+i.proposal_age_ms.toFixed(0)+'ms old':''}${i.error?' · '+i.error:''}`;
-      const revisions=c&&c.revisions&&c.revisions.revisions||[]; const validated=revisions.filter(r=>r.state==='validated'); $('model-select').innerHTML=validated.length?'<option value="">Select validated revision</option>'+validated.map(r=>`<option value="${r.revision_id}">${r.model_id} · ${r.revision_id.slice(0,8)} · validated</option>`).join(''):'<option value="">No validated revisions</option>'; $('model-load').disabled=!validated.length||m.loading||!m.load_available;
+      const revisions=c&&c.revisions&&c.revisions.revisions||[]; const validated=revisions.filter(r=>['validated','active'].includes(r.state)); $('model-select').innerHTML=validated.length?'<option value="">Select validated revision</option>'+validated.map(r=>`<option value="${r.revision_id}">${r.model_id} · ${r.revision_id.slice(0,8)} · ${r.state}</option>`).join(''):'<option value="">No validated revisions</option>'; $('model-load').disabled=!validated.length||m.loading||!m.load_available;
       const jobs=c&&c.jobs&&c.jobs.jobs||[]; $('jobs').textContent=jobs.length?jobs.map(j=>`${j.state} ${j.job_id.slice(0,8)}`).join(' · '):'no training jobs';
     } catch(e) { $('cluster').textContent='operations status unavailable'; }
   }
@@ -385,7 +385,7 @@ def create_app(
         )
         if revision is None:
             raise HTTPException(404, "revision is not present in the polled cluster catalog")
-        if revision.get("state") != "validated":
+        if revision.get("state") not in {"validated", "active"}:
             raise HTTPException(409, "revision has not passed authoritative cluster validation")
         if remote_inference is not None:
             configured = remote_inference.client.revision

@@ -47,8 +47,8 @@ class InferenceV2Client:
         clock_ns: Callable[[], int] = time.monotonic_ns,
         socket_factory: Callable[[], Any] | None = None,
     ) -> None:
-        if revision.get("state") != "validated":
-            raise ValueError("inference v2 requires a validated selected revision")
+        if revision.get("state") not in {"validated", "active"}:
+            raise ValueError("inference v2 requires a validated or active selected revision")
         check_compatibility(revision)
         if timeout_ms < 1 or timeout_ms > 250:
             raise ValueError("inference timeout must be between 1 and 250 ms")
