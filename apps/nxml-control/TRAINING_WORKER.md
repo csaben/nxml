@@ -45,3 +45,35 @@ Model registration can include `training_job_id`. When present, the controller r
 The generic executor intentionally does not pretend raw H.264 frames are already nxrl latent tensors. Recommended first-production default: freeze one explicitly versioned VAE encoder profile, materialize a content-addressed latent artifact from each immutable human-filtered snapshot, and train only against that artifact. Record the encoder model digest, preprocessing/crop/normalization, latent shape/dtype, materializer commit, source snapshot ID, and artifact digest in the job config/result lineage.
 
 Recommended scheduling default on cradle: one job at a time, pinned to GPU 1 only after an operator drain/availability check, with no automatic preemption of VLLM or inference. Keep GPU selection in the worker/scheduler config, never in the HTTP request supplied by the browser. No training starts merely by installing or restarting the control plane.
+
+## Pokemon ZA bootstrap worker
+
+The repository now provides `nxml-bc-worker`, implementing `nxml.pokemon-za-bc-worker.v1`. Production command, pinned to physical GPU 0 while leaving GPU 1 outside the process:
+
+```text
+/usr/bin/env CUDA_VISIBLE_DEVICES=0 HF_HOME=/var/lib/nxml-control/hf /opt/nxml/.venv/bin/nxml-bc-worker --state-dir /var/lib/nxml-control --checkpoint-dir /var/lib/nxml-control/checkpoints
+```
+
+Set that complete string as `NXML_BC_WORKER_COMMAND`. Under CUDA visibility remapping, encoding and single-process nxrl training both use logical `cuda:0`; no second GPU is visible. The controller still does not start a job automatically.
+
+Request config is strict. The practical default is:
+
+```json
+{
+  "profile": "pokemon-za-bootstrap-v1",
+  "epochs": 25,
+  "sequence_length": 32,
+  "batch_size": 8,
+  "num_workers": 4,
+  "learning_rate": 0.0001,
+  "validation_fraction": 0.1,
+  "vae_path": "stabilityai/sd-vae-ft-mse",
+  "encode_batch_size": 24
+}
+```
+
+The worker resolves only the immutable snapshot from `/var/lib/nxml-control/catalog.sqlite3`, re-verifies each cluster object and selected tar member, and never reads an edge path. It requires a human-filtered snapshot and uses its exact per-shard `episode_ids`; quarantined exclusions never reach decoding.
+
+For every eligible row it requires `valid=true`, strictly increasing `frame_index`, 26-dimensional ownership/mask/action fields, human ownership or mask, and `action_timestamp_ns <= frame_timestamp_ns` with exact `action_age_ns`. Targets are `applied_action`, never the policy proposal. Frames are RGB bilinear-resized to 128×256, normalized to [-1,1], deterministically encoded with the mode of `stabilityai/sd-vae-ft-mse`, and scaled by 0.18215 to `(4,16,32)` float16 latents.
+
+Each episode is split temporally: the final 10% (at least one complete sequence plus target) is validation and the prefix is training, with no overlapping window across the boundary. Fixed seed 42 controls initialization and loader shuffle. The bootstrap policy is `bc_transformer_v1`, sequence 32, hidden size 256, three layers, eight heads, dropout 0.2, and 26 outputs. The self-describing nxrl checkpoint is CPU smoke-inferred before publication. Artifact metadata exposes the action spec, latent/VAE profile, sequence length, source snapshot, and source member digests through the training artifact endpoint.

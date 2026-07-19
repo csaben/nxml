@@ -12,7 +12,7 @@ import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
@@ -32,6 +32,7 @@ class TrainingResult:
     checkpoint_sha256: str
     metrics: dict[str, float]
     logs: list[str]
+    metadata: dict = field(default_factory=dict)
 
 
 class TrainingExecutor(Protocol):
@@ -153,7 +154,13 @@ class SubprocessTrainingExecutor:
         if not hmac.compare_digest(digest.encode(), str(result["checkpoint_sha256"]).encode()):
             raise TrainingExecutionError("BC worker checkpoint digest mismatch", logs)
         metrics = {str(key): float(value) for key, value in result.get("metrics", {}).items()}
-        return TrainingResult(str(checkpoint), digest, metrics, [*logs, *result.get("logs", [])])
+        return TrainingResult(
+            str(checkpoint),
+            digest,
+            metrics,
+            [*logs, *result.get("logs", [])],
+            result.get("artifact", {}),
+        )
 
     def cancel(self, job_id):
         with self._lock:
@@ -195,6 +202,7 @@ class TrainingJobs:
               created_at TEXT NOT NULL,updated_at TEXT NOT NULL,checkpoint_path TEXT,checkpoint_sha256 TEXT,error TEXT);
             CREATE TABLE IF NOT EXISTS training_logs(job_id TEXT NOT NULL,line_no INTEGER NOT NULL,message TEXT NOT NULL,PRIMARY KEY(job_id,line_no));
             CREATE TABLE IF NOT EXISTS training_metrics(job_id TEXT NOT NULL,name TEXT NOT NULL,value REAL NOT NULL,PRIMARY KEY(job_id,name));
+            CREATE TABLE IF NOT EXISTS training_results(job_id TEXT PRIMARY KEY,result_json TEXT NOT NULL);
             """)
             schema = db.execute(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='training_jobs'"
@@ -264,6 +272,10 @@ class TrainingJobs:
                         "INSERT INTO training_metrics VALUES(?,?,?)",
                         [(job_id, name, value) for name, value in sorted(result.metrics.items())],
                     )
+                    db.execute(
+                        "INSERT OR REPLACE INTO training_results VALUES(?,?)",
+                        (job_id, json.dumps(result.metadata, sort_keys=True)),
+                    )
         except Exception as error:
             with self._db() as db:
                 failure_logs = getattr(error, "logs", [])
@@ -324,6 +336,11 @@ class TrainingJobs:
 
     def artifacts(self, job_id):
         job = self.get(job_id)
+        with self._db() as db:
+            row = db.execute(
+                "SELECT result_json FROM training_results WHERE job_id=?", (job_id,)
+            ).fetchone()
+        metadata = json.loads(row[0]) if row is not None else {}
         if not job["checkpoint_path"]:
             return []
         return [
@@ -332,6 +349,7 @@ class TrainingJobs:
                 "uri": job["checkpoint_path"],
                 "sha256": job["checkpoint_sha256"],
                 "status": "complete" if job["state"] == "succeeded" else job["state"],
+                "metadata": metadata,
             }
         ]
 

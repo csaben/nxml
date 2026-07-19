@@ -148,6 +148,7 @@ class TrainingArtifactResponse(BaseModel):
     uri: str
     sha256: str
     status: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class TrainingArtifactsResponse(BaseModel):
