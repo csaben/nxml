@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from nxml_capture import SyncedFrame, VideoParquetEpisodeWriter
@@ -58,6 +59,8 @@ def test_schema_v2_preserves_proposals_ownership_and_checksums(tmp_path: Path) -
             takeover_release_remaining_ns=200_000_000,
             proposal_valid=True,
             proposal_fresh=True,
+            proposal_sequence=42,
+            proposal_age_ns=2_000_000,
             boundary_sequence=7,
             boundary_acknowledged=True,
         )
@@ -71,6 +74,20 @@ def test_schema_v2_preserves_proposals_ownership_and_checksums(tmp_path: Path) -
     assert writer.close() is not None
 
     table = pq.read_table(tmp_path / "episode.parquet")
+    expected_extension_types = {
+        "takeover_reason": pa.string(),
+        "takeover_release_remaining_ns": pa.int64(),
+        "proposal_sequence": pa.int64(),
+        "proposal_age_ns": pa.int64(),
+        "gap_state": pa.string(),
+        "gap_reason": pa.string(),
+        "gap_duration_ns": pa.int64(),
+        "boundary_sequence": pa.int64(),
+        "boundary_acknowledged": pa.bool_(),
+    }
+    assert {
+        name: table.schema.field(name).type for name in expected_extension_types
+    } == expected_extension_types
     row = table.to_pylist()[0]
     assert row["action"] == row["applied_action"]
     assert row["human_action"][25] == 1
@@ -90,6 +107,10 @@ def test_schema_v2_preserves_proposals_ownership_and_checksums(tmp_path: Path) -
     assert row["boundary_acknowledged"] is True
     assert row["proposal_valid"] is True and row["proposal_fresh"] is True
     assert row["bc_training_eligible"] is False  # blended ownership is not BC ground truth.
+    assert row["proposal_sequence"] == 42
+    assert row["proposal_age_ns"] == 2_000_000
+    assert row["gap_state"] == "none"
+    assert row["gap_reason"] is None and row["gap_duration_ns"] == 0
 
     events = pq.read_table(tmp_path / "episode.events.parquet").to_pylist()
     assert events[0]["kind"] == "driver_changed"
