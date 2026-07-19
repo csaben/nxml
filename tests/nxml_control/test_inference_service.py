@@ -95,7 +95,9 @@ def test_registry_reload_rollback_and_digest_failure_are_atomic():
     rolled = decode(
         service,
         bytes([MODE_ROLLBACK_V2])
-        + json.dumps({"expected_revision_id": "r2"}).encode(),
+        + json.dumps(
+            {"expected_revision_id": "r2", "target_revision_id": "r1"}
+        ).encode(),
     )
     assert rolled["revision_id"] == "r1"
     loader.fail.add("r2")
@@ -108,6 +110,35 @@ def test_registry_reload_rollback_and_digest_failure_are_atomic():
     assert service.info()["revision_id"] == "r1"
     path_reload = decode(service, bytes([MODE_RELOAD_PATH]) + b'{"model_path":"/tmp/x"}')
     assert path_reload["state"] == "error"
+
+
+def test_rollback_target_identity_and_restart_fallback_are_atomic():
+    service = ImmutableInferenceService(Loader(), "r1")
+    decode(
+        service,
+        bytes([MODE_RELOAD_REVISION_V2])
+        + json.dumps({"revision_id": "r2", "expected_revision_id": "r1"}).encode(),
+    )
+    wrong = decode(
+        service,
+        bytes([MODE_ROLLBACK_V2])
+        + json.dumps(
+            {"expected_revision_id": "r2", "target_revision_id": "not-r1"}
+        ).encode(),
+    )
+    assert wrong["state"] == "error"
+    assert service.info()["revision_id"] == "r2"
+
+    restarted = ImmutableInferenceService(Loader(), "r2")
+    rolled = decode(
+        restarted,
+        bytes([MODE_ROLLBACK_V2])
+        + json.dumps(
+            {"expected_revision_id": "r2", "target_revision_id": "r1"}
+        ).encode(),
+    )
+    assert rolled["revision_id"] == "r1"
+    assert rolled["previous_revision_id"] == "r2"
 
 
 def test_v1_frame_wire_remains_compatible():

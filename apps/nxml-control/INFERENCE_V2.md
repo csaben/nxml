@@ -32,7 +32,11 @@ one and a 250 ms processing budget.
 
 Reload JSON is
 `{"revision_id":"...","expected_revision_id":"..."}`. Rollback JSON is
-`{"expected_revision_id":"..."}`. The expected ID is mandatory CAS state;
+`{"expected_revision_id":"...","target_revision_id":"..."}`. The expected
+ID is mandatory CAS state. The target is optional when the in-memory previous
+revision exists and, when supplied, must match it. After a service restart the
+explicit target is required and is resolved and digest-verified through the
+registry before switching;
 stale requests do not change the loaded revision. Candidate loading, digest
 verification, compatibility checks, and smoke inference happen before the
 atomic switch. Rollback uses the previous successfully loaded revision.

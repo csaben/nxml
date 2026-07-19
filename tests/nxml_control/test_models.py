@@ -163,6 +163,78 @@ def test_policy_server_runtime_verifies_digest_compatibility_and_deterministic_s
     assert runtime.server.path == str(checkpoint)
 
 
+def test_real_runtime_two_artifact_generation_cas_and_rollback(tmp_path):
+    import numpy as np
+    from nxml_control.models import PolicyServerRuntime
+
+    class Server:
+        def __init__(self, model_path, device):
+            self.path = model_path
+
+        def info(self):
+            return {
+                "architecture": "bc_transformer_v1",
+                "sequence_length": 2,
+                "latent_shape": (1, 2, 2),
+                "action_dim": 26,
+            }
+
+        def predict(self, values):
+            assert values.shape == (2, 1, 2, 2)
+            return np.zeros(26, dtype=np.float32)
+
+    runtime = PolicyServerRuntime(device="cpu", server_factory=Server)
+    registry = ModelRegistry(tmp_path / "models.sqlite3", runtime)
+    revisions = []
+    for name, content in (("known-good", b"real-one"), ("retrain", b"real-two")):
+        checkpoint = tmp_path / f"{name}.pt"
+        checkpoint.write_bytes(content)
+        revision = registry.register(
+            model_id="pokemon-za-bc",
+            checkpoint_path=str(checkpoint),
+            checkpoint_sha256=hashlib.sha256(content).hexdigest(),
+            source_snapshot_id="sha256:" + ("a" if name == "known-good" else "b") * 64,
+            source_config={"profile": "pokemon-za-bootstrap-v1"},
+            source_commit_id="worker-commit",
+            compatibility={
+                "architecture": "bc_transformer_v1",
+                "action_spec_id": "switch_packets.v1",
+                "action_dim": 26,
+                "sequence_length": 2,
+                "latent_shape": [1, 2, 2],
+            },
+            evaluation={"loss": 0.1},
+        )
+        revisions.append(registry.validate(revision["revision_id"]))
+
+    first, second = revisions
+    assert registry.promote(
+        first["revision_id"], expected_generation=0, idempotency_key="real-first"
+    )["generation"] == 1
+    promoted = registry.promote(
+        second["revision_id"], expected_generation=1, idempotency_key="real-second"
+    )
+    assert promoted == {
+        "operation": "promote",
+        "active_revision": second["revision_id"],
+        "previous_revision": first["revision_id"],
+        "generation": 2,
+    }
+    assert runtime.server.path == second["checkpoint_path"]
+
+    rolled = registry.rollback(expected_generation=2, idempotency_key="real-rollback")
+    assert rolled == {
+        "operation": "rollback",
+        "active_revision": first["revision_id"],
+        "previous_revision": second["revision_id"],
+        "generation": 3,
+    }
+    assert runtime.server.path == first["checkpoint_path"]
+    assert registry.rollback(
+        expected_generation=2, idempotency_key="real-rollback"
+    ) == rolled
+
+
 def test_production_app_rejects_fake_or_missing_deployment_runtime(tmp_path):
     from nxml_control.api import create_app
 

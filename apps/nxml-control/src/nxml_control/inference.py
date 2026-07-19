@@ -166,13 +166,20 @@ class ImmutableInferenceService:
             self._last_frame_timestamp_ns = None
         return self.info()
 
-    def rollback(self, expected_revision_id: str | None) -> dict:
+    def rollback(
+        self, expected_revision_id: str | None, target_revision_id: str | None = None
+    ) -> dict:
         with self._lock:
             if expected_revision_id != self._current.revision_id:
                 raise ValueError("stale expected revision")
             if self._previous is None:
-                raise ValueError("no previous revision")
-            target_id = self._previous.revision_id
+                if target_revision_id is None:
+                    raise ValueError("no previous revision; explicit rollback target required")
+                target_id = target_revision_id
+            else:
+                target_id = self._previous.revision_id
+                if target_revision_id is not None and target_revision_id != target_id:
+                    raise ValueError("rollback target does not match previous revision")
         return self.reload(target_id, expected_revision_id)
 
     def predict_frame(self, frame_timestamp_ns: int, jpeg: bytes) -> dict:
@@ -223,7 +230,9 @@ class ImmutableInferenceService:
                 if mode == MODE_RELOAD_REVISION_V2:
                     result = self.reload(body["revision_id"], body.get("expected_revision_id"))
                 else:
-                    result = self.rollback(body.get("expected_revision_id"))
+                    result = self.rollback(
+                        body.get("expected_revision_id"), body.get("target_revision_id")
+                    )
                 return json.dumps(result, sort_keys=True).encode()
             if mode == MODE_FRAME_V2:
                 if len(payload) < 8:

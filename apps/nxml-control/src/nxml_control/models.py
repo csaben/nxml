@@ -226,6 +226,11 @@ class ModelRegistry:
     def rollback(
         self, *, expected_revision=None, expected_generation=None, idempotency_key
     ) -> dict:
+        prior = self._activation_result(
+            "rollback", expected_revision, expected_generation, idempotency_key
+        )
+        if prior is not None:
+            return prior
         state = self.deployment()
         target = state["previous_revision"]
         if target is None:
@@ -233,6 +238,25 @@ class ModelRegistry:
         return self._activate(
             "rollback", target, expected_revision, expected_generation, idempotency_key
         )
+
+    def _activation_result(self, operation, expected_revision, expected_generation, key):
+        db = self._connect()
+        try:
+            prior = db.execute(
+                "SELECT * FROM activation_requests WHERE idempotency_key=?", (key,)
+            ).fetchone()
+            if prior is None:
+                return None
+            identity = (
+                prior["operation"],
+                prior["expected_revision"],
+                prior["expected_generation"],
+            )
+            if identity != (operation, expected_revision, expected_generation):
+                raise ConflictError("activation idempotency key reused")
+            return json.loads(prior["result_json"])
+        finally:
+            db.close()
 
     def _activate(self, operation, target, expected_revision, expected_generation, key) -> dict:
         db = self._connect()
