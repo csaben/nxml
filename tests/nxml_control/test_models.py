@@ -176,3 +176,25 @@ def test_model_api_response_loss_retry_and_conflict(tmp_path):
     )
     assert conflict.status_code == 409
     assert client.get("/v1/deployment").json()["active_revision"] == rid
+
+
+def test_concurrent_generation_promote_has_one_winner(tmp_path):
+    registry = ModelRegistry(tmp_path / "models.sqlite3", FakePolicyRuntime())
+    candidates = [register(registry, name) for name in ("generation-a", "generation-b")]
+    for item in candidates:
+        registry.validate(item["revision_id"])
+
+    def activate(item):
+        try:
+            return registry.promote(
+                item["revision_id"],
+                expected_generation=0,
+                idempotency_key="g-" + item["revision_id"],
+            )
+        except ConflictError:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(activate, candidates))
+    assert sum(result is not None for result in results) == 1
+    assert registry.deployment()["generation"] == 1

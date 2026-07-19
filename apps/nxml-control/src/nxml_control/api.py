@@ -103,6 +103,22 @@ class ActivationResponse(BaseModel):
     generation: int
 
 
+class SnapshotListResponse(BaseModel):
+    snapshots: list[SnapshotResponse]
+
+
+class TrainingJobListResponse(BaseModel):
+    jobs: list[TrainingJobResponse]
+
+
+class ModelRevisionListResponse(BaseModel):
+    revisions: list[ModelRevisionResponse]
+
+
+class DeploymentListResponse(BaseModel):
+    deployments: list[DeploymentResponse]
+
+
 class DatasetListResponse(BaseModel):
     datasets: list[dict[str, Any]]
 
@@ -144,6 +160,7 @@ class RegisterModelRequest(BaseModel):
 
 class ActivationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    expected_generation: int | None = Field(default=None, ge=0)
     expected_revision: str | None = None
 
 
@@ -265,12 +282,43 @@ def create_app(
         except KeyError as error:
             raise HTTPException(404, "dataset not found") from error
 
+    @app.get("/v1/snapshots", response_model=SnapshotListResponse)
+    def snapshots(
+        dataset_id: str | None = None,
+        control_source: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ):
+        limit = min(max(limit, 1), 500)
+        return {
+            "snapshots": [
+                item.__dict__
+                for item in catalog.list_snapshots(
+                    dataset_id=dataset_id,
+                    control_source=control_source,
+                    limit=limit,
+                    offset=max(offset, 0),
+                )
+            ]
+        }
+
     @app.get("/v1/snapshots/{snapshot_id}", response_model=SnapshotResponse)
     def snapshot(snapshot_id: str):
         try:
             return catalog.get_snapshot(snapshot_id).__dict__
         except KeyError as error:
             raise HTTPException(404, "snapshot not found") from error
+
+    @app.get("/v1/training/jobs", response_model=TrainingJobListResponse)
+    def training_jobs(
+        state: str | None = None, snapshot_id: str | None = None, limit: int = 100, offset: int = 0
+    ):
+        limit = min(max(limit, 1), 500)
+        return {
+            "jobs": training.list(
+                state=state, snapshot_id=snapshot_id, limit=limit, offset=max(offset, 0)
+            )
+        }
 
     @app.post("/v1/training/jobs", status_code=201, response_model=TrainingJobResponse)
     def submit_training(
@@ -306,6 +354,17 @@ def create_app(
         except KeyError as error:
             raise HTTPException(404, "training job not found") from error
 
+    @app.get("/v1/models/revisions", response_model=ModelRevisionListResponse)
+    def model_revisions(
+        model_id: str | None = None, state: str | None = None, limit: int = 100, offset: int = 0
+    ):
+        limit = min(max(limit, 1), 500)
+        return {
+            "revisions": models.list_revisions(
+                model_id=model_id, state=state, limit=limit, offset=max(offset, 0)
+            )
+        }
+
     @app.post("/v1/models/revisions", status_code=201, response_model=ModelRevisionResponse)
     def register_model(body: RegisterModelRequest):
         return models.register(**body.model_dump())
@@ -326,6 +385,10 @@ def create_app(
         except CandidateError as error:
             raise HTTPException(422, str(error)) from error
 
+    @app.get("/v1/deployments", response_model=DeploymentListResponse)
+    def deployments():
+        return {"deployments": [models.deployment()]}
+
     @app.get("/v1/deployment", response_model=DeploymentResponse)
     def deployment():
         return models.deployment()
@@ -340,6 +403,7 @@ def create_app(
             return models.promote(
                 revision_id,
                 expected_revision=body.expected_revision,
+                expected_generation=body.expected_generation,
                 idempotency_key=idempotency_key,
             )
         except KeyError as error:
@@ -356,7 +420,9 @@ def create_app(
     ):
         try:
             return models.rollback(
-                expected_revision=body.expected_revision, idempotency_key=idempotency_key
+                expected_revision=body.expected_revision,
+                expected_generation=body.expected_generation,
+                idempotency_key=idempotency_key,
             )
         except CandidateError as error:
             raise HTTPException(422, str(error)) from error

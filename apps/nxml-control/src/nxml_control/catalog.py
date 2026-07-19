@@ -305,6 +305,29 @@ class Catalog:
             assert stored is not None
             return _snapshot(stored)
 
+    def list_snapshots(
+        self,
+        *,
+        dataset_id: str | None = None,
+        control_source: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Snapshot]:
+        clauses, params = [], []
+        if dataset_id is not None:
+            clauses.append("dataset_id=?")
+            params.append(dataset_id)
+        if control_source is not None:
+            clauses.append("control_source=?")
+            params.append(control_source)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        with self.connect() as db:
+            rows = db.execute(
+                f"SELECT * FROM snapshots{where} ORDER BY created_at,snapshot_id LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            ).fetchall()
+        return [_snapshot(row) for row in rows]
+
     def get_snapshot(self, snapshot_id: str) -> Snapshot:
         with self.connect() as db:
             row = db.execute(

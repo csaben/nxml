@@ -90,8 +90,11 @@ class ModelRegistry:
               compatibility_json TEXT NOT NULL,evaluation_json TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN('candidate','validated','active','rejected','retired')),created_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS deployment_state(singleton INTEGER PRIMARY KEY CHECK(singleton=1),active_revision TEXT,previous_revision TEXT,generation INTEGER NOT NULL);
             INSERT OR IGNORE INTO deployment_state VALUES(1,NULL,NULL,0);
-            CREATE TABLE IF NOT EXISTS activation_requests(idempotency_key TEXT PRIMARY KEY,operation TEXT NOT NULL,target_revision TEXT NOT NULL,expected_revision TEXT,result_json TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS activation_requests(idempotency_key TEXT PRIMARY KEY,operation TEXT NOT NULL,target_revision TEXT NOT NULL,expected_revision TEXT,expected_generation INTEGER,result_json TEXT NOT NULL);
             """)
+            columns = {row[1] for row in db.execute("PRAGMA table_info(activation_requests)")}
+            if "expected_generation" not in columns:
+                db.execute("ALTER TABLE activation_requests ADD COLUMN expected_generation INTEGER")
             db.commit()
         finally:
             db.close()
@@ -147,6 +150,32 @@ class ModelRegistry:
             item[field] = json.loads(item.pop(field + "_json"))
         return item
 
+    def list_revisions(
+        self,
+        *,
+        model_id: str | None = None,
+        state: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict]:
+        clauses, params = [], []
+        if model_id is not None:
+            clauses.append("model_id=?")
+            params.append(model_id)
+        if state is not None:
+            clauses.append("state=?")
+            params.append(state)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        db = self._connect()
+        try:
+            rows = db.execute(
+                f"SELECT revision_id FROM model_revisions{where} ORDER BY created_at,revision_id LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            ).fetchall()
+        finally:
+            db.close()
+        return [self.get(row["revision_id"]) for row in rows]
+
     def deployment(self) -> dict:
         db = self._connect()
         try:
@@ -173,28 +202,38 @@ class ModelRegistry:
         self._set_state(revision_id, "validated")
         return self.get(revision_id)
 
-    def promote(self, revision_id, *, expected_revision, idempotency_key) -> dict:
-        return self._activate("promote", revision_id, expected_revision, idempotency_key)
+    def promote(
+        self, revision_id, *, expected_revision=None, expected_generation=None, idempotency_key
+    ) -> dict:
+        return self._activate(
+            "promote", revision_id, expected_revision, expected_generation, idempotency_key
+        )
 
-    def rollback(self, *, expected_revision, idempotency_key) -> dict:
+    def rollback(
+        self, *, expected_revision=None, expected_generation=None, idempotency_key
+    ) -> dict:
         state = self.deployment()
         target = state["previous_revision"]
         if target is None:
             raise ConflictError("no previous-known-good revision")
-        return self._activate("rollback", target, expected_revision, idempotency_key)
+        return self._activate(
+            "rollback", target, expected_revision, expected_generation, idempotency_key
+        )
 
-    def _activate(self, operation, target, expected, key) -> dict:
+    def _activate(self, operation, target, expected_revision, expected_generation, key) -> dict:
         db = self._connect()
         try:
             prior = db.execute(
                 "SELECT * FROM activation_requests WHERE idempotency_key=?", (key,)
             ).fetchone()
             if prior:
-                if (prior["operation"], prior["target_revision"], prior["expected_revision"]) != (
-                    operation,
-                    target,
-                    expected,
-                ):
+                identity = (
+                    prior["operation"],
+                    prior["target_revision"],
+                    prior["expected_revision"],
+                    prior["expected_generation"],
+                )
+                if identity != (operation, target, expected_revision, expected_generation):
                     raise ConflictError("activation idempotency key reused")
                 return json.loads(prior["result_json"])
         finally:
@@ -217,10 +256,16 @@ class ModelRegistry:
             try:
                 db.execute("BEGIN IMMEDIATE")
                 state = db.execute("SELECT * FROM deployment_state WHERE singleton=1").fetchone()
-                active = state["active_revision"]
-                if active != expected:
+                active, generation = state["active_revision"], state["generation"]
+                if expected_generation is not None and generation != expected_generation:
                     raise ConflictError(
-                        f"active revision changed: expected {expected}, found {active}"
+                        f"deployment generation changed: expected {expected_generation}, found {generation}"
+                    )
+                if (
+                    expected_generation is None or expected_revision is not None
+                ) and active != expected_revision:
+                    raise ConflictError(
+                        f"active revision changed: expected {expected_revision}, found {active}"
                     )
                 self.runtime.activate(candidate)
                 if active and active != target:
@@ -231,20 +276,27 @@ class ModelRegistry:
                     "UPDATE model_revisions SET state='active' WHERE revision_id=?", (target,)
                 )
                 previous = active if active != target else state["previous_revision"]
-                generation = state["generation"] + 1
+                new_generation = generation + 1
                 db.execute(
                     "UPDATE deployment_state SET active_revision=?,previous_revision=?,generation=? WHERE singleton=1",
-                    (target, previous, generation),
+                    (target, previous, new_generation),
                 )
                 result = {
                     "operation": operation,
                     "active_revision": target,
                     "previous_revision": previous,
-                    "generation": generation,
+                    "generation": new_generation,
                 }
                 db.execute(
-                    "INSERT INTO activation_requests VALUES(?,?,?,?,?)",
-                    (key, operation, target, expected, json.dumps(result, sort_keys=True)),
+                    "INSERT INTO activation_requests(idempotency_key,operation,target_revision,expected_revision,expected_generation,result_json) VALUES(?,?,?,?,?,?)",
+                    (
+                        key,
+                        operation,
+                        target,
+                        expected_revision,
+                        expected_generation,
+                        json.dumps(result, sort_keys=True),
+                    ),
                 )
                 db.commit()
                 return result

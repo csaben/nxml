@@ -143,6 +143,29 @@ class TrainingJobs:
         item["config"] = json.loads(item.pop("config_json"))
         return item
 
+    def list(
+        self,
+        *,
+        state: str | None = None,
+        snapshot_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict]:
+        clauses, params = [], []
+        if state is not None:
+            clauses.append("state=?")
+            params.append(state)
+        if snapshot_id is not None:
+            clauses.append("snapshot_id=?")
+            params.append(snapshot_id)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        with self._db() as db:
+            rows = db.execute(
+                f"SELECT job_id FROM training_jobs{where} ORDER BY created_at,job_id LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            ).fetchall()
+        return [self.get(row["job_id"]) for row in rows]
+
     def logs(self, job_id: str) -> list[str]:
         self.get(job_id)
         with self._db() as db:
