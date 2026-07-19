@@ -38,6 +38,7 @@ class EvdevReader:
         self._action = np.zeros(ACTION_DIM, dtype=np.float32)
         self._lock = threading.Lock()
         self._latest_ts = 0.0
+        self._last_meaningful_ts = 0.0
         self._device: evdev.InputDevice | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -108,6 +109,22 @@ class EvdevReader:
         mask[BUTTON_RANGE] = action[BUTTON_RANGE] >= 0.5
         return ActionSnapshot(action=action, timestamp=ts, source_id=self.source_id, mask=mask)
 
+    @property
+    def last_update_timestamp(self) -> float | None:
+        with self._lock:
+            return self._latest_ts or None
+
+    @property
+    def last_meaningful_input_timestamp(self) -> float | None:
+        with self._lock:
+            return self._last_meaningful_ts or None
+
+    def _mark_meaningful_locked(self) -> None:
+        if np.any(self._action[STICK_RANGE] != 0.0) or np.any(
+            self._action[BUTTON_RANGE] >= 0.5
+        ):
+            self._last_meaningful_ts = self._latest_ts
+
     def _loop(self) -> None:
         device = self._device
         if device is None:
@@ -133,6 +150,7 @@ class EvdevReader:
             with self._lock:
                 self._action[idx] = 1.0 if event.value else 0.0
                 self._latest_ts = event.timestamp()
+                self._mark_meaningful_locked()
             return
 
         if event.type != ecodes.EV_ABS:
@@ -150,6 +168,7 @@ class EvdevReader:
             with self._lock:
                 self._action[m.axis_index] = v
                 self._latest_ts = event.timestamp()
+                self._mark_meaningful_locked()
             return
 
         if code_str in self._mapper.trigger_map:
@@ -161,6 +180,7 @@ class EvdevReader:
             with self._lock:
                 self._action[m.button_index] = 1.0 if pressed else 0.0
                 self._latest_ts = event.timestamp()
+                self._mark_meaningful_locked()
             return
 
         if code_str in self._mapper.hat_map:
@@ -176,3 +196,4 @@ class EvdevReader:
                     self._action[m.neg_button_index] = 0.0
                     self._action[m.pos_button_index] = 0.0
                 self._latest_ts = event.timestamp()
+                self._mark_meaningful_locked()

@@ -24,6 +24,7 @@ own — exactly what "non-blocking AI" means.
 from __future__ import annotations
 
 import contextlib
+import json
 import threading
 import time
 from collections import deque
@@ -66,6 +67,8 @@ class AutopilotConfig:
     vae_path: str | None = None  # default: stabilityai/sd-vae-ft-mse
     device: str | None = None  # cuda / cpu (default: cuda if available)
     tick_hz: float = 30.0
+    spool_status_path: Path | None = None
+    eject_state_path: Path | None = None
     inference_min_period_s: float = 0.0  # 0 = run as fast as the GPU allows
     extra_metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -109,6 +112,8 @@ class _AiInference:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._inferences = 0
+        self._last_latency_s: float | None = None
+        self._last_error: str | None = None
 
     def start(self) -> None:
         if self._thread is not None:
@@ -164,6 +169,8 @@ class _AiInference:
                 with self._lock:
                     self._cached_action = action.astype(np.float32, copy=False)
                     self._cached_at = time.time()
+                    self._last_latency_s = time.time() - t_start
+                    self._last_error = None
                 self._inferences += 1
 
                 elapsed = time.time() - t_start
@@ -173,7 +180,16 @@ class _AiInference:
                 # Log and continue so a transient server hiccup or VAE OOM
                 # doesn't silently kill the daemon thread.
                 print(f"[autopilot-ai] iteration failed: {type(e).__name__}: {e}", flush=True)
+                with self._lock:
+                    self._last_error = f"{type(e).__name__}: {e}"
                 time.sleep(0.05)
+
+    def health(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "last_latency_s": self._last_latency_s,
+                "last_error": self._last_error,
+            }
 
 
 class CachedAiSource:
@@ -257,6 +273,8 @@ class _RemoteFrameAiInference:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._inferences = 0
+        self._last_latency_s: float | None = None
+        self._last_error: str | None = None
 
     def start(self) -> None:
         if self._thread is not None:
@@ -314,6 +332,8 @@ class _RemoteFrameAiInference:
                 with self._lock:
                     self._cached_action = action.astype(np.float32, copy=False)
                     self._cached_at = time.time()
+                    self._last_latency_s = time.time() - t_start
+                    self._last_error = None
                 self._inferences += 1
 
                 elapsed = time.time() - t_start
@@ -324,7 +344,16 @@ class _RemoteFrameAiInference:
                     f"[autopilot-ai-frame] iteration failed: {type(e).__name__}: {e}",
                     flush=True,
                 )
+                with self._lock:
+                    self._last_error = f"{type(e).__name__}: {e}"
                 time.sleep(0.05)
+
+    def health(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "last_latency_s": self._last_latency_s,
+                "last_error": self._last_error,
+            }
 
 
 # ---------------------------------------------------------------------------
@@ -544,7 +573,7 @@ class AutopilotRunner:
 
         # Synthetic A-mash controller for trigger-driven death-screen handling.
         # The action loop drives it (one ``next_action()`` per tick) so cadence
-        # is ``tick_hz`` × ``frames_per_phase``.
+        # is ``tick_hz`` x ``frames_per_phase``.
         from nxml_autopilot.mash import MashController
 
         self._mash_controller = MashController()
@@ -586,15 +615,38 @@ class AutopilotRunner:
             self._web_server.attach_runtime(self)
 
         self._stop_flag = threading.Event()
+        self._ejected = threading.Event()
+        self._driver_lock = threading.Lock()
+        self._active_driver = "none"
+        self._driver_detail = "starting"
+        self._orchestrator_status_lock = threading.Lock()
+        self._orchestrator_status: dict[str, Any] = {
+            "reachable": False,
+            "connected": False,
+            "error": "not checked",
+        }
+        self._orchestrator_checked_at = 0.0
+        self._orchestrator_success_count = 0
+        self._orchestrator_error_count = 0
+        self._load_eject_state()
 
     def _post_action(self, action: np.ndarray, *, synthetic_driver: str | None = None) -> None:
+        if synthetic_driver is not None and self._ejected.is_set():
+            action = np.zeros(ACTION_DIM, dtype=np.float32)
+            synthetic_driver = None
         try:
             payload = {"vector": action.tolist(), "source": "inference"}
             self._http.post(self._post_url, json=payload)
         except httpx.HTTPError as e:
             print(f"[autopilot] orchestrator POST failed: {e}")
         if synthetic_driver is not None:
+            self._set_active_driver("safety", synthetic_driver)
             self._record_synthetic_action(action, synthetic_driver)
+
+    def _set_active_driver(self, driver: str, detail: str | None = None) -> None:
+        with self._driver_lock:
+            self._active_driver = driver
+            self._driver_detail = detail or driver
 
     def _record_synthetic_action(self, action: np.ndarray, driver: str) -> None:
         """Record macro/mash output that bypasses the human/policy mux.
@@ -623,7 +675,7 @@ class AutopilotRunner:
                 policy_action=np.zeros(ACTION_DIM, dtype=np.float32),
                 ownership=np.zeros(ACTION_DIM, dtype=np.uint8),
                 controller_id=driver,
-                active_driver=driver,
+                active_driver="safety",
                 policy_id=self._policy_id,
                 policy_revision=self._policy_revision,
                 valid=True,
@@ -775,6 +827,8 @@ class AutopilotRunner:
         return self._mode
 
     def set_ai_enabled(self, enabled: bool) -> None:
+        if enabled and self._ejected.is_set():
+            raise RuntimeError("cannot enable policy while emergency eject is latched")
         self._ai_source.enabled = enabled
         self._recorder_ctl.append_event(
             "policy_enabled_changed",
@@ -788,11 +842,171 @@ class AutopilotRunner:
         return self._ai_source.enabled
 
     def runtime_status(self) -> dict[str, Any]:
+        now = time.time()
+        frame = self._source.latest()
+        controller_ts = getattr(self._human, "last_update_timestamp", None)
+        _, policy_ts = self._ai.latest_action()
+        with self._driver_lock:
+            active_driver = self._active_driver
+            driver_detail = self._driver_detail
+        frame_age_s = now - frame.timestamp if frame is not None else None
+        capture_stale = frame_age_s is None or frame_age_s > 0.5
+        controller_meaningful_ts = getattr(
+            self._human, "last_meaningful_input_timestamp", None
+        )
+        policy_health = self._ai.health()
+        policy_age_s = now - policy_ts if policy_ts else None
+        policy_ready = (
+            self._ai_source.enabled
+            and not self._ejected.is_set()
+            and not capture_stale
+            and policy_age_s is not None
+            and policy_age_s <= 1.0
+            and policy_health["last_error"] is None
+        )
         return {
             "mode": self._mode,
             "supported_modes": list(self.SUPPORTED_MODES),
             "ai_enabled": self._ai_source.enabled,
+            "ejected": self._ejected.is_set(),
+            "active_driver": active_driver,
+            "driver_detail": driver_detail,
+            "policy": {
+                "id": self._policy_id,
+                "revision": self._policy_revision,
+                "previous_revision": None,
+                "endpoint": self.config.policy_uri,
+                "inference_count": self._ai.inference_count,
+                "last_inference_timestamp": policy_ts or None,
+                "last_inference_age_ms": policy_age_s * 1000 if policy_age_s is not None else None,
+                "latency_ms": (
+                    policy_health["last_latency_s"] * 1000
+                    if policy_health["last_latency_s"] is not None
+                    else None
+                ),
+                "state": "ready" if policy_ready else "not_ready",
+                "ready": policy_ready,
+                "last_error": policy_health["last_error"],
+            },
+            "capture": {
+                "open": self._source.is_open,
+                "device": f"/dev/video{self.config.camera_id}",
+                "last_frame_monotonic_ns": frame.monotonic_ns if frame is not None else None,
+                "age_ms": frame_age_s * 1000 if frame_age_s is not None else None,
+                "stale": capture_stale,
+            },
+            "controller": {
+                "id": self._human.source_id,
+                "transport_sample_age_ms": (
+                    (now - controller_ts) * 1000 if controller_ts else None
+                ),
+                "transport_fresh": bool(controller_ts and now - controller_ts <= 0.5),
+                "meaningful_input_age_ms": (
+                    (now - controller_meaningful_ts) * 1000
+                    if controller_meaningful_ts
+                    else None
+                ),
+            },
+            "orchestrator": self._orchestrator_health(now),
+            "spool": self._spool_status(now),
         }
+
+    def _orchestrator_health(self, now: float) -> dict[str, Any]:
+        with self._orchestrator_status_lock:
+            if now - self._orchestrator_checked_at > 1.0:
+                try:
+                    response = self._http.get(
+                        self.config.controller_url.rstrip("/") + "/health",
+                        timeout=0.5,
+                    )
+                    response.raise_for_status()
+                    self._orchestrator_status = {
+                        "reachable": True,
+                        **response.json(),
+                        "error": None,
+                    }
+                    self._orchestrator_success_count += 1
+                except (httpx.HTTPError, ValueError) as error:
+                    self._orchestrator_status = {
+                        "reachable": False,
+                        "connected": False,
+                        "error": str(error),
+                    }
+                    self._orchestrator_error_count += 1
+                self._orchestrator_checked_at = now
+            return {
+                **self._orchestrator_status,
+                "checked_age_s": now - self._orchestrator_checked_at,
+                "success_count": self._orchestrator_success_count,
+                "error_count": self._orchestrator_error_count,
+            }
+
+    def _spool_status(self, now: float) -> dict[str, Any]:
+        path = self.config.spool_status_path
+        if path is None or not path.is_file():
+            return {"configured": path is not None, "available": False}
+        try:
+            payload = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as error:
+            return {"configured": True, "available": False, "error": str(error)}
+        updated_at = payload.get("updated_at")
+        return {
+            "configured": True,
+            "available": True,
+            "status_age_s": now - updated_at if isinstance(updated_at, (int, float)) else None,
+            **payload,
+            "admission_open": not bool(payload.get("disk_pressure", False)),
+        }
+
+    def _load_eject_state(self) -> None:
+        path = self.config.eject_state_path
+        if path is None or not path.is_file():
+            return
+        try:
+            latched = bool(json.loads(path.read_text()).get("latched", False))
+        except (OSError, json.JSONDecodeError):
+            latched = True
+        if latched:
+            self._ejected.set()
+            self._ai_source.enabled = False
+            self._set_active_driver("safety", "ejected")
+
+    def _persist_eject_state(self) -> None:
+        path = self.config.eject_state_path
+        if path is None:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps({"latched": self._ejected.is_set()}))
+        temporary.replace(path)
+
+    def emergency_eject(self) -> None:
+        """Latch neutral output and cancel every autonomous action source."""
+        self._ejected.set()
+        self._ai_source.enabled = False
+        self._macro_player.stop()
+        self._mash_controller.stop()
+        self._set_active_driver("safety", "ejected")
+        self._persist_eject_state()
+        now = time.time()
+        self._recorder_ctl.append_event(
+            "emergency_eject",
+            timestamp=now,
+            monotonic_ns=time.monotonic_ns(),
+            payload={"latched": True},
+        )
+        self._post_action(np.zeros(ACTION_DIM, dtype=np.float32))
+
+    def rearm(self) -> None:
+        self._ejected.clear()
+        self._set_active_driver("none", "neutral")
+        self._persist_eject_state()
+        self._recorder_ctl.append_event(
+            "emergency_rearm",
+            timestamp=time.time(),
+            monotonic_ns=time.monotonic_ns(),
+            payload={"latched": False},
+        )
 
     def request_stop(self) -> None:
         self._stop_flag.set()
@@ -816,6 +1030,14 @@ class AutopilotRunner:
             while not self._stop_flag.is_set():
                 t_start = time.time()
 
+                if self._ejected.is_set():
+                    self._post_action(np.zeros(ACTION_DIM, dtype=np.float32))
+                    self._set_active_driver("safety", "ejected")
+                    elapsed = time.time() - t_start
+                    if elapsed < period:
+                        time.sleep(period - elapsed)
+                    continue
+
                 # Synthetic A-mash takes priority over the normal mux.
                 # Macro playback also bypasses the mux but is driven by
                 # MacroPlayer's own thread; mash is driven from this loop.
@@ -832,6 +1054,21 @@ class AutopilotRunner:
                     snapshots = [s for s in (human_snap, ai_snap) if s is not None]
                     action = self._mux.strategy.merge(snapshots)
                     self._mux._latest = action
+
+                    human_mask_now = (
+                        human_snap.mask
+                        if human_snap is not None and human_snap.mask is not None
+                        else np.zeros(ACTION_DIM, dtype=bool)
+                    )
+                    human_active_now = bool(human_mask_now.any())
+                    if human_active_now and ai_snap is not None and self._mode == "human-priority":
+                        self._set_active_driver("blended", "human+policy")
+                    elif human_active_now:
+                        self._set_active_driver("human")
+                    elif ai_snap is not None:
+                        self._set_active_driver("policy")
+                    else:
+                        self._set_active_driver("none", "neutral")
 
                     self._post_action(action)
 

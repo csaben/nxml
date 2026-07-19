@@ -115,6 +115,22 @@ from nxml_autopilot import __version__
 )
 @click.option("--device", default=None, help="Inference device (default: cuda if available).")
 @click.option("--tick-hz", default=30.0, type=float, show_default=True, help="Mux/POST tick rate.")
+@click.option(
+    "--spool-status",
+    "spool_status_path",
+    default="~/.local/state/nxml-spool/status.json",
+    type=click.Path(dir_okay=False, path_type=Path),
+    show_default=True,
+    help="nxml-spool status.json surfaced by the edge health API.",
+)
+@click.option(
+    "--eject-state",
+    "eject_state_path",
+    default="~/.local/state/nxml-autopilot/eject.json",
+    type=click.Path(dir_okay=False, path_type=Path),
+    show_default=True,
+    help="Persistent emergency-eject latch state.",
+)
 def main(
     game: str,
     policy_uri: str,
@@ -136,6 +152,8 @@ def main(
     vae_path: str | None,
     device: str | None,
     tick_hz: float,
+    spool_status_path: Path,
+    eject_state_path: Path,
 ) -> None:
     """Run a hybrid human/AI autopilot session."""
     from nxml_autopilot.runner import AutopilotConfig, AutopilotRunner
@@ -166,6 +184,8 @@ def main(
         vae_path=vae_path,
         device=device,
         tick_hz=tick_hz,
+        spool_status_path=spool_status_path.expanduser(),
+        eject_state_path=eject_state_path.expanduser(),
     )
 
     runner = AutopilotRunner(config)

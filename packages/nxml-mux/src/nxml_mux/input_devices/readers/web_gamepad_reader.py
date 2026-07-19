@@ -57,6 +57,7 @@ class WebGamepadReader:
         self._buttons_latched = np.zeros(BUTTON_DIMS, dtype=bool)
         self._lock = threading.Lock()
         self._latest_ts = 0.0
+        self._last_meaningful_ts = 0.0
 
     def start(self) -> None:
         return None
@@ -78,6 +79,8 @@ class WebGamepadReader:
             self._buttons_latched |= cleaned[BUTTON_RANGE] >= 0.5
             np.copyto(self._action, cleaned)
             self._latest_ts = time.time()
+            if np.any(cleaned[STICK_RANGE] != 0.0) or np.any(cleaned[BUTTON_RANGE] >= 0.5):
+                self._last_meaningful_ts = self._latest_ts
 
     def latest(self) -> ActionSnapshot | None:
         now = time.time()
@@ -98,3 +101,14 @@ class WebGamepadReader:
         mask[STICK_RANGE] = action[STICK_RANGE] != 0.0
         mask[BUTTON_RANGE] = action[BUTTON_RANGE] >= 0.5
         return ActionSnapshot(action=action, timestamp=ts, source_id=self.source_id, mask=mask)
+
+    @property
+    def last_update_timestamp(self) -> float | None:
+        """Most recent transport update without consuming button latches."""
+        with self._lock:
+            return self._latest_ts or None
+
+    @property
+    def last_meaningful_input_timestamp(self) -> float | None:
+        with self._lock:
+            return self._last_meaningful_ts or None

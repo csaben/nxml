@@ -428,7 +428,10 @@ def create_app(reader: WebGamepadReader, source: CaptureSource, *, token: str = 
         enabled = payload.get("enabled")
         if not isinstance(enabled, bool):
             raise HTTPException(status_code=400, detail="missing 'enabled': bool")
-        rt.set_ai_enabled(enabled)
+        try:
+            rt.set_ai_enabled(enabled)
+        except RuntimeError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
         return JSONResponse({"attached": True, **rt.runtime_status()})
 
     @app.post("/runtime/mode")
@@ -443,6 +446,20 @@ def create_app(reader: WebGamepadReader, source: CaptureSource, *, token: str = 
             rt.set_mode(mode)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
+        return JSONResponse({"attached": True, **rt.runtime_status()})
+
+    @app.post("/runtime/eject")
+    async def runtime_eject(request: Request) -> JSONResponse:
+        _check_token(request, token)
+        rt = _runtime_or_400()
+        rt.emergency_eject()
+        return JSONResponse({"attached": True, **rt.runtime_status()})
+
+    @app.post("/runtime/rearm")
+    async def runtime_rearm(request: Request) -> JSONResponse:
+        _check_token(request, token)
+        rt = _runtime_or_400()
+        rt.rearm()
         return JSONResponse({"attached": True, **rt.runtime_status()})
 
     @app.get("/health")

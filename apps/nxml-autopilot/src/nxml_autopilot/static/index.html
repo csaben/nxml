@@ -136,6 +136,9 @@
     background: #1d3a5a; border-color: #36a; color: #def;
   }
   #aiToggleBtn.off { background: #5a3a1d; border-color: #a83; color: #fed; }
+  #ejectBtn { background: #651414 !important; border-color: #f44 !important; color: #fff !important; font-weight: 800 !important; }
+  #rearmBtn { border-color: #e90 !important; color: #fdc !important; }
+  body.ejected { box-shadow: inset 0 0 0 8px #d22; }
   #runtimeInfo { font-family: ui-monospace, monospace; font-size: 12px; color: #9c9; }
   #triggers {
     display: flex;
@@ -201,6 +204,9 @@
     <span style="opacity:0.6">mode:</span>
     <button id="modeHpBtn" type="button" data-mode="human-priority">human-priority</button>
     <button id="modeHtBtn" type="button" data-mode="human-takeover">human-takeover</button>
+    <span style="opacity:0.6">|</span>
+    <button id="ejectBtn" type="button">EMERGENCY EJECT</button>
+    <button id="rearmBtn" type="button">Re-arm</button>
     <span id="runtimeInfo">runtime: not attached</span>
   </div>
   <div id="macros">
@@ -591,6 +597,8 @@ refreshMacroStatus();
 const aiToggleBtn = document.getElementById("aiToggleBtn");
 const modeHpBtn = document.getElementById("modeHpBtn");
 const modeHtBtn = document.getElementById("modeHtBtn");
+const ejectBtn = document.getElementById("ejectBtn");
+const rearmBtn = document.getElementById("rearmBtn");
 const runtimeInfo = document.getElementById("runtimeInfo");
 
 let runtimeState = {
@@ -606,6 +614,8 @@ function renderRuntime() {
     aiToggleBtn.disabled = true;
     modeHpBtn.disabled = true;
     modeHtBtn.disabled = true;
+    ejectBtn.disabled = true;
+    rearmBtn.disabled = true;
     aiToggleBtn.textContent = "AI: …";
     aiToggleBtn.classList.remove("off", "active");
     modeHpBtn.classList.remove("active");
@@ -614,6 +624,9 @@ function renderRuntime() {
     return;
   }
   aiToggleBtn.disabled = false;
+  ejectBtn.disabled = false;
+  rearmBtn.disabled = !s.ejected;
+  document.body.classList.toggle("ejected", !!s.ejected);
   aiToggleBtn.textContent = s.ai_enabled ? "AI: on" : "AI: off";
   aiToggleBtn.classList.toggle("off", !s.ai_enabled);
   aiToggleBtn.classList.toggle("active", s.ai_enabled);
@@ -624,7 +637,14 @@ function renderRuntime() {
     b.disabled = !supported;
     b.classList.toggle("active", b.dataset.mode === s.mode);
   }
-  runtimeInfo.textContent = `mode=${s.mode} ai=${s.ai_enabled ? "on" : "off"}`;
+  const cap = s.capture || {};
+  const ctl = s.controller || {};
+  const pol = s.policy || {};
+  const orch = s.orchestrator || {};
+  const spool = s.spool || {};
+  runtimeInfo.textContent = s.ejected
+    ? "EJECTED — neutral output latched"
+    : `driver=${s.active_driver}/${s.driver_detail} mode=${s.mode} ai=${pol.state || "?"} capture=${cap.stale ? "STALE" : "ok"} controller=${ctl.transport_fresh ? "ok" : "stale"} switch=${orch.connected ? "ok" : "down"} spool=${spool.disk_pressure ? "PRESSURE" : "ok"}`;
 }
 
 async function refreshRuntimeStatus() {
@@ -677,6 +697,19 @@ for (const b of [modeHpBtn, modeHtBtn]) {
     }
   });
 }
+
+ejectBtn.addEventListener("click", async () => {
+  const out = await runtimeFetch("/runtime/eject", {});
+  if (out) runtimeState = out;
+  renderRuntime();
+});
+
+rearmBtn.addEventListener("click", async () => {
+  if (!window.confirm("Re-arm controller output? AI remains off until explicitly enabled.")) return;
+  const out = await runtimeFetch("/runtime/rearm", {});
+  if (out) runtimeState = out;
+  renderRuntime();
+});
 
 setInterval(refreshRuntimeStatus, 1000);
 refreshRuntimeStatus();
