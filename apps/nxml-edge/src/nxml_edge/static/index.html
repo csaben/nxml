@@ -45,8 +45,9 @@
       const humanCard=document.querySelector('#human-card'); humanCard.className=`card ${s.human_capture_ready?'human-ready':'human-blocked'}`;
       document.querySelector('#human-state').textContent=s.human_capture_ready?'READY — policy and autopilot are not required':`BLOCKED — ${s.human_blocked_on||'unknown'}`;
       document.querySelector('#human-checks').innerHTML=(s.human_checks||[]).map(c=>`<div>${c.ready?'✓':'✗'} ${c.dependency}: ${c.summary}</div>`).join('');
-      const d = document.querySelector('#driver'); d.textContent=s.driver.toUpperCase(); d.className=s.driver;
-      document.querySelector('#checks').innerHTML=s.checks.map(c=>`<section class="card ${c.ready?'ok':'bad'}"><b>${c.dependency}: ${c.summary}</b>${(c.operator_steps||[]).map(x=>`<div>→ ${x}</div>`).join('')}${c.detail?.spool?`<pre>spool: ${JSON.stringify(c.detail.spool,null,2)}</pre>`:''}</section>`).join('');
+      const shownDriver=s.capture_mode==='human'&&s.human_capture_ready?'human':s.driver;
+      const d = document.querySelector('#driver'); d.textContent=shownDriver.toUpperCase(); d.className=shownDriver;
+      document.querySelector('#checks').innerHTML=s.checks.map(c=>{const optional=s.capture_mode==='human'&&(c.dependency==='policy'||c.dependency==='autopilot');return `<section class="card ${optional?'':c.ready?'ok':'bad'}"><b>${c.dependency}: ${c.summary}</b>${(c.operator_steps||[]).map(x=>`<div>→ ${x}</div>`).join('')}${c.detail?.spool?`<pre>spool: ${JSON.stringify(c.detail.spool,null,2)}</pre>`:''}</section>`}).join('');
       document.querySelector('#logs').textContent=(s.logs||[]).join('\n');
       refreshCluster(); refreshController();
     }
