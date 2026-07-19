@@ -104,7 +104,7 @@ class EdgeSupervisor:
                     dependency=Dependency.AUTOPILOT,
                     ready=runtime.ready,
                     summary="Autopilot ready" if runtime.ready else "Autopilot unavailable",
-                    detail={"error": runtime.error},
+                    detail={"error": runtime.error, "spool": runtime.spool},
                 ),
             ]
             blocked = next((check.dependency for check in checks if not check.ready), None)

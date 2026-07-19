@@ -18,6 +18,7 @@ from nxml_edge.adapters import (
     SystemctlServiceAdapter,
     UdevDeviceAdapter,
 )
+from nxml_edge.cluster import ClusterClient, ClusterDashboard, HttpTransport
 from nxml_edge.config import ConfigStore
 from nxml_edge.supervisor import EdgeSupervisor
 from nxml_edge.web import create_app
@@ -67,7 +68,18 @@ def main(config_path: Path, token_file: Path, fixture_adapters: bool) -> None:
         runtime=runtime,
         services=services,
     )
-    uvicorn.run(create_app(supervisor, token=token), host=config.bind_host, port=config.edge_port)
+    cluster_token = None
+    if config.cluster_token_path and config.cluster_token_path.is_file():
+        cluster_token = config.cluster_token_path.read_text().strip()
+    cluster = ClusterDashboard(
+        ClusterClient(HttpTransport(config.cluster_url, cluster_token)),
+        stale_after=config.cluster_stale_after_seconds,
+    )
+    uvicorn.run(
+        create_app(supervisor, token=token, cluster=cluster),
+        host=config.bind_host,
+        port=config.edge_port,
+    )
 
 
 if __name__ == "__main__":

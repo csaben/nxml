@@ -12,6 +12,9 @@ class EdgeConfig(BaseModel):
     game: str = "pokemon-za"
     switch_mac: str | None = None
     policy_uri: str
+    cluster_url: str = "http://cradle:8787"
+    cluster_token_path: Path | None = Path("~/.config/nxml/cluster.token").expanduser()
+    cluster_stale_after_seconds: float = Field(default=15.0, gt=0)
     capture_identity: str = "/dev/v4l/by-id/REPLACE_ME"
     capture_device_index: int = 0
     tailnet_host: str = "cradle-ns"

@@ -41,6 +41,7 @@ class RuntimeProbe:
     driver: str = "unknown"
     ejected: bool = False
     error: str | None = None
+    spool: dict[str, object] = field(default_factory=dict)
 
 
 class DeviceAdapter(Protocol):
@@ -296,7 +297,8 @@ class HttpRuntimeAdapter:
             and orchestrator.get("connected")
         )
         detail = str(payload.get("driver_detail") or payload.get("active_driver") or "unknown")
-        return RuntimeProbe(ready, detail, bool(payload.get("ejected")))
+        spool = payload.get("spool") if isinstance(payload.get("spool"), dict) else {}
+        return RuntimeProbe(ready, detail, bool(payload.get("ejected")), spool=spool)
 
     def eject(self) -> RuntimeProbe:
         self.client.eject()

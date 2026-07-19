@@ -6,7 +6,7 @@
   <title>NXML Edge</title>
   <style>
     :root { color-scheme: dark; font-family: system-ui, sans-serif; }
-    body { max-width: 980px; margin: 2rem auto; padding: 0 1rem; background:#101318; color:#edf1f7; }
+    body { max-width: 1180px; margin: 2rem auto; padding: 0 1rem; background:#101318; color:#edf1f7; }
     header { display:flex; justify-content:space-between; align-items:center; gap:1rem; }
     #driver { padding:.6rem 1rem; border-radius:999px; font-weight:800; background:#394150; }
     #driver.human { background:#087f5b } #driver.policy { background:#7048e8 }
@@ -16,12 +16,19 @@
     .danger { background:#e03131; color:white } .card { background:#1b2029; margin:.7rem 0; padding:1rem; border-radius:.6rem; }
     .ok { border-left:5px solid #2f9e44 } .bad { border-left:5px solid #e03131 }
     pre { white-space:pre-wrap; max-height:16rem; overflow:auto; color:#adb5bd; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:.7rem }
+    .metric { font-size:1.6rem; font-weight:800 } input { background:#11151b;color:white;border:1px solid #495057;padding:.5rem }
   </style>
 </head>
 <body>
   <header><div><h1>NXML Edge</h1><div id="state">Loading…</div></div><div id="driver">unknown</div></header>
   <p><button onclick="act('start')">Start session</button><button onclick="act('retry')">Retry</button><button onclick="act('stop')">Stop</button><button class="danger" onclick="act('eject')">EMERGENCY EJECT</button><button onclick="act('rearm')">Re-arm</button></p>
   <main id="checks"></main><h2>Recent supervisor actions</h2><pre id="logs"></pre>
+  <section><h2>Cluster <small id="cluster-state">loading</small></h2><p>Cluster failures never affect session or emergency controls.</p>
+    <div class="grid"><div class="card"><div class="metric" id="dataset-count">—</div>datasets</div><div class="card"><div class="metric" id="shard-count">—</div>shards</div><div class="card"><div class="metric" id="episode-count">—</div>episodes</div></div>
+    <div class="grid"><div class="card"><h3>Deployment</h3><pre id="deployment"></pre></div><div class="card"><h3>Snapshots</h3><pre id="snapshots"></pre></div><div class="card"><h3>Training / logs / metrics</h3><pre id="jobs"></pre></div><div class="card"><h3>Models</h3><pre id="revisions"></pre></div><div class="card"><h3>Receipts</h3><pre id="receipts"></pre></div></div>
+    <div class="card"><h3>Controls</h3><input id="dataset-id" placeholder="dataset id"><button onclick="clusterAct('snapshot')">Human snapshot</button><br><input id="snapshot-id" placeholder="snapshot sha256:…"><button onclick="clusterAct('train')">Submit BC</button><br><input id="revision-id" placeholder="validated revision"><input id="generation" type="number" placeholder="expected generation"><button onclick="clusterAct('promote')">Promote</button><button class="danger" onclick="clusterAct('rollback')">Rollback</button><pre id="cluster-action"></pre></div>
+  </section><section class="card"><h2>Search — reserved</h2><p>Future cluster clip references, filters, and labels. No embeddings or indexing run on this edge host.</p></section>
   <script>
     const queryToken = new URLSearchParams(location.search).get('token');
     if (queryToken) localStorage.setItem('nxmlEdgeToken', queryToken);
@@ -33,10 +40,13 @@
       const s = await response.json();
       document.querySelector('#state').textContent = `${s.state}${s.blocked_on ? ' — blocked on '+s.blocked_on : ''}`;
       const d = document.querySelector('#driver'); d.textContent=s.driver.toUpperCase(); d.className=s.driver;
-      document.querySelector('#checks').innerHTML=s.checks.map(c=>`<section class="card ${c.ready?'ok':'bad'}"><b>${c.dependency}: ${c.summary}</b>${(c.operator_steps||[]).map(x=>`<div>→ ${x}</div>`).join('')}</section>`).join('');
+      document.querySelector('#checks').innerHTML=s.checks.map(c=>`<section class="card ${c.ready?'ok':'bad'}"><b>${c.dependency}: ${c.summary}</b>${(c.operator_steps||[]).map(x=>`<div>→ ${x}</div>`).join('')}${c.detail?.spool?`<pre>spool: ${JSON.stringify(c.detail.spool,null,2)}</pre>`:''}</section>`).join('');
       document.querySelector('#logs').textContent=(s.logs||[]).join('\n');
+      refreshCluster();
     }
     async function act(name) { await fetch(`/api/session/${name}`, options('POST')); await refresh(); }
+    async function refreshCluster() { try { const r=await fetch('/api/cluster/status',options('GET')),c=await r.json(); document.querySelector('#cluster-state').textContent=c.connected?'connected':`unavailable — ${c.error||'unknown'}`; for(const k of ['dataset','shard','episode']) document.querySelector(`#${k}-count`).textContent=c[`${k}_count`]??'—'; for(const k of ['deployment','snapshots','jobs','revisions','receipts']) document.querySelector(`#${k}`).textContent=JSON.stringify(c[k]??[],null,2); } catch(e) { document.querySelector('#cluster-state').textContent=`unavailable — ${e}`; } }
+    async function clusterAct(name) { const generation=Number(document.querySelector('#generation').value),key=crypto.randomUUID(); let path,body={}; if(name==='snapshot')path=`/api/cluster/datasets/${encodeURIComponent(document.querySelector('#dataset-id').value)}/human-snapshot`; if(name==='train'){path='/api/cluster/training/bc';body={snapshot_id:document.querySelector('#snapshot-id').value,config:{trainer:'bc'}}} if(name==='promote'){path=`/api/cluster/models/${encodeURIComponent(document.querySelector('#revision-id').value)}/promote`;body={expected_generation:generation}} if(name==='rollback'){path='/api/cluster/deployment/rollback';body={expected_generation:generation}} try{const r=await fetch(path,{method:'POST',headers:{'X-NXML-Edge-Token':token,'Idempotency-Key':key,'Content-Type':'application/json'},body:JSON.stringify(body)});document.querySelector('#cluster-action').textContent=await r.text()}catch(e){document.querySelector('#cluster-action').textContent=String(e)} refreshCluster() }
     refresh(); setInterval(refresh, 2000);
   </script>
 </body>

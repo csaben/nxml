@@ -6,10 +6,13 @@ from importlib.resources import files
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
+from nxml_edge.cluster import ClusterDashboard, ClusterError
 from nxml_edge.supervisor import EdgeSupervisor
 
 
-def create_app(supervisor: EdgeSupervisor, *, token: str) -> FastAPI:
+def create_app(
+    supervisor: EdgeSupervisor, *, token: str, cluster: ClusterDashboard | None = None
+) -> FastAPI:
     app = FastAPI(title="nxml-edge", version="0.1.0")
 
     def require_token(request: Request) -> None:
@@ -26,6 +29,63 @@ def create_app(supervisor: EdgeSupervisor, *, token: str) -> FastAPI:
     def status(request: Request):
         require_token(request)
         return supervisor.status()
+
+    @app.get("/api/cluster/status")
+    def cluster_status(request: Request):
+        require_token(request)
+        return (
+            cluster.status() if cluster else {"connected": False, "error": "cluster not configured"}
+        )
+
+    def cluster_action(request: Request) -> ClusterDashboard:
+        require_token(request)
+        if cluster is None:
+            raise HTTPException(503, "cluster not configured")
+        return cluster
+
+    @app.post("/api/cluster/datasets/{dataset_id}/human-snapshot")
+    def snapshot(dataset_id: str, request: Request):
+        try:
+            return cluster_action(request).create_snapshot(
+                dataset_id, request.headers.get("idempotency-key")
+            )
+        except ClusterError as error:
+            raise HTTPException(error.status or 503, str(error)) from error
+
+    @app.post("/api/cluster/training/bc")
+    async def train(request: Request):
+        dashboard = cluster_action(request)
+        body = await request.json()
+        try:
+            return dashboard.submit_bc(
+                body["snapshot_id"], body.get("config", {}), request.headers.get("idempotency-key")
+            )
+        except ClusterError as error:
+            raise HTTPException(error.status or 503, str(error)) from error
+
+    @app.post("/api/cluster/models/{revision_id}/promote")
+    async def promote(revision_id: str, request: Request):
+        dashboard = cluster_action(request)
+        body = await request.json()
+        try:
+            return dashboard.promote(
+                revision_id,
+                int(body["expected_generation"]),
+                request.headers.get("idempotency-key"),
+            )
+        except ClusterError as error:
+            raise HTTPException(error.status or 503, str(error)) from error
+
+    @app.post("/api/cluster/deployment/rollback")
+    async def rollback(request: Request):
+        dashboard = cluster_action(request)
+        body = await request.json()
+        try:
+            return dashboard.rollback(
+                int(body["expected_generation"]), request.headers.get("idempotency-key")
+            )
+        except ClusterError as error:
+            raise HTTPException(error.status or 503, str(error)) from error
 
     @app.post("/api/session/start")
     def start(request: Request):
