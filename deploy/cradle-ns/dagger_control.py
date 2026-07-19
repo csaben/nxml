@@ -65,7 +65,7 @@ class Arbitrator:
         *,
         stale_ns: int = 55_000_000,
         hard_stall_ns: int = 250_000_000,
-        max_gaps_per_window: int = 8,
+        max_gaps_per_window: int = 16,
     ):
         self.mode = Mode.HUMAN
         self.mute = MuteMask()
