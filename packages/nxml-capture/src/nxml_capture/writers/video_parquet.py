@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -155,6 +156,8 @@ class VideoParquetEpisodeWriter:
         self.config = dict(config or {})
         self.build = dict(build or {})
         self.lineage = dict(lineage or {})
+        self._clock_monotonic_origin_ns = time.monotonic_ns()
+        self._clock_utc_origin = datetime.now(tz=UTC).isoformat()
 
         self._video_path = self.output_dir / f"{self.episode_name}{self._profile.container_ext}"
         self._parquet_path = self.output_dir / f"{self.episode_name}.parquet"
@@ -320,9 +323,21 @@ class VideoParquetEpisodeWriter:
                 **self.build,
             },
             "clock_mapping": {
-                "wall_clock": "unix_seconds",
-                "monotonic_clock": "monotonic_ns",
+                "clock_id": "linux-monotonic",
+                "monotonic_origin_ns": self._clock_monotonic_origin_ns,
+                "utc_origin": self._clock_utc_origin,
+                "uncertainty_ns": 0,
             },
+            "first_frame_timestamp_ns": min(
+                record.frame_monotonic_ns
+                for record in self._records
+                if record.frame_monotonic_ns is not None
+            ) if any(record.frame_monotonic_ns is not None for record in self._records) else 0,
+            "last_frame_timestamp_ns": max(
+                record.frame_monotonic_ns
+                for record in self._records
+                if record.frame_monotonic_ns is not None
+            ) if any(record.frame_monotonic_ns is not None for record in self._records) else 0,
             "capture": {
                 "timestamps": "frame arrival",
                 "frame_color": "bgr24",

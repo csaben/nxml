@@ -67,9 +67,14 @@ def test_schema_v2_preserves_proposals_ownership_and_checksums(tmp_path: Path) -
     assert events[0]["kind"] == "driver_changed"
 
     manifest = json.loads((tmp_path / "episode.manifest.json").read_text())
+    assert manifest["episode_id"] == writer.episode_id
     assert manifest["schema_id"] == "nxml.episode.v2"
     assert manifest["action_spec"] == "switch_packets.v1"
     assert manifest["lineage"]["parent_policy_revision"] == "rev-6"
+    assert manifest["first_frame_timestamp_ns"] == 5_000_000_000
+    assert manifest["last_frame_timestamp_ns"] == 5_000_000_000
+    assert manifest["clock_mapping"]["clock_id"] == "linux-monotonic"
+    assert manifest["clock_mapping"]["monotonic_origin_ns"] > 0
     for name, metadata in manifest["files"].items():
         payload = (tmp_path / name).read_bytes()
         assert metadata["bytes"] == len(payload)

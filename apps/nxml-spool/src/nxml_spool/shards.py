@@ -76,10 +76,27 @@ def pack_shard(
             digest.update(chunk)
     shard_sha256 = digest.hexdigest()
 
+    episode_entries = []
+    for ep in episodes:
+        raw_manifest = json.loads(ep.manifest_path.read_text())
+        episode_entries.append(
+            {
+                "episode_id": ep.episode_id,
+                "first_frame_timestamp_ns": raw_manifest.get("first_frame_timestamp_ns"),
+                "last_frame_timestamp_ns": raw_manifest.get("last_frame_timestamp_ns"),
+                "clock_mapping": raw_manifest.get("clock_mapping"),
+                "temporal_resolution": (
+                    "episode_monotonic_ns"
+                    if raw_manifest.get("first_frame_timestamp_ns") is not None
+                    and raw_manifest.get("last_frame_timestamp_ns") is not None
+                    else "unavailable"
+                ),
+            }
+        )
     api_manifest: dict[str, object] = {
         "schema_id": "nxml.episode.v2",
         "action_spec_id": "switch_packets.v1",
-        "episodes": [{"episode_id": ep.episode_id} for ep in episodes],
+        "episodes": episode_entries,
         "members": members,
     }
     sidecar = {

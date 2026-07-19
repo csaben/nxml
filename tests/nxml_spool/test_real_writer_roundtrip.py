@@ -30,7 +30,16 @@ def _record_real_episode(out_dir: Path, name: str, n_frames: int = 20) -> None:
         frame = np.full((64, 64, 3), min(i * 12, 255), dtype=np.uint8)  # BGR HWC
         action = np.zeros(26, dtype=np.float32)
         action[0] = i / n_frames
-        writer.append(SyncedFrame(timestamp=i / 30.0, frame=frame, action=action, action_age=0.0))
+        writer.append(
+            SyncedFrame(
+                timestamp=i / 30.0,
+                frame=frame,
+                action=action,
+                action_age=0.0,
+                frame_monotonic_ns=1_000_000_000 + i * 33_333_333,
+                action_monotonic_ns=1_000_000_000 + i * 33_333_333,
+            )
+        )
     assert writer.close() is not None
 
 
@@ -67,6 +76,11 @@ def test_real_writer_episode_spools_and_decodes(tmp_path: Path) -> None:
     from nxml_spool.shards import pack_shard
 
     shard = pack_shard(eps, tmp_path / "restage", 0)
+    episode_entry = shard.api_manifest["episodes"][0]
+    assert episode_entry["episode_id"] == "20260710_010101"
+    assert episode_entry["temporal_resolution"] == "episode_monotonic_ns"
+    assert episode_entry["first_frame_timestamp_ns"] == 1_000_000_000
+    assert episode_entry["last_frame_timestamp_ns"] > episode_entry["first_frame_timestamp_ns"]
     extract_dir = tmp_path / "extract"
     with tarfile.open(shard.path) as tar:
         tar.extractall(extract_dir, filter="data")
