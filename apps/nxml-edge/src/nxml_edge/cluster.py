@@ -21,10 +21,17 @@ class ClusterError(RuntimeError):
 
 
 class Health(BaseModel):
-    status: str
-    created: int
-    uploaded: int
-    committed: int
+    """Public control-plane readiness response.
+
+    Current servers return only ``{"status": "ready"}``.  The optional
+    counters retain wire compatibility with older servers, but dashboard
+    counts must come from authenticated list endpoints rather than health.
+    """
+
+    status: Literal["ready", "ok"]
+    created: int | None = None
+    uploaded: int | None = None
+    committed: int | None = None
 
 
 class Dataset(BaseModel):

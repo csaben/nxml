@@ -8,6 +8,7 @@ class FakeControl:
     def __init__(self):
         self.outage = False
         self.loss_once = False
+        self.health_payload = {"status": "ready"}
         self.calls = []
         self.deployment = {
             "active_revision": "rev-a",
@@ -20,7 +21,7 @@ class FakeControl:
         if self.outage:
             raise ClusterError("tailnet unavailable")
         if path == "/healthz":
-            return {"status": "ok", "created": 3, "uploaded": 2, "committed": 1}
+            return self.health_payload
         if path == "/v1/datasets":
             return {"datasets": [{"id": "ds", "shard_count": 2, "episode_count": 7}]}
         if path == "/v1/snapshots":
@@ -81,6 +82,55 @@ def test_cluster_outage_returns_stale_cache_without_touching_session(edge):
     transport.outage = True
     assert dashboard.status()["stale"] is True
     assert edge[0].status().ready is True
+
+
+def test_minimal_ready_health_uses_authenticated_dataset_counts():
+    transport = FakeControl()
+    result = ClusterDashboard(ClusterClient(transport)).status()
+
+    assert result["connected"] is True
+    assert result["health"].status == "ready"
+    assert result["health"].created is None
+    assert result["dataset_count"] == 1
+    assert result["shard_count"] == 2
+    assert result["episode_count"] == 7
+
+
+def test_legacy_health_counters_remain_compatible_but_do_not_drive_counts():
+    transport = FakeControl()
+    transport.health_payload = {"status": "ok", "created": 30, "uploaded": 20, "committed": 10}
+    result = ClusterDashboard(ClusterClient(transport)).status()
+
+    assert result["connected"] is True
+    assert result["health"].committed == 10
+    assert result["dataset_count"] == 1
+    assert result["shard_count"] == 2
+    assert result["episode_count"] == 7
+
+
+@pytest.mark.parametrize("payload", [{}, {"status": "unhealthy"}, {"status": 7}])
+def test_malformed_or_unhealthy_health_is_disconnected(payload):
+    transport = FakeControl()
+    transport.health_payload = payload
+
+    result = ClusterDashboard(ClusterClient(transport)).status()
+
+    assert result["connected"] is False
+    assert result["stale"] is True
+    assert result["error"]
+
+
+def test_cluster_recovers_after_outage():
+    transport = FakeControl()
+    dashboard = ClusterDashboard(ClusterClient(transport))
+    transport.outage = True
+    assert dashboard.status()["connected"] is False
+
+    transport.outage = False
+    recovered = dashboard.status()
+    assert recovered["connected"] is True
+    assert recovered["stale"] is False
+    assert recovered["error"] is None
 
 
 def test_response_loss_retry_reuses_idempotency_key():
