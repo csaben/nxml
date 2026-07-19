@@ -1,0 +1,30 @@
+[Unit]
+Description=NXML immutable-revision GPU inference data plane
+After=network-online.target nxml-control.service
+Wants=network-online.target
+Requires=nxml-control.service
+
+[Service]
+Type=simple
+User=nxml-control
+Group=nxml-control
+EnvironmentFile=/etc/nxml-control/nxml-control.env
+Environment=CUDA_VISIBLE_DEVICES=0
+Environment=HF_HOME=/var/lib/nxml-control/hf
+ExecStart=/opt/nxml/.venv/bin/nxml-inference --state-dir /var/lib/nxml-control --checkpoint-dir /var/lib/nxml-control/checkpoints --revision-id ${NXML_INFERENCE_REVISION_ID} --host 100.80.98.4 --port 5557 --device cuda:0 --timeout-ms 250
+Restart=on-failure
+RestartSec=5s
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/nxml-control /var/log/nxml-control
+
+[Install]
+WantedBy=multi-user.target

@@ -41,7 +41,7 @@ sudo journalctl -u nxml-control.service --since today
 
 Provision the same token to nxml-edge through its secret manager or a local 0600 file; its HTTP client must send `Authorization: Bearer <token>`. Never copy the token into an environment example, command history, unit file, repository, issue, or log. Rotate by atomically replacing `/etc/nxml-control/token` with another 0600 file and restarting both client and service in a coordinated maintenance window.
 
-The ZMQ+frames 30fps inference data plane remains a separate process/socket. This HTTP service is only the authenticated control plane.
+The ZMQ+frames 30fps inference data plane remains a separate process/socket. This HTTP service is only the authenticated control plane. See `INFERENCE_V2.md` and `nxml-inference.service`; inference is pinned to a validated immutable registry revision and physical GPU 0, and starting it does not promote or arm a deployment.
 
 After this version is deployed, quarantine the known noncausal episode without touching its shard or receipt:
 

@@ -3,11 +3,12 @@ name = "nxml-control"
 version = "0.1.0"
 description = "NXML durable ingest and ML control plane"
 requires-python = ">=3.14"
-dependencies = ["fastapi>=0.115", "httpx>=0.27", "pyarrow>=18", "nxml-core", "nxrl", "nxwm", "pydantic>=2.7", "uvicorn>=0.30"]
+dependencies = ["fastapi>=0.115", "httpx>=0.27", "pyarrow>=18", "pyzmq>=26", "nxml-core", "nxrl", "nxwm", "pydantic>=2.7", "uvicorn>=0.30"]
 
 [project.scripts]
 nxml-control = "nxml_control.cli:main"
 nxml-bc-worker = "nxml_control.bc_worker:main"
+nxml-inference = "nxml_control.inference:main"
 
 [build-system]
 requires = ["hatchling"]
