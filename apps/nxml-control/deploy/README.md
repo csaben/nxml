@@ -18,6 +18,16 @@ sudo systemctl enable --now nxml-control.service
 
 The checkout/venv at `/opt/nxml` must already be installed and readable by the service user. If its location differs, edit `ExecStart` before installation. Confirm cradle owns Tailnet address `100.80.98.4`; do not start the service if it does not.
 
+The unit intentionally does not set `MemoryDenyWriteExecute=true`. The
+uv-managed CPython 3.14 build used on cradle cannot create worker threads with
+that property, while FastAPI runs synchronous catalog handlers through an
+AnyIO worker thread. Validate the exact interpreter before enabling the unit:
+
+```sh
+sudo -u nxml-control /opt/nxml/.venv/bin/python -c \
+  'import threading; t=threading.Thread(target=lambda: None); t.start(); t.join()'
+```
+
 Readiness and authenticated checks:
 
 ```sh

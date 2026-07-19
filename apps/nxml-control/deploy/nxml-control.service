@@ -22,7 +22,8 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
-MemoryDenyWriteExecute=true
+# MemoryDenyWriteExecute is incompatible with uv-managed CPython 3.14 threads.
+# FastAPI executes synchronous catalog handlers in an AnyIO worker thread.
 ReadWritePaths=/var/lib/nxml-control /var/log/nxml-control
 
 [Install]
