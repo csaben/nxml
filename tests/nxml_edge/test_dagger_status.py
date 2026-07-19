@@ -54,7 +54,54 @@ def test_status_models_preserve_contract_and_spool_metadata(tmp_path):
     assert wire["session"]["recording_available"] is False
     assert wire["spool"]["commit_id"] == "receipt-7"
     assert wire["spool"]["local_buffered_bytes"] >= spool.stat().st_size
+    storage = wire["spool"]["local_storage"]
+    assert storage["state"] == "ready"
+    assert storage["capture_filesystem"]["available_bytes"] >= 0
+    assert storage["upload_rate_bytes_per_second"] is None
+    assert storage["upload_rate_state"] == "unavailable_no_progress_counter"
+    assert wire["spool"]["rolling_segments"]["state"] == "disabled"
+    assert wire["cluster"] is None
     assert "cluster" in wire["errors"]
+
+
+def test_storage_low_disk_fails_recording_admission(monkeypatch, tmp_path):
+    spool = tmp_path / "status.json"
+    spool.write_text(json.dumps({"disk_high_watermark": 0.85, "disk_low_watermark": 0.75}))
+    fake = SimpleNamespace(f_frsize=1, f_blocks=100, f_bfree=10, f_bavail=8)
+    monkeypatch.setattr(status_mod.os, "statvfs", lambda _path: fake)
+    reader = status_mod.OperationsReader(
+        spool_status_path=spool,
+        cluster_url="http://127.0.0.1:1",
+        cluster_token_path=None,
+        capture_dir=tmp_path,
+        request_timeout=0.01,
+    )
+    local = reader.refresh().spool
+    assert local is not None
+    assert local["local_storage"]["warning"] is True
+    assert local["local_storage"]["recording_admission_open"] is False
+    assert local["admission_open"] is False
+    assert "fail-closed" in local["blocked_reason"]
+
+
+def test_storage_stat_failure_is_explicit_and_fail_closed(monkeypatch, tmp_path):
+    spool = tmp_path / "status.json"
+    spool.write_text("{}")
+    monkeypatch.setattr(
+        status_mod.os, "statvfs", lambda _path: (_ for _ in ()).throw(OSError("stat failed"))
+    )
+    reader = status_mod.OperationsReader(
+        spool_status_path=spool,
+        cluster_url="http://127.0.0.1:1",
+        cluster_token_path=None,
+        capture_dir=tmp_path,
+        request_timeout=0.01,
+    )
+    local = reader.refresh().spool
+    assert local is not None
+    assert local["local_storage"]["state"] == "unavailable"
+    assert local["local_storage"]["recording_admission_open"] is False
+    assert local["admission_open"] is False
 
 
 def test_slow_operations_never_block_fast_websocket(tmp_path):

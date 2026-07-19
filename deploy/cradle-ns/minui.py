@@ -71,6 +71,7 @@ PAGE = """<!doctype html>
   .value { margin-top:.25rem; }
   .on { color:#51cf66 } .off { color:#ff6b6b }
   button { background:#2b3440; color:#eef3f8; border:1px solid #465363; border-radius:.35rem; padding:.4rem .7rem; }
+  progress { width:100%; accent-color:#51cf66; } progress.warn { accent-color:#ffd43b } progress.stop { accent-color:#ff6b6b }
 </style></head><body>
 <img id="preview" src="/stream.mjpeg" alt="Switch capture">
 <div id="bar">
@@ -81,8 +82,8 @@ PAGE = """<!doctype html>
 </div>
 <section id="ops">
  <div class="card"><div class="label">Session</div><div class="value" id="session">human · idle</div><div class="value"><select id="mode"><option value="human">Human</option><option value="pure_ai" disabled>Pure AI</option><option value="hybrid" disabled>Hybrid</option></select> <button id="record">Start episode</button></div><div class="value"><button id="arm">Arm AI</button> <button id="disarm" disabled>Disarm</button> <button id="eject">Emergency eject</button></div><div class="value"><label>Muted dimensions <input id="mute" size="12" placeholder="e.g. 0,4,5"></label> <button id="mute-set" disabled>Apply mute</button></div><div class="value label">switch_packets.v1/mute.v1 · AI proposal pre-arbitration</div></div>
- <div class="card"><div class="label">Local spool</div><div class="value" id="spool">loading…</div></div>
- <div class="card"><div class="label">Cluster</div><div class="value" id="cluster">loading…</div></div>
+ <div class="card"><div class="label">Cradle storage / spool</div><progress id="local-disk" max="1" value="0"></progress><div class="value" id="spool">loading…</div><div class="value" id="local-rate"></div><div class="value" id="segment-backlog"></div></div>
+ <div class="card"><div class="label">Cluster</div><progress id="cluster-disk" max="1" value="0"></progress><div class="value" id="cluster">loading…</div><div class="value" id="cluster-storage"></div></div>
  <div class="card"><div class="label">Models / training</div><div class="value" id="model">loading…</div><div class="value" id="readiness">local model: unloaded · unarmed</div><div class="value" id="inference">inference: unloaded · unarmed</div><select id="model-select"><option value="">No validated revisions</option></select> <button id="model-load" disabled>Load verified revision</button><div class="value" id="jobs"></div></div>
 </section>
 <script>
@@ -90,6 +91,7 @@ PAGE = """<!doctype html>
   const MAP={10:4,11:5,12:6,14:7,15:8,13:9,4:10,6:11,5:12,7:13,9:18,8:19,16:20,2:22,3:23,0:24,1:25};
   let ws=null, seq=0, timer=null, controlsBusy=false;
   const $=id=>document.getElementById(id);
+  const bytes=n=>n==null?'?':(n/1e9).toFixed(2)+' GB', rate=n=>n==null?'?':(n/1e6).toFixed(1)+' MB/s';
   function pad(){const l=navigator.getGamepads?navigator.getGamepads():[];for(const g of l)if(g&&g.mapping==='standard')return g;return null}
   function dz(v){v=Number(v)||0;return Math.abs(v)<DEADZONE?0:Math.max(-1,Math.min(1,v))}
   function vec(g){const a=new Array(DIM).fill(0);a[0]=dz(g.axes[0]);a[1]=-dz(g.axes[1]);a[2]=dz(g.axes[2]);a[3]=-dz(g.axes[3]);for(const[b,i]of Object.entries(MAP)){const x=g.buttons[Number(b)];a[i]=x&&x.pressed?1:0}return a}
@@ -121,8 +123,10 @@ PAGE = """<!doctype html>
       $('gamepad-telemetry').className=a.takeover?'on':''; if(a.mode==='hybrid') $('gamepad-telemetry').textContent+=a.takeover?` · HUMAN OVERRIDE (${a.takeover_reason||'activity'})${a.takeover_release_remaining_ms?` · release in ${a.takeover_release_remaining_ms.toFixed(0)}ms`:''}`:' · AI authority';
       $('record').textContent=['recording','stopping'].includes(r.state)?'Stop episode':'Start episode';
       $('mode').value=a.mode||'human'; [...$('mode').options].forEach(o=>o.disabled=controlsBusy||(o.value!=='human'&&!a.armed)); $('arm').disabled=controlsBusy||!!a.armed; $('disarm').disabled=controlsBusy||!a.armed; $('mute-set').disabled=controlsBusy||!a.armed; $('record').disabled=controlsBusy;
-      const p=s.spool; $('spool').textContent=p?`${p.pending_episodes||0} pending · ${p.episodes_shipped||0} shipped · ${((p.local_buffered_bytes||0)/1e9).toFixed(2)} GB buffered · ${p.disk_free_gb||'?'} GB free · ${p.receipt_state||'unknown'}${p.blocked_reason?' · blocked: '+p.blocked_reason:''}`:`unavailable: ${s.errors.spool||'unknown'}`;
-      const c=s.cluster; $('cluster').textContent=c?`${(c.datasets.datasets||[]).length} datasets · ${(c.snapshots.snapshots||[]).length} snapshots`:`unavailable: ${s.errors.cluster||'unknown'}`;
+      const p=s.spool,ls=p&&p.local_storage,vol=ls&&ls.capture_filesystem; $('spool').textContent=p&&ls&&ls.state==='ready'?`${bytes(vol.available_bytes)} available / ${bytes(vol.total_bytes)} · ${bytes(ls.source_buffered_bytes)} source · ${bytes(ls.staged_bytes)} staged · ${p.pending_episodes||0} pending · ${p.receipt_state||'unknown'}${ls.recording_blocked_reason?' · BLOCKED: '+ls.recording_blocked_reason:ls.warning?' · low-space warning':''}`:`storage unavailable: ${(ls&&ls.error)||(s.errors&&s.errors.spool)||'unknown'}`;
+      $('local-disk').value=vol?vol.used_fraction:0;$('local-disk').className=ls&&!ls.recording_admission_open?'stop':ls&&ls.warning?'warn':'';$('local-rate').textContent=ls&&ls.state==='ready'?`write ${rate(ls.capture_write_rate_bytes_per_second)} · upload ${ls.upload_rate_bytes_per_second==null?'unavailable':rate(ls.upload_rate_bytes_per_second)} · receipts ${rate(ls.receipt_rate_bytes_per_second)} · remaining ${ls.estimated_recording_seconds_remaining==null?'measuring':(ls.estimated_recording_seconds_remaining/60).toFixed(1)+' min'} · ${bytes(ls.receipted_bytes)} receipted`:'';
+      const seg=p&&p.rolling_segments;$('segment-backlog').textContent=seg?`segments: ${seg.state}${seg.segment_backlog_count==null?'':` · ${seg.segment_backlog_count} queued · ${bytes(seg.segment_backlog_bytes)}`}${seg.backpressure?' · BACKPRESSURE':''}${seg.blocked_reason?' · '+seg.blocked_reason:''}`:'segments: unavailable';
+      const c=s.cluster,cs=c&&c.storage; $('cluster').textContent=c?`${(c.datasets.datasets||[]).length} datasets · ${(c.snapshots.snapshots||[]).length} snapshots`:`unavailable: ${s.errors.cluster||'unknown'}`;$('cluster-storage').textContent=cs&&cs.state==='ready'?`${bytes(cs.available_bytes)} available / ${bytes(cs.total_bytes)}`:`storage unavailable${cs&&cs.reason?' · '+cs.reason:''}`;$('cluster-disk').value=cs&&cs.used_fraction||0;$('cluster-disk').className=cs&&cs.warning?'warn':'';
       const d=c&&c.deployment; $('model').textContent=d&&d.active_revision?`active ${d.active_revision.slice(0,8)} · gen ${d.generation}`:'none active';
       const m=s.model_readiness||{}; $('readiness').textContent=`model readiness: ${m.phase||'unloaded'} · ${m.armed?'armed':'unarmed'}${m.active?' · revision '+m.active.slice(0,8):''}${m.checkpoint_sha256?' · sha '+m.checkpoint_sha256.slice(0,8):''}${m.warmup_frames!=null&&m.sequence_length?' · warmup '+m.warmup_frames+'/'+m.sequence_length:''}${m.blocked_reason?' · '+m.blocked_reason:''}${m.error?' · '+m.error:''}`;
       const i=s.inference||{}; $('inference').textContent=`inference: ${i.health||'unloaded'} · ${i.freshness_state||'unavailable'} · ${i.armed?'armed':'unarmed'}${i.revision?' · '+i.revision.slice(0,8):''}${i.processing_latency_ms!=null?' · cluster '+i.processing_latency_ms.toFixed(1)+'ms':''}${i.transport_latency_ms!=null?' · RTT '+i.transport_latency_ms.toFixed(1)+'ms':''}${i.proposal_age_ms!=null?' · proposal '+i.proposal_age_ms.toFixed(0)+'ms old':''}${i.proposal_sequence!=null?' · seq '+i.proposal_sequence:''}${i.gap_duration_ms?' · gap '+i.gap_duration_ms.toFixed(0)+'ms':''}${i.gap_reason?' · '+i.gap_reason:''}${i.error?' · '+i.error:''}`;
@@ -573,6 +577,10 @@ def main() -> None:
     )
     parser.add_argument("--cluster-url", default="http://100.80.98.4:8787")
     parser.add_argument(
+        "--cluster-storage-path",
+        help="published cluster storage telemetry path; omitted means explicitly unavailable",
+    )
+    parser.add_argument(
         "--cluster-token", type=Path, default=Path("~/.config/nxml/cluster.token").expanduser()
     )
     parser.add_argument(
@@ -593,6 +601,7 @@ def main() -> None:
         cluster_url=args.cluster_url,
         cluster_token_path=args.cluster_token,
         capture_dir=args.capture_output,
+        cluster_storage_path=args.cluster_storage_path,
     )
     fanout = MjpegFanoutSource(args.capture)
     remote_inference = None
