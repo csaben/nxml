@@ -9,7 +9,7 @@ import urllib.request
 import uuid
 from typing import Protocol
 
-from nx_packets import ACTION_DIM, Packet, neutral_action, packet_to_action
+from nx_packets import ACTION_DIM, neutral_action
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -61,18 +61,10 @@ class NxbtActionClient:
             raise RuntimeError(f"NXBT action failed: {error}") from error
         if not isinstance(result, dict) or result.get("applied") is not True:
             raise RuntimeError(f"NXBT rejected human action: {result}")
-        receipt: dict[str, object] = {"status": 200, "applied": True}
-        if any(abs(value) > 1e-6 for value in vector):
-            try:
-                with urllib.request.urlopen(
-                    self.url.removesuffix("/action") + "/state", timeout=self.timeout
-                ) as response:
-                    state = json.loads(response.read())
-                applied = packet_to_action(Packet.model_validate(state)).tolist()
-                receipt["applied_summary"] = _vector_summary(applied)
-            except (OSError, ValueError, urllib.error.URLError) as error:
-                receipt["state_error"] = str(error)
-        return receipt
+        # No readback here: a per-input GET /state doubled the orchestrator
+        # round trips on the hot path. The UI polls /api/controller/state for
+        # display instead.
+        return {"status": 200, "applied": True}
 
 
 class HumanControlBridge:
@@ -81,7 +73,7 @@ class HumanControlBridge:
         transport: ActionTransport,
         *,
         stale_after: float = 0.25,
-        max_hz: float = 45.0,
+        max_hz: float = 125.0,
         clock=time.monotonic,
         start_watchdog: bool = True,
     ) -> None:

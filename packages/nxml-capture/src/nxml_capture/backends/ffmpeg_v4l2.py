@@ -28,6 +28,27 @@ def v4l2_input_args(device: str) -> list[str]:
     ]
 
 
+def v4l2_mjpeg_stream_command(device: str) -> list[str]:
+    """Zero-transcode passthrough: the Hagibis emits MJPEG natively, so the
+    stream is a `-c copy` remux into multipart MJPEG (boundary "ffmpeg")
+    suitable for a browser <img> at full 30 fps and ~1-2 frames of latency.
+    """
+    return [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-fflags",
+        "nobuffer",
+        *v4l2_input_args(device),
+        "-c:v",
+        "copy",
+        "-f",
+        "mpjpeg",
+        "pipe:1",
+    ]
+
+
 def capture_preview_jpeg(device: str, *, width: int = 960, timeout: float = 5.0) -> bytes:
     command = [
         "ffmpeg",

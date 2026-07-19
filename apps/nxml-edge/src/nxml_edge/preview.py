@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import json
+import subprocess
 import threading
 import time
 import urllib.error
@@ -8,7 +10,11 @@ import urllib.request
 from collections.abc import Iterator
 from typing import Protocol
 
-from nxml_capture.backends.ffmpeg_v4l2 import capture_preview_jpeg, inspect_jpeg
+from nxml_capture.backends.ffmpeg_v4l2 import (
+    capture_preview_jpeg,
+    inspect_jpeg,
+    v4l2_mjpeg_stream_command,
+)
 
 
 class PreviewSource(Protocol):
@@ -28,10 +34,55 @@ class CapturePreview:
         self.width = width
         self._status: dict[str, object] = {"ok": False, "error": "waiting for first frame"}
         self._lock = threading.Lock()
+        self._stream_lock = threading.Lock()
+        self._streaming = False
+
+    @property
+    def stream_active(self) -> bool:
+        with self._lock:
+            return self._streaming
 
     def status(self) -> dict[str, object]:
         with self._lock:
+            if self._streaming:
+                return {
+                    "ok": True,
+                    "error": None,
+                    "capture": "mjpeg 1920x1080@30 passthrough stream (live)",
+                }
             return dict(self._status)
+
+    def stream(self) -> Iterator[bytes]:
+        """Full-rate zero-transcode MJPEG stream for play-by-preview.
+
+        Holds the V4L2 device for the lifetime of one client — the bounded
+        1 fps `frames()` path stays available as the fallback, and `status()`
+        reports the live stream instead of probing a busy device.
+        """
+        if not self._stream_lock.acquire(blocking=False):
+            raise RuntimeError("preview stream is already active")
+        with self._lock:
+            self._streaming = True
+        process = subprocess.Popen(
+            v4l2_mjpeg_stream_command(self.device),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=0,
+        )
+        try:
+            assert process.stdout is not None
+            while True:
+                chunk = process.stdout.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            process.kill()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                process.wait(timeout=5)
+            with self._lock:
+                self._streaming = False
+            self._stream_lock.release()
 
     def frames(self) -> Iterator[bytes]:
         while True:

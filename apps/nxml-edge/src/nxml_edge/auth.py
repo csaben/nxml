@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from fastapi import HTTPException, Request
+from starlette.requests import HTTPConnection
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +72,15 @@ class TailscaleAuthenticator:
         self.resolver = resolver
 
     def __call__(self, request: Request) -> None:
+        self.authorize_connection(request, state_changing=request.method not in self.SAFE_METHODS)
+
+    def authorize_connection(self, request: HTTPConnection, *, state_changing: bool) -> None:
+        """Shared check for HTTP requests and WebSocket handshakes.
+
+        WebSocket callers pass ``state_changing=True``: the socket carries
+        controller input, so the same-origin proof is mandatory even though
+        the handshake itself is a GET.
+        """
         peer = request.client.host if request.client else ""
         try:
             if not ipaddress.ip_address(peer).is_loopback:
@@ -97,7 +107,7 @@ class TailscaleAuthenticator:
         ):
             raise HTTPException(403, "Tailscale user or device is not authorized")
 
-        if request.method not in self.SAFE_METHODS:
+        if state_changing:
             origin = request.headers.get("origin", "").rstrip("/").lower()
             if origin != f"https://{self.tailnet_host}":
                 raise HTTPException(403, "cross-origin control request rejected")

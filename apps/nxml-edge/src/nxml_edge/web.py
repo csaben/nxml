@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import secrets
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from importlib.resources import files
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, StreamingResponse
+from pydantic import ValidationError
 
 from nxml_edge.cluster import ClusterDashboard, ClusterError
 from nxml_edge.human_control import HumanActionRequest, HumanControlBridge, HumanControlError
@@ -80,6 +82,20 @@ def create_app(
             return {"reachable": False, "error": "controller state is not configured"}
         return controller.status()
 
+    @app.get("/api/preview/stream.mjpeg")
+    def capture_stream(request: Request) -> StreamingResponse:
+        require_token(request)
+        stream = getattr(preview, "stream", None)
+        if stream is None:
+            raise HTTPException(503, "capture stream is not configured")
+        if getattr(preview, "stream_active", False):
+            raise HTTPException(409, "preview stream is already active in another tab")
+        return StreamingResponse(
+            stream(),
+            media_type="multipart/x-mixed-replace; boundary=ffmpeg",
+            headers={"Cache-Control": "no-store, private"},
+        )
+
     @app.get("/api/preview/status")
     def preview_status(request: Request):
         require_token(request)
@@ -114,6 +130,92 @@ def create_app(
     @app.post("/api/human/disable")
     def human_disable(request: Request):
         return require_human_control(request).disable("client_disabled")
+
+    def authorize_human_ws(ws: WebSocket) -> None:
+        """Same trust boundary as the HTTP routes, applied to the handshake."""
+        if auth is not None:
+            authorize = getattr(auth, "authorize_connection", None)
+            if authorize is None:
+                raise HTTPException(403, "websocket auth is not supported by this auth mode")
+            authorize(ws, state_changing=True)
+            return
+        if token is None:
+            raise HTTPException(503, "edge authentication is not configured")
+        supplied = ws.headers.get("x-nxml-edge-token") or ws.query_params.get("token")
+        if not supplied or not secrets.compare_digest(supplied, token):
+            raise HTTPException(401, "bad or missing edge token")
+
+    @app.websocket("/api/human/ws")
+    async def human_ws(ws: WebSocket) -> None:
+        """Low-latency human input stream.
+
+        The socket owns one bridge session: connecting enables human control,
+        action frames are applied without per-frame replies (no head-of-line
+        blocking on network round trips), and closing the socket — for any
+        reason — forces neutral and disables.
+        """
+        if human_control is None:
+            await ws.close(code=1008, reason="human control is not configured")
+            return
+        try:
+            authorize_human_ws(ws)
+        except HTTPException as error:
+            await ws.close(code=1008, reason=str(error.detail)[:120])
+            return
+        await ws.accept()
+        bridge = human_control
+        try:
+            status = await asyncio.to_thread(bridge.enable)
+        except RuntimeError as error:
+            await ws.send_json({"type": "disabled", "reason": str(error)})
+            await ws.close(code=1011)
+            return
+        session_id = str(status["session_id"])
+        await ws.send_json({"type": "enabled", "status": status})
+        rate_drops = 0
+        last_status = asyncio.get_running_loop().time()
+        try:
+            while True:
+                try:
+                    raw = await asyncio.wait_for(ws.receive_text(), timeout=1.0)
+                except TimeoutError:
+                    raw = None
+                if raw is not None:
+                    try:
+                        payload = HumanActionRequest.model_validate_json(raw)
+                    except ValidationError as error:
+                        await ws.send_json(
+                            {"type": "disabled", "reason": f"malformed action frame: {error}"}
+                        )
+                        break
+                    try:
+                        await asyncio.to_thread(bridge.apply, payload)
+                    except HumanControlError as error:
+                        if error.status_code == 429:
+                            rate_drops += 1
+                        else:
+                            await ws.send_json({"type": "disabled", "reason": str(error)})
+                            break
+                now = asyncio.get_running_loop().time()
+                if now - last_status >= 1.0:
+                    last_status = now
+                    current = bridge.status()
+                    current["ws_rate_drops"] = rate_drops
+                    if not current["enabled"]:
+                        reason = (
+                            current.get("neutral_reason") or current.get("last_error") or "disabled"
+                        )
+                        await ws.send_json({"type": "disabled", "reason": str(reason)})
+                        break
+                    await ws.send_json({"type": "status", "status": current})
+        except WebSocketDisconnect:
+            pass
+        finally:
+            # Synchronous on purpose: this runs even when the task is being
+            # cancelled (an await here would raise CancelledError and skip
+            # the neutral), and the bridge watchdog is only a 250 ms backstop.
+            if bridge.status().get("session_id") == session_id:
+                bridge.disable("socket_closed")
 
     @app.get("/api/cluster/status")
     def cluster_status(request: Request):
