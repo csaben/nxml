@@ -1,0 +1,18 @@
+[Unit]
+Description=NXML autopilot edge runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/nxml/cradle.env
+WorkingDirectory=%h/Code/nxml
+ExecStart=/usr/bin/env uv run nxml-autopilot --game ${NXML_GAME} --policy ${NXML_POLICY} --controller ${NXML_ORCHESTRATOR_URL} --camera ${NXML_CAMERA_ID} --input-source web --web-host ${NXML_WEB_HOST} --web-port ${NXML_WEB_PORT} --web-token ${AUTOPILOT_WEB_TOKEN} --mode ${NXML_INITIAL_MODE} --record ${NXML_CAPTURE_DIR}
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+KillSignal=SIGINT
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

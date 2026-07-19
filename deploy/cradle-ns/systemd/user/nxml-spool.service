@@ -1,0 +1,16 @@
+[Unit]
+Description=NXML bounded episode spooler
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/nxml/cradle.env
+WorkingDirectory=%h/Code/nxml
+ExecStart=/usr/bin/env uv run nxml-spool run --watch ${NXML_CAPTURE_DIR} --repo ${NXML_HF_DATASET_REPO} --state-dir ${NXML_SPOOL_STATE_DIR}
+Restart=on-failure
+RestartSec=15
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

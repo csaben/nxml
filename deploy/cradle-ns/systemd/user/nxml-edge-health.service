@@ -1,0 +1,8 @@
+[Unit]
+Description=NXML edge health snapshot
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/nxml/cradle.env
+WorkingDirectory=%h/Code/nxml
+ExecStart=/usr/bin/env python3 deploy/cradle-ns/nxml_edge_health.py --env %h/.config/nxml/cradle.env --output %h/.local/state/nxml-edge/health.json

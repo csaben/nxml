@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll NXML edge health
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=15
+AccuracySec=2
+Persistent=true
+
+[Install]
+WantedBy=timers.target
