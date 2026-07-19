@@ -1,8 +1,10 @@
 # nxml-spool
 
 Capture-machine spooler: watches episode output dirs, packs completed episodes
-(video + actions parquet + manifest) into ~1 GB WebDataset tar shards, uploads
-them to a HuggingFace dataset repo, verifies, then deletes the local files.
+(video + actions/events parquet + manifest) into ~1 GB WebDataset tar shards,
+publishes them through an abstract storage backend, verifies an immutable
+checksum commit, then deletes the local files. Hugging Face dataset repos
+remain supported; mounted cluster/object storage avoids coupling ingest to Git.
 Local disk becomes a sliding buffer instead of an archive.
 
 Works with both capture layouts: `nxml-collect` (flat files) and
@@ -22,6 +24,10 @@ nxml-spool run \
 nxml-spool status         # reads status.json from the state dir
 nxml-spool run ... --once # single pass (seal + ship whatever is ready)
 nxml-spool run ... --no-delete  # dry-ish run: upload but keep local files
+
+# Mounted S3/cluster storage instead of Hugging Face:
+nxml-spool run --watch ~/captures/za --repo unused/local \
+    --storage-root /mnt/nxml-objects
 ```
 
 Below-size shards are sealed anyway once their oldest episode has waited
@@ -34,9 +40,17 @@ becomes durable promptly.
 (episodes shipped, next shard index — atomically rewritten), `staging/`
 (shards being built), and `status.json` (live stats for the capture UI:
 pending episodes, current upload, disk headroom). Episodes are journaled as
-shipped only after the shard's upload is size-verified; a crash between pack
-and verify re-packs into a fresh shard rather than losing or duplicating
-episodes on disk.
+shipped only after the backend verifies the tar checksum and publishes its
+commit marker. A crash after remote commit but before the local journal is
+safe: restart republishes the same immutable bytes, observes the existing
+matching marker, then completes the journal transition. Conflicting bytes are
+never overwritten.
+
+Disk pressure uses hysteresis: `--disk-high-watermark` (default 0.85) enters
+pressure mode and forces partial shards to seal immediately; it clears only
+below `--disk-low-watermark` (default 0.75). `status.json` exposes the current
+state. Source episodes are never deleted merely to satisfy a watermark;
+deletion remains gated by a durable checksum commit.
 
 ## systemd (capture machine)
 

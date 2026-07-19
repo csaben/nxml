@@ -12,6 +12,7 @@ from nxml_spool.episodes import discover_episodes
 from nxml_spool.journal import Journal
 from nxml_spool.shards import pack_shard, plan_shards
 from nxml_spool.spooler import run_spooler
+from nxml_spool.storage import FilesystemStorageBackend
 
 
 def _write_episode(root: Path, name: str, *, subdir: str | None = None, kb: int = 8) -> Path:
@@ -71,6 +72,7 @@ def test_pack_shard_webdataset_layout(tmp_path: Path) -> None:
     assert names == ["ep1.json", "ep1.mkv", "ep1.parquet"]
     sidecar = json.loads(shard.sidecar_path.read_text())
     assert sidecar["n_episodes"] == 1
+    assert sidecar["sha256"] == shard.sha256
 
 
 def test_run_spooler_end_to_end(tmp_path: Path) -> None:
@@ -147,3 +149,55 @@ def test_failed_upload_preserves_everything(tmp_path: Path) -> None:
         settle_seconds=30, uploader=ok, once=True,
     )
     assert Journal(state / "journal.json").stats()["episodes_shipped"] == 1
+
+
+class CommitThenCrashBackend:
+    def __init__(self, delegate: FilesystemStorageBackend) -> None:
+        self.delegate = delegate
+        self.crashed = False
+
+    def publish(self, shard):
+        commit = self.delegate.publish(shard)
+        if not self.crashed:
+            self.crashed = True
+            raise RuntimeError("crash after durable commit")
+        return commit
+
+
+def test_restart_after_remote_commit_is_exactly_once(tmp_path: Path) -> None:
+    """Crash after marker publication but before journal flush is idempotent."""
+    import pytest
+
+    watch = tmp_path / "capture"
+    _write_episode(watch, "episode")
+    _age(tmp_path)
+    state = tmp_path / "state"
+    object_root = tmp_path / "objects"
+    backend = CommitThenCrashBackend(FilesystemStorageBackend(object_root))
+
+    with pytest.raises(RuntimeError, match="after durable commit"):
+        run_spooler(
+            [watch],
+            repo_id="unused",
+            state_dir=state,
+            shard_size_mb=1,
+            settle_seconds=30,
+            storage=backend,
+            once=True,
+        )
+    assert list(watch.glob("*.mkv")), "local source survives before journal commit"
+    assert len(list(object_root.glob("commits/*.commit.json"))) == 1
+
+    run_spooler(
+        [watch],
+        repo_id="unused",
+        state_dir=state,
+        shard_size_mb=1,
+        settle_seconds=30,
+        storage=backend,
+        once=True,
+    )
+    assert Journal(state / "journal.json").stats()["episodes_shipped"] == 1
+    assert len(list(object_root.glob("shards/*.tar"))) == 1
+    assert len(list(object_root.glob("commits/*.commit.json"))) == 1
+    assert not list(watch.glob("*.mkv"))

@@ -8,6 +8,7 @@ is already compressed) built in a staging dir, with a ``.json`` sidecar listing 
 
 from __future__ import annotations
 
+import hashlib
 import json
 import tarfile
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ class Shard:
     sidecar_path: Path  # shard-{NNNNNN}.json
     episode_ids: list[str]
     size_bytes: int
+    sha256: str
 
 
 def pack_shard(
@@ -40,6 +42,11 @@ def pack_shard(
                 tar.add(ep.events_path, arcname=f"{ep.episode_id}.events.parquet")
             tar.add(ep.manifest_path, arcname=f"{ep.episode_id}.json")
     tmp_path.replace(shard_path)
+    digest = hashlib.sha256()
+    with shard_path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    shard_sha256 = digest.hexdigest()
 
     sidecar = {
         "shard": shard_path.name,
@@ -53,6 +60,7 @@ def pack_shard(
         ],
         "n_episodes": len(episodes),
         "bytes": shard_path.stat().st_size,
+        "sha256": shard_sha256,
     }
     sidecar_path = shard_path.with_suffix(".json")
     sidecar_path.write_text(json.dumps(sidecar, indent=2))
@@ -62,6 +70,7 @@ def pack_shard(
         sidecar_path=sidecar_path,
         episode_ids=[ep.episode_id for ep in episodes],
         size_bytes=shard_path.stat().st_size,
+        sha256=shard_sha256,
     )
 
 

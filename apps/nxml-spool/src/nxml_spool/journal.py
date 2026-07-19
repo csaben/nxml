@@ -30,11 +30,29 @@ class Journal:
     def is_shipped(self, episode_id: str) -> bool:
         return episode_id in self._data["shipped_episodes"]
 
-    def record_uploaded_shard(self, shard_name: str, episode_ids: list[str]) -> None:
+    def record_uploaded_shard(
+        self,
+        shard_name: str,
+        episode_ids: list[str],
+        *,
+        commit_id: str | None = None,
+        checksum: str | None = None,
+    ) -> None:
         now = time.time()
-        self._data["uploaded_shards"].append({"shard": shard_name, "time": now})
+        self._data["uploaded_shards"].append(
+            {
+                "shard": shard_name,
+                "time": now,
+                "commit_id": commit_id,
+                "checksum": checksum,
+            }
+        )
         for episode_id in episode_ids:
-            self._data["shipped_episodes"][episode_id] = {"shard": shard_name, "time": now}
+            self._data["shipped_episodes"][episode_id] = {
+                "shard": shard_name,
+                "time": now,
+                "commit_id": commit_id,
+            }
         self._data["next_shard_index"] += 1
         self._flush()
 

@@ -32,6 +32,12 @@ def main() -> None:
 )
 @click.option("--repo", "repo_id", required=True, help="HF dataset repo, e.g. arelius/nxml-pokemon-legends-za-v2")
 @click.option(
+    "--storage-root",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Mounted object-storage root. Uses immutable filesystem commits instead of HF.",
+)
+@click.option(
     "--state-dir",
     default=Path("~/.local/state/nxml-spool").expanduser(),
     type=click.Path(file_okay=False, path_type=Path),
@@ -47,9 +53,12 @@ def main() -> None:
 @click.option("--no-delete", is_flag=True, help="Keep local episode files after verified upload")
 @click.option("--public", is_flag=True, help="Create the repo public (default private/gated)")
 @click.option("--once", is_flag=True, help="One pass (pack+upload whatever is ready) then exit")
+@click.option("--disk-high-watermark", default=0.85, show_default=True, type=float)
+@click.option("--disk-low-watermark", default=0.75, show_default=True, type=float)
 def run(
     watch_dirs: tuple[Path, ...],
     repo_id: str,
+    storage_root: Path | None,
     state_dir: Path,
     shard_size_mb: int,
     settle_seconds: float,
@@ -58,10 +67,19 @@ def run(
     no_delete: bool,
     public: bool,
     once: bool,
+    disk_high_watermark: float,
+    disk_low_watermark: float,
 ) -> None:
     """Run the spool loop."""
     logging.basicConfig(format="%(asctime)s %(message)s", datefmt="[%X]", level=logging.INFO)
-    from nxml_spool.spooler import Uploader, run_spooler
+    from nxml_spool.spooler import run_spooler
+    from nxml_spool.storage import FilesystemStorageBackend, HFDatasetStorageBackend
+
+    storage = (
+        FilesystemStorageBackend(storage_root)
+        if storage_root is not None
+        else HFDatasetStorageBackend(repo_id, private=not public)
+    )
 
     run_spooler(
         list(watch_dirs),
@@ -72,8 +90,10 @@ def run(
         poll_seconds=poll_seconds,
         delete_after_upload=not no_delete,
         flush_partial_after_s=flush_partial_after,
-        uploader=Uploader(repo_id, private=not public),
+        storage=storage,
         once=once,
+        disk_high_watermark=disk_high_watermark,
+        disk_low_watermark=disk_low_watermark,
     )
 
 

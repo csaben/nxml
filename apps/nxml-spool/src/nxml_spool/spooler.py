@@ -16,6 +16,7 @@ from pathlib import Path
 from nxml_spool.episodes import discover_episodes
 from nxml_spool.journal import Journal
 from nxml_spool.shards import pack_shard, plan_shards
+from nxml_spool.storage import HFDatasetStorageBackend, StorageBackend, StorageCommit
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,25 @@ class Uploader:
             )
 
 
+class _LegacyUploaderBackend:
+    """Preserve the pre-v2 uploader injection contract used by callers/tests."""
+
+    def __init__(self, uploader: Uploader) -> None:
+        self.uploader = uploader
+
+    def publish(self, shard) -> StorageCommit:
+        self.uploader.upload_and_verify(shard.path, f"shards/{shard.path.name}")
+        self.uploader.upload_and_verify(
+            shard.sidecar_path, f"meta/{shard.sidecar_path.name}"
+        )
+        return StorageCommit(
+            shard.sha256,
+            f"shards/{shard.path.name}",
+            shard.sha256,
+            shard.size_bytes,
+        )
+
+
 def _write_status(state_dir: Path, journal: Journal, extra: dict) -> None:
     status = {**journal.stats(), **extra, "updated_at": time.time()}
     tmp = state_dir / "status.json.tmp"
@@ -65,7 +85,10 @@ def run_spooler(
     delete_after_upload: bool = True,
     flush_partial_after_s: float = 900.0,
     uploader: Uploader | None = None,
+    storage: StorageBackend | None = None,
     once: bool = False,
+    disk_high_watermark: float = 0.85,
+    disk_low_watermark: float = 0.75,
 ) -> None:
     """Run the spool loop (forever unless ``once``).
 
@@ -75,8 +98,17 @@ def run_spooler(
     """
     state_dir.mkdir(parents=True, exist_ok=True)
     journal = Journal(state_dir / "journal.json")
-    if uploader is None:
-        uploader = Uploader(repo_id)
+    if storage is not None and uploader is not None:
+        raise ValueError("pass either storage or uploader, not both")
+    backend: StorageBackend
+    if storage is not None:
+        backend = storage
+    elif uploader is not None:
+        backend = _LegacyUploaderBackend(uploader)
+    else:
+        backend = HFDatasetStorageBackend(repo_id)
+    if not 0 < disk_low_watermark < disk_high_watermark < 1:
+        raise ValueError("disk watermarks must satisfy 0 < low < high < 1")
     shard_size_bytes = shard_size_mb * 1024 * 1024
     staging_dir = state_dir / "staging"
 
@@ -85,20 +117,32 @@ def run_spooler(
         f"(shards ~{shard_size_mb} MB, settle {settle_seconds}s)"
     )
 
+    pressure_active = False
     while True:
         pending = [
             ep
             for ep in discover_episodes(watch_dirs, settle_seconds=settle_seconds)
             if not journal.is_shipped(ep.episode_id)
         ]
-        disk_free_gb = shutil.disk_usage(watch_dirs[0]).free / 1e9 if watch_dirs else 0
+        disk = shutil.disk_usage(watch_dirs[0]) if watch_dirs else None
+        disk_free_gb = disk.free / 1e9 if disk is not None else 0
+        disk_used_fraction = (disk.used / disk.total) if disk is not None else 0
+        if pressure_active:
+            pressure_active = disk_used_fraction > disk_low_watermark
+        else:
+            pressure_active = disk_used_fraction >= disk_high_watermark
         groups = plan_shards(pending, shard_size_bytes=shard_size_bytes)
 
         for group in groups:
             group_bytes = sum(ep.size_bytes for ep in group)
             is_full = group_bytes >= shard_size_bytes * 0.9
             oldest_age = time.time() - min(ep.video_path.stat().st_mtime for ep in group)
-            if not is_full and oldest_age < flush_partial_after_s and not once:
+            if (
+                not is_full
+                and oldest_age < flush_partial_after_s
+                and not once
+                and not pressure_active
+            ):
                 continue  # wait for more episodes before sealing a small shard
 
             shard = pack_shard(group, staging_dir, journal.next_shard_index)
@@ -108,10 +152,18 @@ def run_spooler(
             )
             _write_status(state_dir, journal, {"uploading": shard.path.name,
                                                "pending_episodes": len(pending),
-                                               "disk_free_gb": round(disk_free_gb, 1)})
-            uploader.upload_and_verify(shard.path, f"shards/{shard.path.name}")
-            uploader.upload_and_verify(shard.sidecar_path, f"meta/{shard.sidecar_path.name}")
-            journal.record_uploaded_shard(shard.path.name, shard.episode_ids)
+                                               "disk_free_gb": round(disk_free_gb, 1),
+                                               "disk_used_fraction": disk_used_fraction,
+                                               "disk_pressure": pressure_active})
+            commit = backend.publish(shard)
+            if commit.checksum != shard.sha256:
+                raise RuntimeError(f"backend committed wrong checksum for {shard.path.name}")
+            journal.record_uploaded_shard(
+                shard.path.name,
+                shard.episode_ids,
+                commit_id=commit.commit_id,
+                checksum=commit.checksum,
+            )
             logger.info(f"Verified {shard.path.name} on {repo_id}")
 
             shard.path.unlink()
@@ -138,6 +190,10 @@ def run_spooler(
                     ]
                 ),
                 "disk_free_gb": round(disk_free_gb, 1),
+                "disk_used_fraction": disk_used_fraction,
+                "disk_pressure": pressure_active,
+                "disk_high_watermark": disk_high_watermark,
+                "disk_low_watermark": disk_low_watermark,
             },
         )
         if once:

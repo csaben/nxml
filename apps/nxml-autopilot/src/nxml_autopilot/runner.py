@@ -538,7 +538,9 @@ class AutopilotRunner:
         )
         if self._macro_store is not None:
             self._seed_default_macros(self._macro_store, config.game)
-        self._macro_player = MacroPlayer(poster=self._post_action)
+        self._macro_player = MacroPlayer(
+            poster=lambda action: self._post_action(action, synthetic_driver="macro")
+        )
 
         # Synthetic A-mash controller for trigger-driven death-screen handling.
         # The action loop drives it (one ``next_action()`` per tick) so cadence
@@ -585,12 +587,48 @@ class AutopilotRunner:
 
         self._stop_flag = threading.Event()
 
-    def _post_action(self, action: np.ndarray) -> None:
+    def _post_action(self, action: np.ndarray, *, synthetic_driver: str | None = None) -> None:
         try:
             payload = {"vector": action.tolist(), "source": "inference"}
             self._http.post(self._post_url, json=payload)
         except httpx.HTTPError as e:
             print(f"[autopilot] orchestrator POST failed: {e}")
+        if synthetic_driver is not None:
+            self._record_synthetic_action(action, synthetic_driver)
+
+    def _record_synthetic_action(self, action: np.ndarray, driver: str) -> None:
+        """Record macro/mash output that bypasses the human/policy mux.
+
+        Ownership remains 0 because the accepted v2 wire encoding reserves
+        1 for human and 2 for policy. ``active_driver`` distinguishes the
+        synthetic controller in a human-readable form.
+        """
+        if not self._recorder_ctl.is_active:
+            return
+        frame = self._source.latest()
+        if frame is None:
+            return
+        now = time.time()
+        self._recorder_ctl.append(
+            SyncedFrame(
+                timestamp=now,
+                frame=frame.image,
+                action=action,
+                action_age=0.0,
+                frame_monotonic_ns=frame.monotonic_ns,
+                action_timestamp=now,
+                action_monotonic_ns=time.monotonic_ns(),
+                human_action=np.zeros(ACTION_DIM, dtype=np.float32),
+                human_mask=np.zeros(ACTION_DIM, dtype=bool),
+                policy_action=np.zeros(ACTION_DIM, dtype=np.float32),
+                ownership=np.zeros(ACTION_DIM, dtype=np.uint8),
+                controller_id=driver,
+                active_driver=driver,
+                policy_id=self._policy_id,
+                policy_revision=self._policy_revision,
+                valid=True,
+            )
+        )
 
     SUPPORTED_MODES = ("human-priority", "human-takeover")
 
@@ -783,7 +821,7 @@ class AutopilotRunner:
                 # MacroPlayer's own thread; mash is driven from this loop.
                 mash_action = self._mash_controller.next_action()
                 if mash_action is not None:
-                    self._post_action(mash_action)
+                    self._post_action(mash_action, synthetic_driver="mash_a")
                 elif not self._macro_player.is_playing:
                     # Sample sources directly (don't call ``mux.tick()``, which
                     # would re-call each source's ``latest()`` — and the web
