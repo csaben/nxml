@@ -29,15 +29,15 @@ def action_parquet(*, count=80, noncausal_at=None):
     pq.write_table(
         pa.table(
             {
-                "frame_index": list(range(count)),
-                "frame_timestamp_ns": frame_ns,
-                "action_timestamp_ns": action_ns,
-                "action_age_ns": [
-                    max(frame - action, 0)
+                "frame_idx": list(range(count)),
+                "frame_monotonic_ns": frame_ns,
+                "action_monotonic_ns": action_ns,
+                "action_age": [
+                    max(frame - action, 0) / 1_000_000_000
                     for frame, action in zip(frame_ns, action_ns, strict=True)
                 ],
                 "applied_action": actions,
-                "human_action_mask": [[True, *([False] * 25)] for _ in range(count)],
+                "human_mask": [[True, *([False] * 25)] for _ in range(count)],
                 "ownership": [[1, *([0] * 25)] for _ in range(count)],
                 "valid": [True] * count,
             }
@@ -132,6 +132,58 @@ def test_action_decoder_rejects_hidden_negative_causal_age(tmp_path):
     parquet.write_bytes(action_parquet(noncausal_at=3))
     with pytest.raises(ValueError, match="noncausal action alignment"):
         decode_action_rows(parquet, control_source="human")
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda table: table.drop(["frame_idx"]), "lacks required fields"),
+        (
+            lambda table: table.set_column(
+                table.schema.get_field_index("frame_idx"),
+                "frame_idx",
+                pa.array([0, 0, *range(2, table.num_rows)]),
+            ),
+            "complete, ordered, duplicate-free",
+        ),
+        (
+            lambda table: table.set_column(
+                table.schema.get_field_index("frame_idx"),
+                "frame_idx",
+                pa.array([1, 0, *range(2, table.num_rows)]),
+            ),
+            "complete, ordered, duplicate-free",
+        ),
+    ],
+)
+def test_action_decoder_rejects_missing_duplicate_or_out_of_order_sequence(
+    tmp_path, mutation, message
+):
+    source = pq.read_table(io.BytesIO(action_parquet(count=8)))
+    parquet = tmp_path / "invalid.parquet"
+    pq.write_table(mutation(source), parquet)
+    with pytest.raises(ValueError, match=message):
+        decode_action_rows(parquet, control_source="human")
+
+
+def test_prepare_snapshot_requires_one_media_frame_per_action_row(tmp_path):
+    snapshot = committed_human_snapshot(tmp_path)
+
+    def mismatched_encoder(_video, _indices, *, expected_frame_count, **_kwargs):
+        assert expected_frame_count == 80
+        raise ValueError(
+            "media frame count does not match the complete edge-v2 action row sequence"
+        )
+
+    with pytest.raises(ValueError, match="media frame count does not match"):
+        prepare_snapshot(
+            state_dir=tmp_path,
+            snapshot_id=snapshot["snapshot_id"],
+            workspace=tmp_path / "mismatch-worker",
+            config=BootstrapConfig(sequence_length=8, validation_fraction=0.2),
+            encode_fn=mismatched_encoder,
+            device="cpu",
+        )
 
 
 def test_split_requires_independent_sequence_windows():

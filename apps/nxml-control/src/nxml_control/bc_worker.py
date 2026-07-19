@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import tarfile
 from collections.abc import Callable
@@ -99,30 +100,53 @@ def _extract_verified(archive: tarfile.TarFile, member: dict, destination: Path)
     return output
 
 
-def decode_action_rows(parquet_path: Path, *, control_source: str) -> tuple[list[int], np.ndarray]:
-    """Decode strictly causal, eligible applied actions in stable row order."""
+def decode_action_rows(
+    parquet_path: Path, *, control_source: str
+) -> tuple[list[int], np.ndarray, int]:
+    """Validate the emitted edge-v2 row sequence, then select causal applied actions."""
     import pyarrow.parquet as pq
 
     rows = pq.read_table(parquet_path).to_pylist()
     frame_indices: list[int] = []
     actions: list[list[float]] = []
-    previous_frame = -1
-    for row in rows:
-        if not bool(row.get("valid", False)):
-            continue
-        frame_index = int(row["frame_index"])
-        if frame_index <= previous_frame:
-            raise ValueError("eligible frame_index values must be strictly increasing")
-        frame_ns = int(row["frame_timestamp_ns"])
-        action_ns = int(row["action_timestamp_ns"])
+    previous_frame_ns = -1
+    for expected_index, row in enumerate(rows):
+        required = (
+            "frame_idx",
+            "frame_monotonic_ns",
+            "action_monotonic_ns",
+            "action_age",
+            "applied_action",
+            "human_mask",
+            "ownership",
+            "valid",
+        )
+        missing = [field for field in required if field not in row]
+        if missing:
+            raise ValueError(f"edge-v2 action row lacks required fields: {missing}")
+        frame_index = int(row["frame_idx"])
+        if frame_index != expected_index:
+            raise ValueError(
+                "frame_idx must be a complete, ordered, duplicate-free sequence from zero"
+            )
+        frame_ns = int(row["frame_monotonic_ns"])
+        if frame_ns <= previous_frame_ns:
+            raise ValueError("frame_monotonic_ns must be strictly increasing")
+        previous_frame_ns = frame_ns
+        action_ns = int(row["action_monotonic_ns"])
         if action_ns > frame_ns:
             raise ValueError("noncausal action alignment")
-        if int(row["action_age_ns"]) != frame_ns - action_ns:
-            raise ValueError("action_age_ns does not match monotonic timestamps")
+        expected_age = (frame_ns - action_ns) / 1_000_000_000
+        if not math.isclose(
+            float(row["action_age"]), expected_age, rel_tol=0.0, abs_tol=1e-9
+        ):
+            raise ValueError("action_age does not match monotonic timestamps")
+        if not bool(row.get("valid", False)):
+            continue
         ownership = [int(value) for value in row.get("ownership", ())]
-        human_mask = [bool(value) for value in row.get("human_action_mask", ())]
+        human_mask = [bool(value) for value in row.get("human_mask", ())]
         if len(ownership) != ACTION_DIM or len(human_mask) != ACTION_DIM:
-            raise ValueError("ownership and human_action_mask must have 26 dimensions")
+            raise ValueError("ownership and human_mask must have 26 dimensions")
         if control_source == "human" and not (any(human_mask) or 1 in ownership):
             continue
         if control_source == "policy" and 2 not in ownership:
@@ -132,10 +156,9 @@ def decode_action_rows(parquet_path: Path, *, control_source: str) -> tuple[list
             raise ValueError(f"applied_action must have {ACTION_DIM} dimensions")
         frame_indices.append(frame_index)
         actions.append(applied)
-        previous_frame = frame_index
     if not actions:
         raise ValueError("episode has no eligible action rows")
-    return frame_indices, np.asarray(actions, dtype=np.float32)
+    return frame_indices, np.asarray(actions, dtype=np.float32), len(rows)
 
 
 def encode_selected_frames(
@@ -145,6 +168,7 @@ def encode_selected_frames(
     vae_path: str,
     device: str,
     batch_size: int,
+    expected_frame_count: int,
 ) -> np.ndarray:
     """Decode RGB frames and reuse nxwm's canonical SD-VAE preprocessing."""
     import torch
@@ -153,6 +177,10 @@ def encode_selected_frames(
     from torchcodec.decoders import VideoDecoder
 
     decoder = VideoDecoder(str(video_path), device="cpu")
+    if decoder.metadata.num_frames != expected_frame_count:
+        raise ValueError(
+            "media frame count does not match the complete edge-v2 action row sequence"
+        )
     if not frame_indices or frame_indices[-1] >= decoder.metadata.num_frames:
         raise ValueError("action frame index exceeds decoded video")
     wanted = set(frame_indices)
@@ -231,13 +259,16 @@ def prepare_snapshot(
                 episode_dir.mkdir()
                 video_path = _extract_verified(archive, video_member, episode_dir)
                 action_path = _extract_verified(archive, action_member, episode_dir)
-                indices, actions = decode_action_rows(action_path, control_source="human")
+                indices, actions, row_count = decode_action_rows(
+                    action_path, control_source="human"
+                )
                 latents = encode_fn(
                     video_path,
                     indices,
                     vae_path=config.vae_path,
                     device=device,
                     batch_size=config.encode_batch_size,
+                    expected_frame_count=row_count,
                 )
                 if len(latents) != len(actions) or tuple(latents.shape[1:]) != (4, 16, 32):
                     raise ValueError(

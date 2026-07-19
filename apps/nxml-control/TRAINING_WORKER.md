@@ -74,6 +74,17 @@ Request config is strict. The practical default is:
 
 The worker resolves only the immutable snapshot from `/var/lib/nxml-control/catalog.sqlite3`, re-verifies each cluster object and selected tar member, and never reads an edge path. It requires a human-filtered snapshot and uses its exact per-shard `episode_ids`; quarantined exclusions never reach decoding.
 
-For every eligible row it requires `valid=true`, strictly increasing `frame_index`, 26-dimensional ownership/mask/action fields, human ownership or mask, and `action_timestamp_ns <= frame_timestamp_ns` with exact `action_age_ns`. Targets are `applied_action`, never the policy proposal. Frames are RGB bilinear-resized to 128×256, normalized to [-1,1], deterministically encoded with the mode of `stabilityai/sd-vae-ft-mse`, and scaled by 0.18215 to `(4,16,32)` float16 latents.
+The edge writer's v2 Parquet wire names are `frame_idx`,
+`frame_monotonic_ns`, `action_monotonic_ns`, `action_age` (seconds),
+`human_mask`, `ownership`, and `applied_action`. The worker validates every
+row before filtering: `frame_idx` must be exactly `0..N-1`, frame timestamps
+must strictly increase, action timestamps must be causal, and `action_age`
+must equal their monotonic delta. Decoded media must contain exactly `N`
+frames. It then selects `valid=true` rows with human ownership or mask and
+requires 26-dimensional ownership/mask/action values. Targets are
+`applied_action`, never the policy proposal. Frames are RGB bilinear-resized
+to 128×256, normalized to [-1,1], deterministically encoded with the mode of
+`stabilityai/sd-vae-ft-mse`, and scaled by 0.18215 to `(4,16,32)` float16
+latents.
 
 Each episode is split temporally: the final 10% (at least one complete sequence plus target) is validation and the prefix is training, with no overlapping window across the boundary. Fixed seed 42 controls initialization and loader shuffle. The bootstrap policy is `bc_transformer_v1`, sequence 32, hidden size 256, three layers, eight heads, dropout 0.2, and 26 outputs. The self-describing nxrl checkpoint is CPU smoke-inferred before publication. Artifact metadata exposes the action spec, latent/VAE profile, sequence length, source snapshot, and source member digests through the training artifact endpoint.
