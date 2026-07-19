@@ -599,14 +599,25 @@ def create_app(
         body: EpisodeQualityRequest,
         idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1)],
     ):
+        fields = body.model_dump()
+        legacy_fields = dict(fields)
+        legacy_fields.pop("schema_id")
         try:
-            fields = body.model_dump()
-            fields.pop("schema_id")
             return catalog.set_episode_quality(
-                dataset_id, episode_id, idempotency_key=idempotency_key, **fields
+                dataset_id, episode_id, idempotency_key=idempotency_key, **legacy_fields
             )
-        except KeyError as error:
-            raise HTTPException(404, "committed episode not found") from error
+        except KeyError:
+            try:
+                return segments.set_episode_quality(
+                    dataset_id,
+                    episode_id,
+                    idempotency_key=idempotency_key,
+                    **fields,
+                )
+            except SegmentNotFoundError as error:
+                raise HTTPException(404, "committed episode not found") from error
+            except SegmentConflictError as error:
+                raise HTTPException(409, str(error)) from error
         except ValueError as error:
             raise HTTPException(409, str(error)) from error
 
@@ -615,7 +626,12 @@ def create_app(
         response_model=EpisodeQualityListResponse,
     )
     def episode_quality(dataset_id: str, episode_id: str):
-        return {"dispositions": catalog.episode_quality(dataset_id, episode_id)}
+        return {
+            "dispositions": [
+                *catalog.episode_quality(dataset_id, episode_id),
+                *segments.episode_quality(dataset_id, episode_id),
+            ]
+        }
 
     @app.get("/v1/commits", response_model=CommitReceiptListResponse)
     def receipts(

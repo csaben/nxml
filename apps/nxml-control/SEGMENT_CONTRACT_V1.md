@@ -174,7 +174,7 @@ Segment quality is append-only and idempotent:
 }
 ```
 
-Snapshot creation fails closed and reads the latest disposition for every segment. A
+The canonical episode quality route also accepts closed rolling episode UUIDs. A latest `training_eligible=false` rolling episode disposition vetoes the whole episode; `true` never bypasses mandatory per-segment validation. Snapshot creation fails closed and reads the latest disposition for every segment. A
 segment is eligible only when that explicit latest disposition has both
 `training_eligible=true` and `validator_state=passed`; a missing disposition is
 recorded as `missing_quality_disposition` and excludes the episode. Every exclusion

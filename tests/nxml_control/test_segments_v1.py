@@ -409,6 +409,52 @@ def test_segment_routes_survive_restart_and_receipt_gates_source_delete(tmp_path
         )
         assert quality.status_code == 201
 
+    episode_quality_url = f"/v1/datasets/pokemon/episodes/{RUN_ID}/quality-dispositions"
+    episode_veto = client.post(
+        episode_quality_url,
+        headers={"Idempotency-Key": "rolling-episode-veto"},
+        json={
+            "schema_id": "nxml.episode-quality.v1",
+            "training_eligible": False,
+            "reason": "synthetic_canary",
+            "validator": "edge-canary",
+            "validator_version": "1",
+        },
+    )
+    assert episode_veto.status_code == 201
+    assert (
+        client.post(
+            episode_quality_url,
+            headers={"Idempotency-Key": "rolling-episode-veto"},
+            json={
+                "schema_id": "nxml.episode-quality.v1",
+                "training_eligible": False,
+                "reason": "synthetic_canary",
+                "validator": "edge-canary",
+                "validator_version": "1",
+            },
+        ).json()
+        == episode_veto.json()
+    )
+    assert client.get(episode_quality_url).json()["dispositions"] == [episode_veto.json()]
+    vetoed = client.post("/v1/datasets/pokemon/segment-snapshots").json()
+    assert vetoed["episodes"] == []
+    assert vetoed["excluded_episodes"][0]["episode_disposition"]["reason"] == ("synthetic_canary")
+    assert vetoed["excluded_episodes"][0]["segments"] == []
+
+    episode_pass = client.post(
+        episode_quality_url,
+        headers={"Idempotency-Key": "rolling-episode-pass"},
+        json={
+            "schema_id": "nxml.episode-quality.v1",
+            "training_eligible": True,
+            "reason": "real_episode_validated",
+            "validator": "edge-canary",
+            "validator_version": "2",
+        },
+    )
+    assert episode_pass.status_code == 201
+
     included = client.post("/v1/datasets/pokemon/segment-snapshots")
     assert included.status_code == 201
     assert included.json()["episodes"][0]["segment_ids"] == [
@@ -584,3 +630,36 @@ def test_existing_upload_retry_survives_capacity_block(tmp_path):
         json={"object_key": "uploads/new.tar", "size_bytes": 1, "sha256": "3" * 64},
     )
     assert fresh.status_code == 507
+
+
+def test_rolling_episode_quality_missing_and_conflict_statuses(tmp_path):
+    client = TestClient(create_app(state_dir=tmp_path))
+    url = f"/v1/datasets/pokemon/episodes/{RUN_ID}/quality-dispositions"
+    body = {
+        "schema_id": "nxml.episode-quality.v1",
+        "training_eligible": False,
+        "reason": "not_closed",
+        "validator": "validator",
+        "validator_version": "1",
+    }
+    assert (
+        client.post(url, headers={"Idempotency-Key": "missing-close"}, json=body).status_code == 404
+    )
+
+    content, manifest = segment_tar(RUN_ID, 0, 0, 10)
+    catalog = client.app.state.catalog
+    ingest = client.app.state.ingest
+    upload(catalog, ingest, client.app.state.segments, content, manifest, "rolling-quality")
+    client.app.state.segments.close_episode(close_body([manifest]), idempotency_key="close")
+    assert (
+        client.post(url, headers={"Idempotency-Key": "quality-conflict"}, json=body).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            url,
+            headers={"Idempotency-Key": "quality-conflict"},
+            json={**body, "reason": "changed"},
+        ).status_code
+        == 409
+    )

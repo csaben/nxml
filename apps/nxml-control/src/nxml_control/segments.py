@@ -21,9 +21,7 @@ from nxml_control.storage import ObjectStorage
 
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 ID_PATTERN = r"^sha256:[0-9a-f]{64}$"
-EPISODE_ID_PATTERN = (
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-)
+EPISODE_ID_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 STAGED_OBJECT_PATTERN = re.compile(
     r"^uploads/segments/(?P<episode_id>[0-9a-f-]{36})/"
     r"(?P<sequence_index>[0-9]{6})-(?P<sha256>[0-9a-f]{64})\.tar$"
@@ -100,12 +98,8 @@ class SegmentBundleV1(BaseModel):
         if len(paths) != len(set(paths)):
             raise ValueError("segment member paths must be unique")
         expected_prefix = f"{self.episode_id}.{self.sequence_index:06d}"
-        if any(
-            not path.rsplit("/", 1)[-1].startswith(expected_prefix + ".") for path in paths
-        ):
-            raise ValueError(
-                "segment member basenames must reuse episode UUID and sequence index"
-            )
+        if any(not path.rsplit("/", 1)[-1].startswith(expected_prefix + ".") for path in paths):
+            raise ValueError("segment member basenames must reuse episode UUID and sequence index")
         by_role = {member.role: member.path for member in self.members}
         if not by_role["video"].endswith((".mkv", ".mp4")):
             raise ValueError("video member must be MKV or MP4")
@@ -184,6 +178,12 @@ class SegmentCatalog:
             CREATE TABLE IF NOT EXISTS episode_closes(
               close_id TEXT PRIMARY KEY,idempotency_key TEXT NOT NULL UNIQUE,dataset_id TEXT NOT NULL,
               episode_id TEXT NOT NULL UNIQUE,manifest_json TEXT NOT NULL,created_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS rolling_episode_quality_dispositions(
+              disposition_id TEXT PRIMARY KEY,idempotency_key TEXT NOT NULL UNIQUE,
+              dataset_id TEXT NOT NULL,episode_id TEXT NOT NULL,schema_id TEXT NOT NULL,
+              training_eligible INTEGER NOT NULL,reason TEXT NOT NULL,validator TEXT NOT NULL,
+              validator_version TEXT NOT NULL,created_at TEXT NOT NULL,
+              UNIQUE(dataset_id,episode_id,disposition_id));
             CREATE TABLE IF NOT EXISTS episode_close_segments(
               close_id TEXT NOT NULL REFERENCES episode_closes(close_id),segment_id TEXT NOT NULL,
               ordinal INTEGER NOT NULL,PRIMARY KEY(close_id,segment_id),UNIQUE(close_id,ordinal));
@@ -239,9 +239,7 @@ class SegmentCatalog:
             parsed.object_size_bytes,
             parsed.object_sha256,
         ):
-            raise SegmentContractError(
-                "segment object identity does not match verified upload"
-            )
+            raise SegmentContractError("segment object identity does not match verified upload")
         try:
             self.ingest.verify_members(upload_id, parsed.model_dump(mode="json"))
         except ValueError as error:
@@ -393,6 +391,83 @@ class SegmentCatalog:
             item["training_eligible"] = bool(item["training_eligible"])
         return result
 
+    def set_episode_quality(
+        self,
+        dataset_id: str,
+        episode_id: str,
+        *,
+        idempotency_key: str,
+        schema_id: str,
+        training_eligible: bool,
+        reason: str,
+        validator: str,
+        validator_version: str,
+    ) -> dict:
+        payload = (
+            dataset_id,
+            episode_id,
+            schema_id,
+            int(training_eligible),
+            reason,
+            validator,
+            validator_version,
+        )
+        with self.catalog.connect() as db:
+            if (
+                db.execute(
+                    "SELECT 1 FROM episode_closes WHERE dataset_id=? AND episode_id=?",
+                    (dataset_id, episode_id),
+                ).fetchone()
+                is None
+            ):
+                raise SegmentNotFoundError("closed rolling episode not found")
+            try:
+                disposition_id = str(uuid4())
+                now = datetime.now(UTC).isoformat()
+                db.execute(
+                    "INSERT INTO rolling_episode_quality_dispositions VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (disposition_id, idempotency_key, *payload, now),
+                )
+            except sqlite3.IntegrityError:
+                row = db.execute(
+                    "SELECT * FROM rolling_episode_quality_dispositions WHERE idempotency_key=?",
+                    (idempotency_key,),
+                ).fetchone()
+                actual = (
+                    None
+                    if row is None
+                    else tuple(
+                        row[key]
+                        for key in (
+                            "dataset_id",
+                            "episode_id",
+                            "schema_id",
+                            "training_eligible",
+                            "reason",
+                            "validator",
+                            "validator_version",
+                        )
+                    )
+                )
+                if actual != payload:
+                    raise SegmentConflictError(
+                        "rolling episode quality idempotency conflict"
+                    ) from None
+                return self.episode_quality(dataset_id, episode_id)[-1]
+        return self.episode_quality(dataset_id, episode_id)[-1]
+
+    def episode_quality(self, dataset_id: str, episode_id: str) -> list[dict]:
+        with self.catalog.connect() as db:
+            rows = db.execute(
+                """SELECT * FROM rolling_episode_quality_dispositions
+                WHERE dataset_id=? AND episode_id=? ORDER BY created_at,disposition_id""",
+                (dataset_id, episode_id),
+            ).fetchall()
+        result = [dict(row) for row in rows]
+        for item in result:
+            item["training_eligible"] = bool(item["training_eligible"])
+        return result
+
     def close_episode(self, close: dict, *, idempotency_key: str) -> dict:
         try:
             parsed = EpisodeCloseV1.model_validate(close)
@@ -503,15 +578,36 @@ class SegmentCatalog:
                     WHERE x.close_id=? ORDER BY x.ordinal""",
                     (close["close_id"],),
                 ).fetchall()
+                episode_quality = db.execute(
+                    """SELECT * FROM rolling_episode_quality_dispositions
+                    WHERE dataset_id=? AND episode_id=?
+                    ORDER BY created_at DESC,disposition_id DESC LIMIT 1""",
+                    (dataset_id, close["episode_id"]),
+                ).fetchone()
+                episode_failure = (
+                    episode_quality
+                    if episode_quality is not None and episode_quality["training_eligible"] != 1
+                    else None
+                )
                 failures = [
                     row
                     for row in segments
                     if row["training_eligible"] != 1 or row["validator_state"] != "passed"
                 ]
-                if failures:
+                if episode_failure is not None or failures:
                     excluded.append(
                         {
                             "episode_id": close["episode_id"],
+                            "episode_disposition": (
+                                None
+                                if episode_failure is None
+                                else {
+                                    "reason": episode_failure["reason"],
+                                    "validator": episode_failure["validator"],
+                                    "validator_version": episode_failure["validator_version"],
+                                    "disposition_id": episode_failure["disposition_id"],
+                                }
+                            ),
                             "segments": [
                                 {
                                     "segment_id": row["segment_id"],
@@ -584,9 +680,7 @@ class SegmentCatalog:
         for row in rows:
             info = self.storage.inspect(row["storage_key"])
             if info is None or (info.size_bytes, info.sha256) != (row["size_bytes"], row["sha256"]):
-                raise SegmentContractError(
-                    f"durable segment object mismatch: {row['segment_id']}"
-                )
+                raise SegmentContractError(f"durable segment object mismatch: {row['segment_id']}")
             with self.storage.open(row["storage_key"]) as source:
                 manifest = json.loads(row["manifest_json"])
                 while chunk := source.read(chunk_size):
