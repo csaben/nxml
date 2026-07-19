@@ -9,7 +9,7 @@ fi
 AUTOPILOT_WEB_TOKEN=$(tr -d '\r\n' < "$token_file")
 export AUTOPILOT_WEB_TOKEN
 
-exec uv run nxml-autopilot \
+exec /home/arelius/.local/bin/uv --directory /home/arelius/Code/nxml run nxml-autopilot \
     --game "$NXML_GAME" \
     --policy "$NXML_POLICY" \
     --controller "$NXML_ORCHESTRATOR_URL" \

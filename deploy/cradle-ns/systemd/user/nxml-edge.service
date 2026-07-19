@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=%h/Code/nxml
-ExecStart=/usr/bin/env uv run nxml-edge --config %h/.config/nxml/edge.json --token-file %h/.config/nxml/autopilot.token
+ExecStart=%h/.local/bin/uv --directory %h/Code/nxml run nxml-edge --config %h/.config/nxml/edge.json --token-file %h/.config/nxml/autopilot.token
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
