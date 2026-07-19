@@ -1,7 +1,9 @@
 from pathlib import Path
 
-
 SCRIPT = Path(__file__).parents[2] / "apps/nxml-control/deploy/nxml-stack"
+
+
+VALIDATOR = Path(__file__).parents[2] / "apps/nxml-control/deploy/validate_rolling.py"
 
 
 def test_inference_admission_uses_free_vram_floor_without_killing_processes():
