@@ -57,8 +57,12 @@ def test_status_models_preserve_contract_and_spool_metadata(tmp_path):
 
 def test_slow_operations_never_block_fast_websocket(tmp_path):
     class SlowReader:
-        def start(self): pass
-        def stop(self): pass
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
         def snapshot(self):
             time.sleep(1)
 
@@ -78,7 +82,93 @@ def test_unconfigured_shell_is_no_auth_and_read_only():
         assert client.get("/").status_code == 200
         status = client.get("/api/ops/status").json()
         assert status["session"]["mode"] == "human"
+        assert status["model_readiness"]["phase"] == "disabled"
+        assert status["model_readiness"]["load_available"] is False
+        assert status["model_readiness"]["armed"] is False
         assert client.post("/api/ops/status").status_code == 405
+
+
+def test_local_model_load_requires_authoritative_validated_state():
+    class Status:
+        def __init__(self):
+            self.cluster = {
+                "revisions": {
+                    "revisions": [
+                        {"revision_id": "candidate-r1", "state": "candidate"},
+                    ]
+                }
+            }
+
+        def wire(self):
+            return {"spool": {}, "cluster": self.cluster, "errors": {}}
+
+    class Operations:
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def snapshot(self):
+            return Status()
+
+    class Runtime:
+        def load_async(self, revision):
+            raise AssertionError("unvalidated candidate must not reach runtime")
+
+        def state(self):
+            return SimpleNamespace(wire=lambda: {"phase": "unloaded", "armed": False})
+
+    app = minui.create_app(Orchestrator(), "/dev/null", Operations(), model_runtime=Runtime())
+    with TestClient(app) as client:
+        response = client.post("/api/models/load/candidate-r1")
+    assert response.status_code == 409
+    assert "authoritative cluster validation" in response.json()["detail"]
+
+
+def test_validated_revision_is_handed_to_off_thread_runtime_unarmed():
+    revision = {"revision_id": "validated-r1", "state": "validated"}
+
+    class Status:
+        def __init__(self):
+            self.cluster = {"revisions": {"revisions": [revision]}}
+
+        def wire(self):
+            return {"spool": {}, "cluster": self.cluster, "errors": {}}
+
+    class Operations:
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def snapshot(self):
+            return Status()
+
+    class Runtime:
+        selected = None
+
+        def load_async(self, item):
+            self.selected = item
+
+        def state(self):
+            return SimpleNamespace(
+                wire=lambda: {
+                    "schema_version": "nxml.dagger-model-readiness.v1",
+                    "phase": "loading",
+                    "loading": "validated-r1",
+                    "armed": False,
+                }
+            )
+
+    runtime = Runtime()
+    app = minui.create_app(Orchestrator(), "/dev/null", Operations(), model_runtime=runtime)
+    with TestClient(app) as client:
+        response = client.post("/api/models/load/validated-r1")
+    assert response.status_code == 202
+    assert runtime.selected is revision
+    assert response.json()["armed"] is False
 
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "127.0.0.1", "192.168.1.2", "::1", "cradle-ns"])
@@ -117,14 +207,26 @@ def test_disk_pressure_closes_recording_admission():
     class Status:
         def __init__(self):
             self.spool = {"admission_open": False, "blocked_reason": "disk pressure"}
-        def wire(self): return {}
+
+        def wire(self):
+            return {}
+
     class Operations:
-        def start(self): pass
-        def stop(self): pass
-        def snapshot(self): return Status()
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def snapshot(self):
+            return Status()
+
     class Recorder:
-        def status(self): return {"state": "idle"}
-        def start(self): raise AssertionError("recorder must not start")
+        def status(self):
+            return {"state": "idle"}
+
+        def start(self):
+            raise AssertionError("recorder must not start")
 
     app = minui.create_app(Orchestrator(), "/dev/null", Operations(), recorder=Recorder())
     with TestClient(app) as client:
@@ -135,24 +237,39 @@ def test_disk_pressure_closes_recording_admission():
 
 def test_recording_session_finalizes_and_stamps_integrity(monkeypatch, tmp_path):
     class Controller:
-        def __init__(self, **_kwargs): pass
-        def start(self): pass
-        def stop(self): pass
+        def __init__(self, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
 
     class Sync:
         invalid_samples = 0
-        def __init__(self, *_args, **_kwargs): pass
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
         def frames(self):
             yield SimpleNamespace(valid=True)
 
     class Writer:
         episode_name = "episode"
+
         def __init__(self):
             self.count = 0
             self.config = {}
-        def append(self, _synced): self.count += 1
-        def __len__(self): return self.count
-        def close(self): return None
+
+        def append(self, _synced):
+            self.count += 1
+
+        def __len__(self):
+            return self.count
+
+        def close(self):
+            return None
 
     monkeypatch.setattr(recording_mod, "ControllerSubscription", Controller)
     monkeypatch.setattr(recording_mod, "Synchronizer", Sync)
@@ -171,21 +288,35 @@ def test_recording_defaults_to_canonical_ffv1_mkv(tmp_path):
 
 def test_recording_loss_is_a_visible_failed_state(monkeypatch, tmp_path):
     class Controller:
-        def __init__(self, **_kwargs): pass
-        def start(self): pass
-        def stop(self): pass
+        def __init__(self, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
 
     class Sync:
         invalid_samples = 0
-        def __init__(self, *_args, **_kwargs): pass
-        def frames(self): raise recording_mod.CaptureFrameLossError("lost source frames")
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def frames(self):
+            raise recording_mod.CaptureFrameLossError("lost source frames")
 
     class Writer:
         episode_name = "episode"
+
         def __init__(self):
             self.config = {}
-        def append_event(self, *_args, **_kwargs): pass
-        def close(self): return None
+
+        def append_event(self, *_args, **_kwargs):
+            pass
+
+        def close(self):
+            return None
 
     monkeypatch.setattr(recording_mod, "ControllerSubscription", Controller)
     monkeypatch.setattr(recording_mod, "Synchronizer", Sync)

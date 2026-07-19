@@ -184,4 +184,8 @@ def load_bc_frame_policy(path, *, device: str = "cuda", vae_path: str | None = N
     info = policy.info()
     if info.architecture != "bc_transformer_v1" or info.action_dim != DIM:
         raise ValueError("loaded policy is not bc_transformer_v1 switch_packets.v1/26-D")
+    smoke_shape = (info.sequence_length, *info.latent_shape)
+    smoke = policy.predict(np.zeros(smoke_shape, dtype=np.float32))
+    if smoke.shape != (DIM,) or not np.isfinite(smoke).all():
+        raise ValueError("local smoke inference returned an invalid 26-D action")
     return policy

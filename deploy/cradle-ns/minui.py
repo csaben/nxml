@@ -33,6 +33,7 @@ from nxml_capture.backends.ffmpeg_v4l2 import v4l2_mjpeg_stream_command
 
 sys.path.insert(0, str(Path(__file__).parent))
 from dagger_inference import InferenceStatus
+from dagger_models import AtomicModelRuntime
 from dagger_recording import HumanRecordingSession
 from dagger_status import OperationsReader
 from nxml_capture.backends.mjpeg_fanout import MjpegFanoutSource
@@ -77,7 +78,7 @@ PAGE = """<!doctype html>
  <div class="card"><div class="label">Session</div><div class="value" id="session">human · idle</div><div class="value"><select id="mode"><option value="human">Human</option><option disabled>Pure AI — policy runtime required</option><option disabled>Hybrid — policy runtime required</option></select> <button id="record">Start episode</button></div><div class="value label">Mute switch_packets.v1/mute.v1 · 0/26 (available when AI runtime is armed)</div></div>
  <div class="card"><div class="label">Local spool</div><div class="value" id="spool">loading…</div></div>
  <div class="card"><div class="label">Cluster</div><div class="value" id="cluster">loading…</div></div>
- <div class="card"><div class="label">Models / training</div><div class="value" id="model">loading…</div><div class="value" id="inference">inference: unloaded · unarmed</div><select id="model-select"><option>No compatible revisions</option></select><div class="value" id="jobs"></div></div>
+ <div class="card"><div class="label">Models / training</div><div class="value" id="model">loading…</div><div class="value" id="readiness">local model: unloaded · unarmed</div><div class="value" id="inference">inference: unloaded · unarmed</div><select id="model-select"><option value="">No validated revisions</option></select> <button id="model-load" disabled>Load verified revision</button><div class="value" id="jobs"></div></div>
 </section>
 <script>
   const HZ=60, DEADZONE=0.15, DIM=26;
@@ -114,13 +115,15 @@ PAGE = """<!doctype html>
       const p=s.spool; $('spool').textContent=p?`${p.pending_episodes||0} pending · ${p.episodes_shipped||0} shipped · ${((p.local_buffered_bytes||0)/1e9).toFixed(2)} GB buffered · ${p.disk_free_gb||'?'} GB free · ${p.receipt_state||'unknown'}${p.blocked_reason?' · blocked: '+p.blocked_reason:''}`:`unavailable: ${s.errors.spool||'unknown'}`;
       const c=s.cluster; $('cluster').textContent=c?`${(c.datasets.datasets||[]).length} datasets · ${(c.snapshots.snapshots||[]).length} snapshots`:`unavailable: ${s.errors.cluster||'unknown'}`;
       const d=c&&c.deployment; $('model').textContent=d&&d.active_revision?`active ${d.active_revision.slice(0,8)} · gen ${d.generation}`:'none active';
+      const m=s.model_readiness||{}; $('readiness').textContent=`model readiness: ${m.phase||'unloaded'} · ${m.armed?'armed':'unarmed'}${m.active?' · active '+m.active.slice(0,8):''}${m.previous?' · previous '+m.previous.slice(0,8):''}${m.blocked_reason?' · '+m.blocked_reason:''}${m.error?' · '+m.error:''}`;
       const i=s.inference||{}; $('inference').textContent=`inference: ${i.health||'unloaded'} · ${i.armed?'armed':'unarmed'}${i.revision?' · '+i.revision.slice(0,8):''}${i.inference_latency_ms!=null?' · '+i.inference_latency_ms.toFixed(1)+'ms':''}${i.proposal_age_ms!=null?' · proposal '+i.proposal_age_ms.toFixed(0)+'ms old':''}${i.error?' · '+i.error:''}`;
-      const revisions=c&&c.revisions&&c.revisions.revisions||[]; $('model-select').innerHTML=revisions.length?revisions.map(r=>`<option disabled>${r.model_id} · ${r.revision_id.slice(0,8)} · ${r.state}</option>`).join(''):'<option>No compatible revisions</option>';
+      const revisions=c&&c.revisions&&c.revisions.revisions||[]; const validated=revisions.filter(r=>r.state==='validated'); $('model-select').innerHTML=validated.length?'<option value="">Select validated revision</option>'+validated.map(r=>`<option value="${r.revision_id}">${r.model_id} · ${r.revision_id.slice(0,8)} · validated</option>`).join(''):'<option value="">No validated revisions</option>'; $('model-load').disabled=!validated.length||m.loading||!m.load_available;
       const jobs=c&&c.jobs&&c.jobs.jobs||[]; $('jobs').textContent=jobs.length?jobs.map(j=>`${j.state} ${j.job_id.slice(0,8)}`).join(' · '):'no training jobs';
     } catch(e) { $('cluster').textContent='operations status unavailable'; }
   }
   pollOps(); setInterval(pollOps,5000);
   $('record').onclick=async()=>{const stop=$('record').textContent.startsWith('Stop'); $('record').disabled=true; try{await fetch(stop?'/api/recording/stop':'/api/recording/start',{method:'POST'}); await pollOps()}finally{$('record').disabled=false}};
+  $('model-load').onclick=async()=>{const revision=$('model-select').value;if(!revision)return;$('model-load').disabled=true;try{const response=await fetch('/api/models/load/'+encodeURIComponent(revision),{method:'POST'});if(!response.ok)throw new Error((await response.json()).detail||'load rejected');await pollOps()}catch(e){$('readiness').textContent='local model: rejected · '+e.message}finally{setTimeout(pollOps,500)}};
 </script></body></html>"""
 
 
@@ -149,6 +152,21 @@ class OrchestratorClient:
                         raise
 
 
+def disabled_model_readiness() -> dict:
+    """Explicit fail-closed contract until local vs cluster inference is selected."""
+    return {
+        "schema_version": "nxml.dagger-model-readiness.v1",
+        "phase": "disabled",
+        "armed": False,
+        "ready": False,
+        "load_available": False,
+        "active": None,
+        "previous": None,
+        "loading": None,
+        "blocked_reason": "inference runtime boundary is not configured",
+    }
+
+
 def create_app(
     orchestrator: OrchestratorClient,
     capture_device: str,
@@ -156,6 +174,7 @@ def create_app(
     capture_source: MjpegFanoutSource | None = None,
     recorder: HumanRecordingSession | None = None,
     inference=None,
+    model_runtime: AtomicModelRuntime | None = None,
 ) -> FastAPI:
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -201,6 +220,11 @@ def create_app(
                 "inference": (
                     inference.status() if inference is not None else InferenceStatus().wire()
                 ),
+                "model_readiness": (
+                    model_runtime.state().wire()
+                    if model_runtime is not None
+                    else disabled_model_readiness()
+                ),
                 "errors": {"operations": "not configured"},
             }
         wire = operations.snapshot().wire()
@@ -208,7 +232,31 @@ def create_app(
         wire["inference"] = (
             inference.status() if inference is not None else InferenceStatus().wire()
         )
+        wire["model_readiness"] = (
+            model_runtime.state().wire()
+            if model_runtime is not None
+            else disabled_model_readiness()
+        )
         return wire
+
+    @app.post("/api/models/load/{revision_id}", status_code=202)
+    def model_load(revision_id: str) -> dict:
+        if model_runtime is None or operations is None:
+            raise HTTPException(503, "local model runtime is not configured")
+        cluster = operations.snapshot().cluster or {}
+        revisions = (cluster.get("revisions") or {}).get("revisions") or []
+        revision = next(
+            (item for item in revisions if item.get("revision_id") == revision_id), None
+        )
+        if revision is None:
+            raise HTTPException(404, "revision is not present in the polled cluster catalog")
+        if revision.get("state") != "validated":
+            raise HTTPException(409, "revision has not passed authoritative cluster validation")
+        try:
+            model_runtime.load_async(revision)
+        except (RuntimeError, ValueError) as error:
+            raise HTTPException(409, str(error)) from error
+        return model_runtime.state().wire()
 
     @app.post("/api/recording/start")
     def recording_start() -> dict:

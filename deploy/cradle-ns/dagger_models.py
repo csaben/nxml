@@ -8,7 +8,7 @@ import shutil
 import threading
 import urllib.request
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +16,8 @@ REQUIRED = {
     "architecture": "bc_transformer_v1",
     "action_spec_id": "switch_packets.v1",
     "action_dim": 26,
+    "latent_shape": [4, 16, 32],
+    "vae_profile": "sd-vae-ft-mse.rgb-bilinear-128x256.mode.scale-0.18215.v1",
 }
 
 
@@ -26,6 +28,11 @@ def check_compatibility(revision: dict) -> None:
     }
     if mismatches:
         raise ValueError(f"incompatible model revision: {mismatches}")
+    if (
+        not isinstance(compatibility.get("sequence_length"), int)
+        or compatibility["sequence_length"] < 1
+    ):
+        raise ValueError("incompatible model revision: invalid sequence_length")
 
 
 class RevisionCache:
@@ -39,11 +46,6 @@ class RevisionCache:
         digest = revision["checkpoint_sha256"]
         if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
             raise ValueError("invalid checkpoint SHA-256")
-        target = self.root / digest
-        if target.is_file() and _sha(target) == digest:
-            return target
-        self.root.mkdir(parents=True, exist_ok=True)
-        temp = target.with_suffix(".tmp")
         uri = revision.get("artifact_uri")
         expected_id = "sha256:" + digest
         if revision.get("artifact_id") != expected_id or not uri:
@@ -51,6 +53,11 @@ class RevisionCache:
         expected_uri = f"/v1/models/revisions/{revision['revision_id']}/artifacts/{expected_id}"
         if uri != expected_uri or self.control_url is None:
             raise ValueError("artifact URI is not the canonical control service endpoint")
+        target = self.root / digest
+        if target.is_file() and _sha(target) == digest:
+            return target
+        self.root.mkdir(parents=True, exist_ok=True)
+        temp = target.with_suffix(".tmp")
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
         request = urllib.request.Request(self.control_url + uri, headers=headers)
         with urllib.request.urlopen(request, timeout=60) as src, temp.open("wb") as dst:
@@ -72,11 +79,23 @@ def _sha(path: Path) -> str:
 
 @dataclass(frozen=True)
 class ModelState:
+    schema_version: str = "nxml.dagger-model-readiness.v1"
     active: str | None = None
     previous: str | None = None
     loading: str | None = None
     error: str | None = None
     armed: bool = False
+    ready: bool = False
+    load_available: bool = True
+    checkpoint_sha256: str | None = None
+    compatibility: dict[str, Any] = field(default_factory=dict)
+
+    def wire(self) -> dict[str, Any]:
+        value = asdict(self)
+        value["phase"] = "loading" if self.loading else "ready" if self.ready else "unloaded"
+        if self.error:
+            value["phase"] = "failed"
+        return value
 
 
 class AtomicModelRuntime:
@@ -86,6 +105,8 @@ class AtomicModelRuntime:
         self._lock = threading.Lock()
         self._handle = None
         self._previous_handle = None
+        self._revision: dict | None = None
+        self._previous_revision: dict | None = None
         self._state = ModelState()
 
     def state(self):
@@ -93,11 +114,21 @@ class AtomicModelRuntime:
             return self._state
 
     def load_async(self, revision: dict) -> None:
+        if revision.get("state") != "validated":
+            raise ValueError("only a cluster-validated revision may be loaded")
+        check_compatibility(revision)
         with self._lock:
             if self._state.loading:
                 raise RuntimeError("model load already active")
             self._state = ModelState(
-                self._state.active, self._state.previous, revision["revision_id"]
+                active=self._state.active,
+                previous=self._state.previous,
+                loading=revision["revision_id"],
+                armed=False,
+                ready=self._state.ready,
+                load_available=True,
+                checkpoint_sha256=self._state.checkpoint_sha256,
+                compatibility=self._state.compatibility,
             )
         threading.Thread(
             target=self._load, args=(revision,), daemon=True, name="dagger-model-load"
@@ -106,15 +137,44 @@ class AtomicModelRuntime:
     def _load(self, revision):
         try:
             handle = self.loader(self.cache.acquire(revision))
+            info_method = getattr(handle, "info", None)
+            if callable(info_method):
+                info = info_method()
+                expected = revision["compatibility"]
+                if (
+                    info.architecture != expected["architecture"]
+                    or info.action_dim != expected["action_dim"]
+                    or info.sequence_length != expected["sequence_length"]
+                    or list(info.latent_shape) != expected["latent_shape"]
+                ):
+                    raise ValueError("loaded checkpoint metadata differs from immutable revision")
             with self._lock:
                 old = self._state.active
                 self._previous_handle = self._handle
+                self._previous_revision = self._revision
                 self._handle = handle
-                self._state = ModelState(revision["revision_id"], old, armed=False)
+                self._revision = dict(revision)
+                self._state = ModelState(
+                    active=revision["revision_id"],
+                    previous=old,
+                    armed=False,
+                    ready=True,
+                    load_available=True,
+                    checkpoint_sha256=revision["checkpoint_sha256"],
+                    compatibility=dict(revision["compatibility"]),
+                )
         except Exception as error:
             with self._lock:
-                self._handle = None
-                self._state = ModelState(error=str(error), armed=False)
+                self._state = ModelState(
+                    active=self._state.active,
+                    previous=self._state.previous,
+                    error=str(error),
+                    armed=False,
+                    ready=self._handle is not None,
+                    load_available=True,
+                    checkpoint_sha256=self._state.checkpoint_sha256,
+                    compatibility=self._state.compatibility,
+                )
 
     def rollback(self) -> None:
         with self._lock:
@@ -122,12 +182,29 @@ class AtomicModelRuntime:
                 raise RuntimeError("no previous verified revision")
             active, previous = self._state.active, self._state.previous
             self._handle, self._previous_handle = self._previous_handle, self._handle
-            self._state = ModelState(previous, active, armed=False)
+            self._revision, self._previous_revision = self._previous_revision, self._revision
+            assert self._revision is not None
+            self._state = ModelState(
+                active=previous,
+                previous=active,
+                armed=False,
+                ready=True,
+                load_available=True,
+                checkpoint_sha256=self._revision["checkpoint_sha256"],
+                compatibility=dict(self._revision["compatibility"]),
+            )
 
     def neutral_disarm(self, reason: str):
         with self._lock:
             self._state = ModelState(
-                self._state.active, self._state.previous, error=reason, armed=False
+                active=self._state.active,
+                previous=self._state.previous,
+                error=reason,
+                armed=False,
+                ready=self._handle is not None,
+                load_available=True,
+                checkpoint_sha256=self._state.checkpoint_sha256,
+                compatibility=self._state.compatibility,
             )
 
     def active_handle(self) -> tuple[str | None, Any | None]:
