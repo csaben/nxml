@@ -67,19 +67,19 @@ exactly one independently checksummed video/action/event triplet.
   "members": [
     {
       "role": "video",
-      "path": "episode.000000.mkv",
+      "path": "5e2d0f44-b532-46ff-b433-4082b12945ab.000000.mkv",
       "size_bytes": 1000000000,
       "sha256": "<64 lowercase hex>"
     },
     {
       "role": "actions",
-      "path": "episode.000000.parquet",
+      "path": "5e2d0f44-b532-46ff-b433-4082b12945ab.000000.parquet",
       "size_bytes": 1000000,
       "sha256": "<64 lowercase hex>"
     },
     {
       "role": "events",
-      "path": "episode.000000.events.parquet",
+      "path": "5e2d0f44-b532-46ff-b433-4082b12945ab.000000.events.parquet",
       "size_bytes": 10000,
       "sha256": "<64 lowercase hex>"
     }
