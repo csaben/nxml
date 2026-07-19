@@ -102,6 +102,11 @@ def test_run_spooler_end_to_end(tmp_path: Path) -> None:
     assert journal.stats()["episodes_shipped"] == 2
     status = json.loads((state / "status.json").read_text())
     assert status["pending_episodes"] == 0
+    assert status["staging_shards"] == 0
+    assert status["staging_bytes"] == 0
+    assert status["admission_open"] is True
+    assert status["disk_high_watermark"] == 0.85
+    assert status["disk_low_watermark"] == 0.75
 
     # Idempotent second pass: nothing new to ship.
     run_spooler(

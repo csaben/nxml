@@ -74,6 +74,14 @@ def _write_status(state_dir: Path, journal: Journal, extra: dict) -> None:
     tmp.replace(state_dir / "status.json")
 
 
+def _staging_status(staging_dir: Path) -> dict[str, int]:
+    shards = list(staging_dir.glob("*.tar")) if staging_dir.is_dir() else []
+    return {
+        "staging_shards": len(shards),
+        "staging_bytes": sum(path.stat().st_size for path in shards),
+    }
+
+
 def run_spooler(
     watch_dirs: list[Path],
     *,
@@ -154,7 +162,11 @@ def run_spooler(
                                                "pending_episodes": len(pending),
                                                "disk_free_gb": round(disk_free_gb, 1),
                                                "disk_used_fraction": disk_used_fraction,
-                                               "disk_pressure": pressure_active})
+                                               "disk_pressure": pressure_active,
+                                               "disk_high_watermark": disk_high_watermark,
+                                               "disk_low_watermark": disk_low_watermark,
+                                               "admission_open": not pressure_active,
+                                               **_staging_status(staging_dir)})
             commit = backend.publish(shard)
             if commit.checksum != shard.sha256:
                 raise RuntimeError(f"backend committed wrong checksum for {shard.path.name}")
@@ -194,6 +206,8 @@ def run_spooler(
                 "disk_pressure": pressure_active,
                 "disk_high_watermark": disk_high_watermark,
                 "disk_low_watermark": disk_low_watermark,
+                "admission_open": not pressure_active,
+                **_staging_status(staging_dir),
             },
         )
         if once:
