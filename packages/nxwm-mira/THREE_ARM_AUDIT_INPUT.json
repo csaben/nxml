@@ -1,0 +1,4625 @@
+{
+  "checkpoint": {
+    "config_sha256": "1b1fc12e1aca0fdad5df163a5c85a2adbb378bce6255aab5b67cf2637678462d",
+    "id": "checkpoint-99999",
+    "weights_sha256": "4e22b445a27c8feb60d7e749d59e865bb9adfe787006665e5ae9f908c5b6f8dd"
+  },
+  "compact": {
+    "manifest_sha256": "46d8586609c0027e26e8138b513c78b032b2a599fa93be6ed28497c88c2c2b10",
+    "repo": "arelius/nxml-pokemon-za-gameplay",
+    "revision": "665c111ae391f1e41502285e404343590cd94ad7",
+    "snapshot": "sha256:2b0b76db8c44b4a8c9e2d5e7062f0c9f139bdd714aee5f3e3cfca89b7b0e0d05"
+  },
+  "deltas": [
+    "A_to_B_geometry",
+    "B_to_C_content_codec",
+    "A_to_C_total"
+  ],
+  "dry_run": {
+    "cpu_descriptor_and_matching_passed": true,
+    "gpu_metrics_started": false
+  },
+  "git_commit": "66f82cf33202e40fc4c5e05649862436f57101f6",
+  "input_digest": "sha256:a9a137b2223e1336b6e544566ba7838ede3fd7b659e83c39493aaf42d7e07587",
+  "matching": {
+    "action_quartiles": [
+      0.1345362514257431,
+      0.1345362514257431,
+      1.1045463532209396
+    ],
+    "candidate_compact_windows": 256,
+    "exact_stratum_pairs": 48,
+    "features": [
+      "motion",
+      "action",
+      "brightness"
+    ],
+    "motion_quartiles": [
+      0.01108879316598177,
+      0.04406338930130005,
+      0.05600517988204956
+    ]
+  },
+  "pairs": [
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.05317539442330599,
+          "brightness": 0.33120861649513245,
+          "buttons": 0.008522727526724339,
+          "motion": 0.000895285455044359,
+          "stick": 0.04465266689658165
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          816,
+          820,
+          824,
+          828,
+          832,
+          836,
+          840,
+          844,
+          848,
+          852,
+          856,
+          860,
+          864,
+          868,
+          872,
+          876
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:643d7023a3d819de18890b322f8cb7d2ae07028e198a9d0f54595d52d788bd17"
+      },
+      "distance": 12.477999212813913,
+      "reference": {
+        "descriptor": {
+          "action": 0.12041594088077545,
+          "brightness": 0.02697201631963253,
+          "buttons": 0.0,
+          "motion": 0.010154577903449535,
+          "stick": 0.12041594088077545
+        },
+        "episode_id": "20260410_225607_6-56pm",
+        "episode_index": 125,
+        "frame_ordinals": [
+          1408,
+          1410,
+          1412,
+          1414,
+          1416,
+          1418,
+          1420,
+          1422,
+          1424,
+          1426,
+          1428,
+          1430,
+          1432,
+          1434,
+          1436,
+          1438
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:8176eb2f6db529707b47c1cb2f48263197f73ed36ff3919224162d3451737ba6"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.3671163320541382,
+          "buttons": 0.0,
+          "motion": 0.06313106417655945,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          3148,
+          3152,
+          3156,
+          3160,
+          3164,
+          3168,
+          3172,
+          3176,
+          3180,
+          3184,
+          3188,
+          3192,
+          3196,
+          3200,
+          3204,
+          3208
+        ],
+        "stratum": [
+          3,
+          0
+        ],
+        "window_id": "sha256:5212f9cb335f74148d301c25cedae9352630a4713744d0572bde6a03c94beaf4"
+      },
+      "distance": 1.033011026217319,
+      "reference": {
+        "descriptor": {
+          "action": 0.12041594088077545,
+          "brightness": 0.3176515996456146,
+          "buttons": 0.0,
+          "motion": 0.08649088442325592,
+          "stick": 0.12041594088077545
+        },
+        "episode_id": "20260410_225607_6-56pm",
+        "episode_index": 125,
+        "frame_ordinals": [
+          256,
+          258,
+          260,
+          262,
+          264,
+          266,
+          268,
+          270,
+          272,
+          274,
+          276,
+          278,
+          280,
+          282,
+          284,
+          286
+        ],
+        "stratum": [
+          3,
+          0
+        ],
+        "window_id": "sha256:fb50a64cbef5ed7f1b56a36011d502c3402c7c86d4ab46e3babee4cd9bd4a44b"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.2734334468841553,
+          "brightness": 0.3010236918926239,
+          "buttons": 0.0,
+          "motion": 0.08854234218597412,
+          "stick": 1.2734334468841553
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          4664,
+          4668,
+          4672,
+          4676,
+          4680,
+          4684,
+          4688,
+          4692,
+          4696,
+          4700,
+          4704,
+          4708,
+          4712,
+          4716,
+          4720,
+          4724
+        ],
+        "stratum": [
+          3,
+          3
+        ],
+        "window_id": "sha256:e94e0d4f4a91eea17cce1524ea936b6a48f2510e34c41e306a9f4742f762ad75"
+      },
+      "distance": 0.06820767189673352,
+      "reference": {
+        "descriptor": {
+          "action": 1.1454956531524658,
+          "brightness": 0.30053946375846863,
+          "buttons": 0.0,
+          "motion": 0.09040643274784088,
+          "stick": 1.1454956531524658
+        },
+        "episode_id": "20260213_205913_3-59pm",
+        "episode_index": 157,
+        "frame_ordinals": [
+          1120,
+          1122,
+          1124,
+          1126,
+          1128,
+          1130,
+          1132,
+          1134,
+          1136,
+          1138,
+          1140,
+          1142,
+          1144,
+          1146,
+          1148,
+          1150
+        ],
+        "stratum": [
+          3,
+          3
+        ],
+        "window_id": "sha256:addb444b9a18b6dd6dc68e1c5fc9c3cd4ee758b8e1f2422cb37091b809b3a07f"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.2517645796760917,
+          "brightness": 0.2574231028556824,
+          "buttons": 0.014204545877873898,
+          "motion": 0.07162704318761826,
+          "stick": 1.2375600337982178
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          3816,
+          3820,
+          3824,
+          3828,
+          3832,
+          3836,
+          3840,
+          3844,
+          3848,
+          3852,
+          3856,
+          3860,
+          3864,
+          3868,
+          3872,
+          3876
+        ],
+        "stratum": [
+          3,
+          3
+        ],
+        "window_id": "sha256:37b3f601f88082ede8ba80e33f1677011ff048d91ea00d6b4306e9138fe220df"
+      },
+      "distance": 0.005439329075850784,
+      "reference": {
+        "descriptor": {
+          "action": 1.2864091396331787,
+          "brightness": 0.2550644874572754,
+          "buttons": 0.0,
+          "motion": 0.07165007293224335,
+          "stick": 1.2864091396331787
+        },
+        "episode_id": "20260310_043322_12-33am",
+        "episode_index": 156,
+        "frame_ordinals": [
+          1792,
+          1794,
+          1796,
+          1798,
+          1800,
+          1802,
+          1804,
+          1806,
+          1808,
+          1810,
+          1812,
+          1814,
+          1816,
+          1818,
+          1820,
+          1822
+        ],
+        "stratum": [
+          3,
+          3
+        ],
+        "window_id": "sha256:964dcd716573236a79ea8c3c3c5b879fe48e4f24584df34c928e2f878a4fd4e6"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.4138070046901703,
+          "brightness": 0.30716419219970703,
+          "buttons": 0.0,
+          "motion": 0.01626863330602646,
+          "stick": 0.4138070046901703
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          1680,
+          1684,
+          1688,
+          1692,
+          1696,
+          1700,
+          1704,
+          1708,
+          1712,
+          1716,
+          1720,
+          1724,
+          1728,
+          1732,
+          1736,
+          1740
+        ],
+        "stratum": [
+          1,
+          2
+        ],
+        "window_id": "sha256:3ce9d79beda9a74d60c0e9ef9aa7ad61ad98ea596401820f6c867788a42cebc5"
+      },
+      "distance": 3.5181441377518086,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.20463508367538452,
+          "buttons": 0.0,
+          "motion": 0.05525568872690201,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          608,
+          610,
+          612,
+          614,
+          616,
+          618,
+          620,
+          622,
+          624,
+          626,
+          628,
+          630,
+          632,
+          634,
+          636,
+          638
+        ],
+        "stratum": [
+          2,
+          0
+        ],
+        "window_id": "sha256:2643bc7e82dcb78bdd160a828c9f6ee99bd2bb6d761ee156d25f2f2713b433e7"
+      },
+      "stratum_exact": false
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.0925140604376793,
+          "brightness": 0.25050026178359985,
+          "buttons": 0.022727273404598236,
+          "motion": 0.04650342836976051,
+          "stick": 1.069786787033081
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          3896,
+          3900,
+          3904,
+          3908,
+          3912,
+          3916,
+          3920,
+          3924,
+          3928,
+          3932,
+          3936,
+          3940,
+          3944,
+          3948,
+          3952,
+          3956
+        ],
+        "stratum": [
+          2,
+          2
+        ],
+        "window_id": "sha256:a8ca63d4c6a12c400a053a3f18911dbe02cf9c7bda9d4b24e1aabc7ed86a74bc"
+      },
+      "distance": 4.523401280621793,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.17036201059818268,
+          "buttons": 0.0,
+          "motion": 0.054460559040308,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          1504,
+          1506,
+          1508,
+          1510,
+          1512,
+          1514,
+          1516,
+          1518,
+          1520,
+          1522,
+          1524,
+          1526,
+          1528,
+          1530,
+          1532,
+          1534
+        ],
+        "stratum": [
+          2,
+          0
+        ],
+        "window_id": "sha256:7f1509bd26f7dd2761257bb5920552f93b60d93ce880c2b183c5c162f85c644f"
+      },
+      "stratum_exact": false
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.3656872510910034,
+          "buttons": 0.0,
+          "motion": 0.05648934468626976,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          3152,
+          3156,
+          3160,
+          3164,
+          3168,
+          3172,
+          3176,
+          3180,
+          3184,
+          3188,
+          3192,
+          3196,
+          3200,
+          3204,
+          3208,
+          3212
+        ],
+        "stratum": [
+          3,
+          0
+        ],
+        "window_id": "sha256:401a1d2fc9c79bee817a2fcb3521b6456469dfc7214c05cad1f13089357ec533"
+      },
+      "distance": 2.4873976509406677,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.2495892196893692,
+          "buttons": 0.0,
+          "motion": 0.07925457507371902,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          1216,
+          1218,
+          1220,
+          1222,
+          1224,
+          1226,
+          1228,
+          1230,
+          1232,
+          1234,
+          1236,
+          1238,
+          1240,
+          1242,
+          1244,
+          1246
+        ],
+        "stratum": [
+          3,
+          0
+        ],
+        "window_id": "sha256:b6903d457b9790bcd2eacd4bf672c425e75b7cbd36abe9ab66e819e8a0faace1"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.2564611434936523,
+          "brightness": 0.29080039262771606,
+          "buttons": 0.0,
+          "motion": 0.0855998545885086,
+          "stick": 1.2564611434936523
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          4608,
+          4612,
+          4616,
+          4620,
+          4624,
+          4628,
+          4632,
+          4636,
+          4640,
+          4644,
+          4648,
+          4652,
+          4656,
+          4660,
+          4664,
+          4668
+        ],
+        "stratum": [
+          3,
+          3
+        ],
+        "window_id": "sha256:cae65b2902bfc7847d2ef84c7b069d2a5a90b2b70509782ba63e6d1b20e46a87"
+      },
+      "distance": 0.09451240148921247,
+      "reference": {
+        "descriptor": {
+          "action": 1.207248330116272,
+          "brightness": 0.2663765251636505,
+          "buttons": 0.0,
+          "motion": 0.08347181230783463,
+          "stick": 1.207248330116272
+        },
+        "episode_id": "20260310_043322_12-33am",
+        "episode_index": 156,
+        "frame_ordinals": [
+          4320,
+          4322,
+          4324,
+          4326,
+          4328,
+          4330,
+          4332,
+          4334,
+          4336,
+          4338,
+          4340,
+          4342,
+          4344,
+          4346,
+          4348,
+          4350
+        ],
+        "stratum": [
+          3,
+          3
+        ],
+        "window_id": "sha256:d9c42b67126fe1575e75150003a97d7b2db82054746ed9f807bf4db36529dfb6"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.3395603895187378,
+          "brightness": 0.2782769501209259,
+          "buttons": 0.0,
+          "motion": 0.08026482164859772,
+          "stick": 1.3395603895187378
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          4800,
+          4804,
+          4808,
+          4812,
+          4816,
+          4820,
+          4824,
+          4828,
+          4832,
+          4836,
+          4840,
+          4844,
+          4848,
+          4852,
+          4856,
+          4860
+        ],
+        "stratum": [
+          3,
+          3
+        ],
+        "window_id": "sha256:09d57e1b8e86ce36df8379e99da42d869a164ed0c4c0edbab1eb45d68b97d042"
+      },
+      "distance": 0.4793240140770625,
+      "reference": {
+        "descriptor": {
+          "action": 1.4105483293533325,
+          "brightness": 0.23075388371944427,
+          "buttons": 0.0,
+          "motion": 0.09178796410560608,
+          "stick": 1.4105483293533325
+        },
+        "episode_id": "20260213_205913_3-59pm",
+        "episode_index": 157,
+        "frame_ordinals": [
+          1408,
+          1410,
+          1412,
+          1414,
+          1416,
+          1418,
+          1420,
+          1422,
+          1424,
+          1426,
+          1428,
+          1430,
+          1432,
+          1434,
+          1436,
+          1438
+        ],
+        "stratum": [
+          3,
+          3
+        ],
+        "window_id": "sha256:a00d541aa4e63914d85b88549d179d38594c432f6613474f08cd900314e37d9c"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.09216748364269733,
+          "brightness": 0.509242594242096,
+          "buttons": 0.017045455053448677,
+          "motion": 0.06974025070667267,
+          "stick": 0.07512202858924866
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          7052,
+          7056,
+          7060,
+          7064,
+          7068,
+          7072,
+          7076,
+          7080,
+          7084,
+          7088,
+          7092,
+          7096,
+          7100,
+          7104,
+          7108,
+          7112
+        ],
+        "stratum": [
+          3,
+          0
+        ],
+        "window_id": "sha256:a32930d47a91091218a28b0225caf7c7d04aaa5bd5cc080b8506512979704558"
+      },
+      "distance": 5.42155482382013,
+      "reference": {
+        "descriptor": {
+          "action": 0.12999999523162842,
+          "brightness": 0.30803245306015015,
+          "buttons": 0.0,
+          "motion": 0.07270753383636475,
+          "stick": 0.12999999523162842
+        },
+        "episode_id": "20260310_043322_12-33am",
+        "episode_index": 156,
+        "frame_ordinals": [
+          5376,
+          5378,
+          5380,
+          5382,
+          5384,
+          5386,
+          5388,
+          5390,
+          5392,
+          5394,
+          5396,
+          5398,
+          5400,
+          5402,
+          5404,
+          5406
+        ],
+        "stratum": [
+          3,
+          0
+        ],
+        "window_id": "sha256:296e4e2dd88c1865fcc9e04e4786ed720f8a58b3bb2a757f3fb0f2b47146b882"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.0904866456985474,
+          "brightness": 0.28157714009284973,
+          "buttons": 0.0,
+          "motion": 0.05028385668992996,
+          "stick": 1.0904866456985474
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          3416,
+          3420,
+          3424,
+          3428,
+          3432,
+          3436,
+          3440,
+          3444,
+          3448,
+          3452,
+          3456,
+          3460,
+          3464,
+          3468,
+          3472,
+          3476
+        ],
+        "stratum": [
+          2,
+          2
+        ],
+        "window_id": "sha256:2e7ca13ca7599db95d7d610bb0b8d9a0e1fa0e9270c68a0ee32702ce3ed47e4e"
+      },
+      "distance": 0.284230852981794,
+      "reference": {
+        "descriptor": {
+          "action": 1.0768189877271652,
+          "brightness": 0.23794569075107574,
+          "buttons": 0.04545454680919647,
+          "motion": 0.04532063007354736,
+          "stick": 1.0313644409179688
+        },
+        "episode_id": "20260310_043322_12-33am",
+        "episode_index": 156,
+        "frame_ordinals": [
+          2368,
+          2370,
+          2372,
+          2374,
+          2376,
+          2378,
+          2380,
+          2382,
+          2384,
+          2386,
+          2388,
+          2390,
+          2392,
+          2394,
+          2396,
+          2398
+        ],
+        "stratum": [
+          2,
+          2
+        ],
+        "window_id": "sha256:12980d5415fd9fbcd57630782642edca2d4f9ecd19ed06610e8db26a11277ebd"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.33133187890052795,
+          "buttons": 0.0,
+          "motion": 0.0006515216664411128,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          732,
+          736,
+          740,
+          744,
+          748,
+          752,
+          756,
+          760,
+          764,
+          768,
+          772,
+          776,
+          780,
+          784,
+          788,
+          792
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:f2503bfab5a77e8d49f6a6aa596bc215ccda82375a61864208ecbde406a0765c"
+      },
+      "distance": 0.9593232234927535,
+      "reference": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.2465723156929016,
+          "buttons": 0.0,
+          "motion": 0.0003363499999977648,
+          "stick": 0.0
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          6368,
+          6370,
+          6372,
+          6374,
+          6376,
+          6378,
+          6380,
+          6382,
+          6384,
+          6386,
+          6388,
+          6390,
+          6392,
+          6394,
+          6396,
+          6398
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:38605f0fb6de562bdd08a6dcdf9023fc19d5ba222672280b82bd98d8ba8474e8"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.3314145803451538,
+          "buttons": 0.0,
+          "motion": 0.0008077764068730175,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          12,
+          16,
+          20,
+          24,
+          28,
+          32,
+          36,
+          40,
+          44,
+          48,
+          52,
+          56,
+          60,
+          64,
+          68,
+          72
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:5a13a65e14b5f07ebf788d198a4aeaba8f8615106aea66a71e6e008b174d8654"
+      },
+      "distance": 5.158380224581075,
+      "reference": {
+        "descriptor": {
+          "action": 0.12041594088077545,
+          "brightness": 0.13925720751285553,
+          "buttons": 0.0,
+          "motion": 0.012815234251320362,
+          "stick": 0.12041594088077545
+        },
+        "episode_id": "20260410_225607_6-56pm",
+        "episode_index": 125,
+        "frame_ordinals": [
+          2080,
+          2082,
+          2084,
+          2086,
+          2088,
+          2090,
+          2092,
+          2094,
+          2096,
+          2098,
+          2100,
+          2102,
+          2104,
+          2106,
+          2108,
+          2110
+        ],
+        "stratum": [
+          1,
+          0
+        ],
+        "window_id": "sha256:63b02ebfe0935d92df9cccb891fb5b81c78fb03fa9b94d8138693d63a9ea4207"
+      },
+      "stratum_exact": false
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.3313566744327545,
+          "buttons": 0.0,
+          "motion": 0.0006623836234211922,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          360,
+          364,
+          368,
+          372,
+          376,
+          380,
+          384,
+          388,
+          392,
+          396,
+          400,
+          404,
+          408,
+          412,
+          416,
+          420
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:0c2e29fb84af977dc7589bf1dd1699dd36fd4fa5490d70d2b9979c435b8f99d7"
+      },
+      "distance": 3.1062551720014238,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.18384325504302979,
+          "buttons": 0.0,
+          "motion": 0.011116406880319118,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          384,
+          386,
+          388,
+          390,
+          392,
+          394,
+          396,
+          398,
+          400,
+          402,
+          404,
+          406,
+          408,
+          410,
+          412,
+          414
+        ],
+        "stratum": [
+          1,
+          0
+        ],
+        "window_id": "sha256:31d7c1c2ccdf664a9d57bd0ea4b3ae61d890b8886ea840f8478dd172852637dd"
+      },
+      "stratum_exact": false
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.4403409091755748,
+          "brightness": 0.39443516731262207,
+          "buttons": 0.0028409091755747795,
+          "motion": 0.03421163558959961,
+          "stick": 0.4375
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          1400,
+          1404,
+          1408,
+          1412,
+          1416,
+          1420,
+          1424,
+          1428,
+          1432,
+          1436,
+          1440,
+          1444,
+          1448,
+          1452,
+          1456,
+          1460
+        ],
+        "stratum": [
+          1,
+          2
+        ],
+        "window_id": "sha256:a17c72ed80eed214ef92ef0e2a2769cc3fe2540147ff120e4bec04871d41f9af"
+      },
+      "distance": 5.347113374379179,
+      "reference": {
+        "descriptor": {
+          "action": 0.14021806977689266,
+          "brightness": 0.20918461680412292,
+          "buttons": 0.005681818351149559,
+          "motion": 0.015591761097311974,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          4608,
+          4610,
+          4612,
+          4614,
+          4616,
+          4618,
+          4620,
+          4622,
+          4624,
+          4626,
+          4628,
+          4630,
+          4632,
+          4634,
+          4636,
+          4638
+        ],
+        "stratum": [
+          1,
+          2
+        ],
+        "window_id": "sha256:7241209d14eeae3981ccfaf9ab136bbe9fc0bdfc3f4cf1bff6c4353571e773f3"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.33137378096580505,
+          "buttons": 0.0,
+          "motion": 0.000671160058118403,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          324,
+          328,
+          332,
+          336,
+          340,
+          344,
+          348,
+          352,
+          356,
+          360,
+          364,
+          368,
+          372,
+          376,
+          380,
+          384
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:a48468ea07286dbae6f3d07fa385b98fa5fe145b444a417f78bddf9bd63f7e7b"
+      },
+      "distance": 4.3314364823968985,
+      "reference": {
+        "descriptor": {
+          "action": 0.12041594088077545,
+          "brightness": 0.15387795865535736,
+          "buttons": 0.0,
+          "motion": 0.008246186189353466,
+          "stick": 0.12041594088077545
+        },
+        "episode_id": "20260410_225607_6-56pm",
+        "episode_index": 125,
+        "frame_ordinals": [
+          3424,
+          3426,
+          3428,
+          3430,
+          3432,
+          3434,
+          3436,
+          3438,
+          3440,
+          3442,
+          3444,
+          3446,
+          3448,
+          3450,
+          3452,
+          3454
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:c76af33b7df1067703ae2bcab981a3dc54b9b944fa7e1373c9ad34821bc20ab8"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.3313596546649933,
+          "buttons": 0.0,
+          "motion": 0.0006273140315897763,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          148,
+          152,
+          156,
+          160,
+          164,
+          168,
+          172,
+          176,
+          180,
+          184,
+          188,
+          192,
+          196,
+          200,
+          204,
+          208
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:c697fe3df5a5b3615a64e8aba96ecc889c97c9f8c23302e0f32863de32dd2f28"
+      },
+      "distance": 13.63363257565221,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.013497518375515938,
+          "buttons": 0.0,
+          "motion": 0.008448905311524868,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          4320,
+          4322,
+          4324,
+          4326,
+          4328,
+          4330,
+          4332,
+          4334,
+          4336,
+          4338,
+          4340,
+          4342,
+          4344,
+          4346,
+          4348,
+          4350
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:e167fe2aa8483c7274e7d2456752cdc38e71b1c7934eb273bb4bff7b7e428bff"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.1111349612474442,
+          "brightness": 0.267957866191864,
+          "buttons": 0.04829545319080353,
+          "motion": 0.051591113209724426,
+          "stick": 1.0628395080566406
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          3536,
+          3540,
+          3544,
+          3548,
+          3552,
+          3556,
+          3560,
+          3564,
+          3568,
+          3572,
+          3576,
+          3580,
+          3584,
+          3588,
+          3592,
+          3596
+        ],
+        "stratum": [
+          2,
+          3
+        ],
+        "window_id": "sha256:20671db6e3911a3aaeab1acffd419ed9b20dbbcab61d20272940d597e4281263"
+      },
+      "distance": 4.419723739635399,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.19727715849876404,
+          "buttons": 0.0,
+          "motion": 0.04737119749188423,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          2080,
+          2082,
+          2084,
+          2086,
+          2088,
+          2090,
+          2092,
+          2094,
+          2096,
+          2098,
+          2100,
+          2102,
+          2104,
+          2106,
+          2108,
+          2110
+        ],
+        "stratum": [
+          2,
+          0
+        ],
+        "window_id": "sha256:8509c78c0e18b9654a3bb73417d39d7a6d1f3ec413623a00e8e0a273eda20baa"
+      },
+      "stratum_exact": false
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.087423357181251,
+          "brightness": 0.2683263421058655,
+          "buttons": 0.0028409091755747795,
+          "motion": 0.060116611421108246,
+          "stick": 1.0845824480056763
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          3636,
+          3640,
+          3644,
+          3648,
+          3652,
+          3656,
+          3660,
+          3664,
+          3668,
+          3672,
+          3676,
+          3680,
+          3684,
+          3688,
+          3692,
+          3696
+        ],
+        "stratum": [
+          3,
+          2
+        ],
+        "window_id": "sha256:8b9aa0e3f026a13ad99b1ca027bd277814f40763d9838517083f679ae9efa0d4"
+      },
+      "distance": 4.358044067100657,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.19643011689186096,
+          "buttons": 0.0,
+          "motion": 0.050271645188331604,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          3552,
+          3554,
+          3556,
+          3558,
+          3560,
+          3562,
+          3564,
+          3566,
+          3568,
+          3570,
+          3572,
+          3574,
+          3576,
+          3578,
+          3580,
+          3582
+        ],
+        "stratum": [
+          2,
+          0
+        ],
+        "window_id": "sha256:902cf8601a366abe829ddc09c5366bf6cfeb2ebb261a77ebf75aeb6b3643fc1d"
+      },
+      "stratum_exact": false
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.33138883113861084,
+          "buttons": 0.0,
+          "motion": 0.0006963721825741231,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          452,
+          456,
+          460,
+          464,
+          468,
+          472,
+          476,
+          480,
+          484,
+          488,
+          492,
+          496,
+          500,
+          504,
+          508,
+          512
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:3cde1158571854ad33d7a398aa8eb1ad79a82fa5ac096725763839107e98967d"
+      },
+      "distance": 2.5713939134197954,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.19810082018375397,
+          "buttons": 0.0,
+          "motion": 0.01108879316598177,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          2432,
+          2434,
+          2436,
+          2438,
+          2440,
+          2442,
+          2444,
+          2446,
+          2448,
+          2450,
+          2452,
+          2454,
+          2456,
+          2458,
+          2460,
+          2462
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:80b2b8f192480d6934cda850f1a34d36fd8bb48f735774e209f9a2998035378f"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.102588426321745,
+          "brightness": 0.2671367824077606,
+          "buttons": 0.04261363670229912,
+          "motion": 0.057119082659482956,
+          "stick": 1.0599747896194458
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          3932,
+          3936,
+          3940,
+          3944,
+          3948,
+          3952,
+          3956,
+          3960,
+          3964,
+          3968,
+          3972,
+          3976,
+          3980,
+          3984,
+          3988,
+          3992
+        ],
+        "stratum": [
+          3,
+          2
+        ],
+        "window_id": "sha256:79c99da26ea9f2a8890e11821be1f477c107a585c73c2bc6195995084436c241"
+      },
+      "distance": 4.590635981639786,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.18728648126125336,
+          "buttons": 0.0,
+          "motion": 0.049296654760837555,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          3360,
+          3362,
+          3364,
+          3366,
+          3368,
+          3370,
+          3372,
+          3374,
+          3376,
+          3378,
+          3380,
+          3382,
+          3384,
+          3386,
+          3388,
+          3390
+        ],
+        "stratum": [
+          2,
+          0
+        ],
+        "window_id": "sha256:400aba0895c7b45ef57e200f84af35cb433e788dd5e71d294d91b1c57d5eee06"
+      },
+      "stratum_exact": false
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.128059245646,
+          "brightness": 0.2611585259437561,
+          "buttons": 0.039772726595401764,
+          "motion": 0.05455084145069122,
+          "stick": 1.0882865190505981
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          3924,
+          3928,
+          3932,
+          3936,
+          3940,
+          3944,
+          3948,
+          3952,
+          3956,
+          3960,
+          3964,
+          3968,
+          3972,
+          3976,
+          3980,
+          3984
+        ],
+        "stratum": [
+          2,
+          3
+        ],
+        "window_id": "sha256:a5ad90f587bb310cc6c51b37046938faac53aebef688bdd38a1f5500ed8467f0"
+      },
+      "distance": 0.2548340667452606,
+      "reference": {
+        "descriptor": {
+          "action": 1.1381057500839233,
+          "brightness": 0.22613003849983215,
+          "buttons": 0.0,
+          "motion": 0.04582618549466133,
+          "stick": 1.1381057500839233
+        },
+        "episode_id": "20260310_043322_12-33am",
+        "episode_index": 156,
+        "frame_ordinals": [
+          5056,
+          5058,
+          5060,
+          5062,
+          5064,
+          5066,
+          5068,
+          5070,
+          5072,
+          5074,
+          5076,
+          5078,
+          5080,
+          5082,
+          5084,
+          5086
+        ],
+        "stratum": [
+          2,
+          3
+        ],
+        "window_id": "sha256:13872a412bf55473f74051e3c8d908054b749113033bcf7b3b965efea3a9405f"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.33136069774627686,
+          "buttons": 0.0,
+          "motion": 0.00061082246247679,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          708,
+          712,
+          716,
+          720,
+          724,
+          728,
+          732,
+          736,
+          740,
+          744,
+          748,
+          752,
+          756,
+          760,
+          764,
+          768
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:01d579e0e7eb9764e17684cb2ffaeda54c113770c27e7bdb674452312a2849f7"
+      },
+      "distance": 4.469357999177399,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.1498584896326065,
+          "buttons": 0.0,
+          "motion": 0.0009156655287370086,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          4544,
+          4546,
+          4548,
+          4550,
+          4552,
+          4554,
+          4556,
+          4558,
+          4560,
+          4562,
+          4564,
+          4566,
+          4568,
+          4570,
+          4572,
+          4574
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:34ec4899e59f89fc8d7723ef5518a8ac1a73112850ce484a581df752b8cbec5c"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.3313789665699005,
+          "buttons": 0.0,
+          "motion": 0.0006810963968746364,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          68,
+          72,
+          76,
+          80,
+          84,
+          88,
+          92,
+          96,
+          100,
+          104,
+          108,
+          112,
+          116,
+          120,
+          124,
+          128
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:84f8b6cf6d1b75dd9209e31272467fe63853203e8333f60a2559a43f5c2a86bd"
+      },
+      "distance": 5.058741423700406,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.14954793453216553,
+          "buttons": 0.0,
+          "motion": 0.02263086661696434,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          3136,
+          3138,
+          3140,
+          3142,
+          3144,
+          3146,
+          3148,
+          3150,
+          3152,
+          3154,
+          3156,
+          3158,
+          3160,
+          3162,
+          3164,
+          3166
+        ],
+        "stratum": [
+          1,
+          0
+        ],
+        "window_id": "sha256:d31b0b851dea08ae8fb25e5a21e060bed1d556642a1be943951a3fb09eb1318e"
+      },
+      "stratum_exact": false
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.33136194944381714,
+          "buttons": 0.0,
+          "motion": 0.0006275945343077183,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          156,
+          160,
+          164,
+          168,
+          172,
+          176,
+          180,
+          184,
+          188,
+          192,
+          196,
+          200,
+          204,
+          208,
+          212,
+          216
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:2731cb10ab169a20cb9a44342016a6210b512563f91c2cdd3665223cdfb4984f"
+      },
+      "distance": 14.336084263467198,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.00449755834415555,
+          "buttons": 0.0,
+          "motion": 8.368113776668906e-05,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          3776,
+          3778,
+          3780,
+          3782,
+          3784,
+          3786,
+          3788,
+          3790,
+          3792,
+          3794,
+          3796,
+          3798,
+          3800,
+          3802,
+          3804,
+          3806
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:c25999c394819f6f2a7e8bbfd759c0f9e7938359a8841732105872d002275f3a"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.5430446108803153,
+          "brightness": 0.3305208384990692,
+          "buttons": 0.014204545877873898,
+          "motion": 0.0010110976872965693,
+          "stick": 0.5288400650024414
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          844,
+          848,
+          852,
+          856,
+          860,
+          864,
+          868,
+          872,
+          876,
+          880,
+          884,
+          888,
+          892,
+          896,
+          900,
+          904
+        ],
+        "stratum": [
+          0,
+          2
+        ],
+        "window_id": "sha256:1364000cef18258ec7be9ae48413649ad50d119042bb7e31e57edd95e836bf5e"
+      },
+      "distance": 1.833780267998078,
+      "reference": {
+        "descriptor": {
+          "action": 0.49777713418006897,
+          "brightness": 0.2149587869644165,
+          "buttons": 0.0,
+          "motion": 0.0070008267648518085,
+          "stick": 0.49777713418006897
+        },
+        "episode_id": "20260317_225835_6-58pm",
+        "episode_index": 233,
+        "frame_ordinals": [
+          0,
+          2,
+          4,
+          6,
+          8,
+          10,
+          12,
+          14,
+          16,
+          18,
+          20,
+          22,
+          24,
+          26,
+          28,
+          30
+        ],
+        "stratum": [
+          0,
+          2
+        ],
+        "window_id": "sha256:6677e3a6b55bfb90f1fd5a8c942a0681bc7d35db53b7e77117db017ae7e797c8"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.218163089826703,
+          "brightness": 0.258800208568573,
+          "buttons": 0.017045455053448677,
+          "motion": 0.06954800337553024,
+          "stick": 1.2011176347732544
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          3692,
+          3696,
+          3700,
+          3704,
+          3708,
+          3712,
+          3716,
+          3720,
+          3724,
+          3728,
+          3732,
+          3736,
+          3740,
+          3744,
+          3748,
+          3752
+        ],
+        "stratum": [
+          3,
+          3
+        ],
+        "window_id": "sha256:e815c35d8a6677860800fc20053f44ded061fcd54bbeb07761eeb1b6c9ac3b8b"
+      },
+      "distance": 0.5354884560810408,
+      "reference": {
+        "descriptor": {
+          "action": 1.1989076137542725,
+          "brightness": 0.20009343326091766,
+          "buttons": 0.0,
+          "motion": 0.06167030707001686,
+          "stick": 1.1989076137542725
+        },
+        "episode_id": "20260213_205913_3-59pm",
+        "episode_index": 157,
+        "frame_ordinals": [
+          1376,
+          1378,
+          1380,
+          1382,
+          1384,
+          1386,
+          1388,
+          1390,
+          1392,
+          1394,
+          1396,
+          1398,
+          1400,
+          1402,
+          1404,
+          1406
+        ],
+        "stratum": [
+          3,
+          3
+        ],
+        "window_id": "sha256:ca13cc0ecd84c19058ad9e41d7d72cb255b46f8b8886dacf5e6e20207e9f932d"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.08238560333848,
+          "brightness": 0.2897496819496155,
+          "buttons": 0.03693181648850441,
+          "motion": 0.052924830466508865,
+          "stick": 1.0454537868499756
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          3504,
+          3508,
+          3512,
+          3516,
+          3520,
+          3524,
+          3528,
+          3532,
+          3536,
+          3540,
+          3544,
+          3548,
+          3552,
+          3556,
+          3560,
+          3564
+        ],
+        "stratum": [
+          2,
+          2
+        ],
+        "window_id": "sha256:6be52f46e931c1f685b0d9c063684914ecbe987cc03d2035f46244c76ae51d2d"
+      },
+      "distance": 5.019088831191522,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.18461252748966217,
+          "buttons": 0.0,
+          "motion": 0.04805949330329895,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          672,
+          674,
+          676,
+          678,
+          680,
+          682,
+          684,
+          686,
+          688,
+          690,
+          692,
+          694,
+          696,
+          698,
+          700,
+          702
+        ],
+        "stratum": [
+          2,
+          0
+        ],
+        "window_id": "sha256:0e6c6b2569f73c0a441561563db4d1ecd43bb3ec6ee6c5611840ddca05827e71"
+      },
+      "stratum_exact": false
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.059002161026001,
+          "brightness": 0.34159037470817566,
+          "buttons": 0.03125,
+          "motion": 0.04781963676214218,
+          "stick": 1.027752161026001
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          4100,
+          4104,
+          4108,
+          4112,
+          4116,
+          4120,
+          4124,
+          4128,
+          4132,
+          4136,
+          4140,
+          4144,
+          4148,
+          4152,
+          4156,
+          4160
+        ],
+        "stratum": [
+          2,
+          2
+        ],
+        "window_id": "sha256:ee07b13dc28ff8ddb9b0fa4e2abf1f7ace119eecf3730eaa424c58c458ec86de"
+      },
+      "distance": 2.175280027593,
+      "reference": {
+        "descriptor": {
+          "action": 0.7644313359633088,
+          "brightness": 0.22480008006095886,
+          "buttons": 0.008522727526724339,
+          "motion": 0.044314123690128326,
+          "stick": 0.7559086084365845
+        },
+        "episode_id": "20260310_043322_12-33am",
+        "episode_index": 156,
+        "frame_ordinals": [
+          3488,
+          3490,
+          3492,
+          3494,
+          3496,
+          3498,
+          3500,
+          3502,
+          3504,
+          3506,
+          3508,
+          3510,
+          3512,
+          3514,
+          3516,
+          3518
+        ],
+        "stratum": [
+          2,
+          2
+        ],
+        "window_id": "sha256:94614dd56ac9d170a0752d79a5c5e005f86b148ec4baedbf7a57b19ac03e3b1f"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.331373006105423,
+          "buttons": 0.0,
+          "motion": 0.0006593430298380554,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          572,
+          576,
+          580,
+          584,
+          588,
+          592,
+          596,
+          600,
+          604,
+          608,
+          612,
+          616,
+          620,
+          624,
+          628,
+          632
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:8f1d4821895c2843a5a24f2b9a596971c7edce7b975621808768e648e598dc1b"
+      },
+      "distance": 0.9628647346396959,
+      "reference": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.2464519441127777,
+          "buttons": 0.0,
+          "motion": 0.0006881430745124817,
+          "stick": 0.0
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          6560,
+          6562,
+          6564,
+          6566,
+          6568,
+          6570,
+          6572,
+          6574,
+          6576,
+          6578,
+          6580,
+          6582,
+          6584,
+          6586,
+          6588,
+          6590
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:afada74b3c54634b7dc42418246c2fd49ed74de884d060433c8d7036359db16e"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.0920956023037434,
+          "brightness": 0.31824877858161926,
+          "buttons": 0.05113636329770088,
+          "motion": 0.03307243809103966,
+          "stick": 1.0409592390060425
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          2340,
+          2344,
+          2348,
+          2352,
+          2356,
+          2360,
+          2364,
+          2368,
+          2372,
+          2376,
+          2380,
+          2384,
+          2388,
+          2392,
+          2396,
+          2400
+        ],
+        "stratum": [
+          1,
+          2
+        ],
+        "window_id": "sha256:e39738518627ae58e7dad8cced9f8edc8a491656ac94d5a7932feabff757613a"
+      },
+      "distance": 1.0673924385415536,
+      "reference": {
+        "descriptor": {
+          "action": 1.0983682870864868,
+          "brightness": 0.23508472740650177,
+          "buttons": 0.0,
+          "motion": 0.04406338930130005,
+          "stick": 1.0983682870864868
+        },
+        "episode_id": "20260310_043322_12-33am",
+        "episode_index": 156,
+        "frame_ordinals": [
+          4256,
+          4258,
+          4260,
+          4262,
+          4264,
+          4266,
+          4268,
+          4270,
+          4272,
+          4274,
+          4276,
+          4278,
+          4280,
+          4282,
+          4284,
+          4286
+        ],
+        "stratum": [
+          1,
+          2
+        ],
+        "window_id": "sha256:f7972f4727498a96178757406e27ace75f7ce2a3cf294cafbd973bb8af04a141"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.1087912321090698,
+          "brightness": 0.35941651463508606,
+          "buttons": 0.0,
+          "motion": 0.03402005136013031,
+          "stick": 1.1087912321090698
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          1588,
+          1592,
+          1596,
+          1600,
+          1604,
+          1608,
+          1612,
+          1616,
+          1620,
+          1624,
+          1628,
+          1632,
+          1636,
+          1640,
+          1644,
+          1648
+        ],
+        "stratum": [
+          1,
+          3
+        ],
+        "window_id": "sha256:69a4b262cd930db6cf9a9b1fc7e792c7fb28c0e670622ece3ab42fceca1ba1a2"
+      },
+      "distance": 6.3978871205916175,
+      "reference": {
+        "descriptor": {
+          "action": 1.3942158222198486,
+          "brightness": 0.1473788619041443,
+          "buttons": 0.0,
+          "motion": 0.04202404245734215,
+          "stick": 1.3942158222198486
+        },
+        "episode_id": "20260321_235422_7-54pm",
+        "episode_index": 124,
+        "frame_ordinals": [
+          352,
+          354,
+          356,
+          358,
+          360,
+          362,
+          364,
+          366,
+          368,
+          370,
+          372,
+          374,
+          376,
+          378,
+          380,
+          382
+        ],
+        "stratum": [
+          1,
+          3
+        ],
+        "window_id": "sha256:dde9867bdf3c696969760ba5d783071aa8a3bba9cc718c54c0c286df25888842"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.2277390956878662,
+          "brightness": 0.2925371825695038,
+          "buttons": 0.0,
+          "motion": 0.07905126363039017,
+          "stick": 1.2277390956878662
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          4620,
+          4624,
+          4628,
+          4632,
+          4636,
+          4640,
+          4644,
+          4648,
+          4652,
+          4656,
+          4660,
+          4664,
+          4668,
+          4672,
+          4676,
+          4680
+        ],
+        "stratum": [
+          3,
+          3
+        ],
+        "window_id": "sha256:e49ecd74dbbe00f3fd0cdf169fb05f18bd14c2e3f0f031a2bc14a242bc37a090"
+      },
+      "distance": 0.06972537271655346,
+      "reference": {
+        "descriptor": {
+          "action": 1.2179063446819782,
+          "brightness": 0.28920289874076843,
+          "buttons": 0.019886363297700882,
+          "motion": 0.08660154044628143,
+          "stick": 1.1980199813842773
+        },
+        "episode_id": "wandering-arch",
+        "episode_index": 185,
+        "frame_ordinals": [
+          640,
+          642,
+          644,
+          646,
+          648,
+          650,
+          652,
+          654,
+          656,
+          658,
+          660,
+          662,
+          664,
+          666,
+          668,
+          670
+        ],
+        "stratum": [
+          3,
+          3
+        ],
+        "window_id": "sha256:43413e90678abe0b320080ed6892fa05f602071fad1c2b54ff7a5a4b8e88e435"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.127893015742302,
+          "brightness": 0.3929988741874695,
+          "buttons": 0.04545454680919647,
+          "motion": 0.04003895819187164,
+          "stick": 1.0824384689331055
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          8004,
+          8008,
+          8012,
+          8016,
+          8020,
+          8024,
+          8028,
+          8032,
+          8036,
+          8040,
+          8044,
+          8048,
+          8052,
+          8056,
+          8060,
+          8064
+        ],
+        "stratum": [
+          1,
+          3
+        ],
+        "window_id": "sha256:e3703cb2be82eca49b7c06766a860fe545a4bcd91705ba89e4a7eee95a32b259"
+      },
+      "distance": 5.599855789919693,
+      "reference": {
+        "descriptor": {
+          "action": 1.106817364692688,
+          "brightness": 0.19275595247745514,
+          "buttons": 0.0,
+          "motion": 0.025707976892590523,
+          "stick": 1.106817364692688
+        },
+        "episode_id": "20260310_043322_12-33am",
+        "episode_index": 156,
+        "frame_ordinals": [
+          4864,
+          4866,
+          4868,
+          4870,
+          4872,
+          4874,
+          4876,
+          4878,
+          4880,
+          4882,
+          4884,
+          4886,
+          4888,
+          4890,
+          4892,
+          4894
+        ],
+        "stratum": [
+          1,
+          3
+        ],
+        "window_id": "sha256:24176bd8e8a0886b2ddfa152a352277be771793763f5ac50bc28c85e52ff72e9"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.6493750596418977,
+          "brightness": 0.4363952577114105,
+          "buttons": 0.008522727526724339,
+          "motion": 0.10275206714868546,
+          "stick": 0.6408523321151733
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          988,
+          992,
+          996,
+          1000,
+          1004,
+          1008,
+          1012,
+          1016,
+          1020,
+          1024,
+          1028,
+          1032,
+          1036,
+          1040,
+          1044,
+          1048
+        ],
+        "stratum": [
+          3,
+          2
+        ],
+        "window_id": "sha256:ce981ead75d3221ea983370014bd1f0fe2b9487af9afb8dfeed4aed89957a8d4"
+      },
+      "distance": 2.2902910903342013,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.3747894763946533,
+          "buttons": 0.0,
+          "motion": 0.1277940422296524,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          1792,
+          1794,
+          1796,
+          1798,
+          1800,
+          1802,
+          1804,
+          1806,
+          1808,
+          1810,
+          1812,
+          1814,
+          1816,
+          1818,
+          1820,
+          1822
+        ],
+        "stratum": [
+          3,
+          0
+        ],
+        "window_id": "sha256:9c61fd2d73f7a08a3f5f58775f438f327ef303daa620fa2f75314c9ef2659d05"
+      },
+      "stratum_exact": false
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.28340277075767517,
+          "brightness": 0.4412410259246826,
+          "buttons": 0.04829545319080353,
+          "motion": 0.03522162139415741,
+          "stick": 0.23510731756687164
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          7168,
+          7172,
+          7176,
+          7180,
+          7184,
+          7188,
+          7192,
+          7196,
+          7200,
+          7204,
+          7208,
+          7212,
+          7216,
+          7220,
+          7224,
+          7228
+        ],
+        "stratum": [
+          1,
+          2
+        ],
+        "window_id": "sha256:b238697b088a94b8f9d6cd7f3f2c509b71200bf1f90219ac66969c64db51a0c0"
+      },
+      "distance": 0.23784568966984987,
+      "reference": {
+        "descriptor": {
+          "action": 0.30014586448669434,
+          "brightness": 0.40175431966781616,
+          "buttons": 0.0625,
+          "motion": 0.030322642996907234,
+          "stick": 0.23764586448669434
+        },
+        "episode_id": "wandering-arch",
+        "episode_index": 185,
+        "frame_ordinals": [
+          960,
+          962,
+          964,
+          966,
+          968,
+          970,
+          972,
+          974,
+          976,
+          978,
+          980,
+          982,
+          984,
+          986,
+          988,
+          990
+        ],
+        "stratum": [
+          1,
+          2
+        ],
+        "window_id": "sha256:a7904faf9513de4da882ac0a228ecd6aecbf527045531b39e54989941263ca66"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.073286771774292,
+          "brightness": 0.3431144654750824,
+          "buttons": 0.0,
+          "motion": 0.04489080607891083,
+          "stick": 1.073286771774292
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          2132,
+          2136,
+          2140,
+          2144,
+          2148,
+          2152,
+          2156,
+          2160,
+          2164,
+          2168,
+          2172,
+          2176,
+          2180,
+          2184,
+          2188,
+          2192
+        ],
+        "stratum": [
+          2,
+          2
+        ],
+        "window_id": "sha256:5109e92f2b3f4385ee622a417fb62bc2ee9f500b233fffb992ba249c24071210"
+      },
+      "distance": 1.5708507967122163,
+      "reference": {
+        "descriptor": {
+          "action": 1.078434944152832,
+          "brightness": 0.23513619601726532,
+          "buttons": 0.0,
+          "motion": 0.04832512512803078,
+          "stick": 1.078434944152832
+        },
+        "episode_id": "20260310_043322_12-33am",
+        "episode_index": 156,
+        "frame_ordinals": [
+          4416,
+          4418,
+          4420,
+          4422,
+          4424,
+          4426,
+          4428,
+          4430,
+          4432,
+          4434,
+          4436,
+          4438,
+          4440,
+          4442,
+          4444,
+          4446
+        ],
+        "stratum": [
+          2,
+          2
+        ],
+        "window_id": "sha256:5753626a3c1970d3a427d0f1bf83c778d8e1edad9e3b9cb538530dda1d594a99"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.120581690222025,
+          "brightness": 0.2765939235687256,
+          "buttons": 0.03693181648850441,
+          "motion": 0.0579063706099987,
+          "stick": 1.0836498737335205
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          3948,
+          3952,
+          3956,
+          3960,
+          3964,
+          3968,
+          3972,
+          3976,
+          3980,
+          3984,
+          3988,
+          3992,
+          3996,
+          4000,
+          4004,
+          4008
+        ],
+        "stratum": [
+          3,
+          3
+        ],
+        "window_id": "sha256:fc0191d72adc22ea2f50cdeada2653941c820d8b44c4768d308a2b6169567237"
+      },
+      "distance": 0.0019936916989583002,
+      "reference": {
+        "descriptor": {
+          "action": 1.1298154052346945,
+          "brightness": 0.2762637138366699,
+          "buttons": 0.005681818351149559,
+          "motion": 0.05908208712935448,
+          "stick": 1.124133586883545
+        },
+        "episode_id": "wandering-arch",
+        "episode_index": 185,
+        "frame_ordinals": [
+          96,
+          98,
+          100,
+          102,
+          104,
+          106,
+          108,
+          110,
+          112,
+          114,
+          116,
+          118,
+          120,
+          122,
+          124,
+          126
+        ],
+        "stratum": [
+          3,
+          3
+        ],
+        "window_id": "sha256:3549a9fc02f397f9717a8afbcbc529eb401c14e0d474c245a6a0758457558cac"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.1182605028152466,
+          "brightness": 0.28419092297554016,
+          "buttons": 0.0,
+          "motion": 0.06796527653932571,
+          "stick": 1.1182605028152466
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          4216,
+          4220,
+          4224,
+          4228,
+          4232,
+          4236,
+          4240,
+          4244,
+          4248,
+          4252,
+          4256,
+          4260,
+          4264,
+          4268,
+          4272,
+          4276
+        ],
+        "stratum": [
+          3,
+          3
+        ],
+        "window_id": "sha256:df901474312d17813b0e6755678c06693f46893be2a635db678e49fb563c06f1"
+      },
+      "distance": 0.09881328100028354,
+      "reference": {
+        "descriptor": {
+          "action": 1.1727700233459473,
+          "brightness": 0.27726858854293823,
+          "buttons": 0.0,
+          "motion": 0.05972718447446823,
+          "stick": 1.1727700233459473
+        },
+        "episode_id": "20260310_043322_12-33am",
+        "episode_index": 156,
+        "frame_ordinals": [
+          2688,
+          2690,
+          2692,
+          2694,
+          2696,
+          2698,
+          2700,
+          2702,
+          2704,
+          2706,
+          2708,
+          2710,
+          2712,
+          2714,
+          2716,
+          2718
+        ],
+        "stratum": [
+          3,
+          3
+        ],
+        "window_id": "sha256:66299001bf6886119efa37ec95ebc2b793fa9f0aaf2827f6ae498bd99b2c86a8"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.161771472543478,
+          "brightness": 0.3916356563568115,
+          "buttons": 0.05681818351149559,
+          "motion": 0.043768417090177536,
+          "stick": 1.1049532890319824
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          7944,
+          7948,
+          7952,
+          7956,
+          7960,
+          7964,
+          7968,
+          7972,
+          7976,
+          7980,
+          7984,
+          7988,
+          7992,
+          7996,
+          8000,
+          8004
+        ],
+        "stratum": [
+          1,
+          3
+        ],
+        "window_id": "sha256:64b5eb70fda0d0b40b579fafe6bbd227f3e504729bad060e77874c1cb588013a"
+      },
+      "distance": 7.447716475722438,
+      "reference": {
+        "descriptor": {
+          "action": 1.2008219957351685,
+          "brightness": 0.1572503000497818,
+          "buttons": 0.0,
+          "motion": 0.03429495170712471,
+          "stick": 1.2008219957351685
+        },
+        "episode_id": "20260321_235422_7-54pm",
+        "episode_index": 124,
+        "frame_ordinals": [
+          192,
+          194,
+          196,
+          198,
+          200,
+          202,
+          204,
+          206,
+          208,
+          210,
+          212,
+          214,
+          216,
+          218,
+          220,
+          222
+        ],
+        "stratum": [
+          1,
+          3
+        ],
+        "window_id": "sha256:018678ea7e48a5035ad38e30d94cbeb068db6b50d17ce62afe9fd8995f2e17a9"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.33138009905815125,
+          "buttons": 0.0,
+          "motion": 0.0006774126668460667,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          272,
+          276,
+          280,
+          284,
+          288,
+          292,
+          296,
+          300,
+          304,
+          308,
+          312,
+          316,
+          320,
+          324,
+          328,
+          332
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:7fa001ad04d011c10ff828346b2d8b9dbcbff9532f43089f00280e5764c7379a"
+      },
+      "distance": 14.342010929570142,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.0044485824182629585,
+          "buttons": 0.0,
+          "motion": 8.392776362597942e-05,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          3968,
+          3970,
+          3972,
+          3974,
+          3976,
+          3978,
+          3980,
+          3982,
+          3984,
+          3986,
+          3988,
+          3990,
+          3992,
+          3994,
+          3996,
+          3998
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:86af12704ef07eb1a9a9b559da2ac957d43ad34de149d45207c3428bb0a193f4"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.3314094841480255,
+          "buttons": 0.0,
+          "motion": 0.0007058148621581495,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          656,
+          660,
+          664,
+          668,
+          672,
+          676,
+          680,
+          684,
+          688,
+          692,
+          696,
+          700,
+          704,
+          708,
+          712,
+          716
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:6f69400bfea15f35dfa181038bce50dbb8ccc9b720ab9e6e57c1f74b1e33aba8"
+      },
+      "distance": 4.468843970762819,
+      "reference": {
+        "descriptor": {
+          "action": 0.12041594088077545,
+          "brightness": 0.19603216648101807,
+          "buttons": 0.0,
+          "motion": 0.04133573919534683,
+          "stick": 0.12041594088077545
+        },
+        "episode_id": "20260410_225607_6-56pm",
+        "episode_index": 125,
+        "frame_ordinals": [
+          544,
+          546,
+          548,
+          550,
+          552,
+          554,
+          556,
+          558,
+          560,
+          562,
+          564,
+          566,
+          568,
+          570,
+          572,
+          574
+        ],
+        "stratum": [
+          1,
+          0
+        ],
+        "window_id": "sha256:b776e8d6dfc320f0940125a2ace644a068e60bdd9e010c5dc12ca364bfebef6d"
+      },
+      "stratum_exact": false
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.0942056942731142,
+          "brightness": 0.34547823667526245,
+          "buttons": 0.017045455053448677,
+          "motion": 0.04906477779150009,
+          "stick": 1.0771602392196655
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          2792,
+          2796,
+          2800,
+          2804,
+          2808,
+          2812,
+          2816,
+          2820,
+          2824,
+          2828,
+          2832,
+          2836,
+          2840,
+          2844,
+          2848,
+          2852
+        ],
+        "stratum": [
+          2,
+          2
+        ],
+        "window_id": "sha256:a7835216f72f431ce6aa2e08bd00d390b6fd0bb920ca6d11fa01edeb7b8bb3ec"
+      },
+      "distance": 3.1113577189414534,
+      "reference": {
+        "descriptor": {
+          "action": 1.0411797985434532,
+          "brightness": 0.19309848546981812,
+          "buttons": 0.053977273404598236,
+          "motion": 0.04869213327765465,
+          "stick": 0.987202525138855
+        },
+        "episode_id": "20260213_205913_3-59pm",
+        "episode_index": 157,
+        "frame_ordinals": [
+          960,
+          962,
+          964,
+          966,
+          968,
+          970,
+          972,
+          974,
+          976,
+          978,
+          980,
+          982,
+          984,
+          986,
+          988,
+          990
+        ],
+        "stratum": [
+          2,
+          2
+        ],
+        "window_id": "sha256:0993f6f85ec51f4063a2381b7330357be676ed7212cddba4658aa68f6d6cdd53"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.0695308446884155,
+          "brightness": 0.29022616147994995,
+          "buttons": 0.0,
+          "motion": 0.06035532057285309,
+          "stick": 1.0695308446884155
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          3404,
+          3408,
+          3412,
+          3416,
+          3420,
+          3424,
+          3428,
+          3432,
+          3436,
+          3440,
+          3444,
+          3448,
+          3452,
+          3456,
+          3460,
+          3464
+        ],
+        "stratum": [
+          3,
+          2
+        ],
+        "window_id": "sha256:8c70c022013fd3a9d4dd406f5e26f3f2e8c25bcbe67095eae766d3da015c2e95"
+      },
+      "distance": 0.2748083625978293,
+      "reference": {
+        "descriptor": {
+          "action": 1.0823498107492924,
+          "brightness": 0.245681494474411,
+          "buttons": 0.034090910106897354,
+          "motion": 0.057569470256567,
+          "stick": 1.048258900642395
+        },
+        "episode_id": "20260310_043322_12-33am",
+        "episode_index": 156,
+        "frame_ordinals": [
+          3584,
+          3586,
+          3588,
+          3590,
+          3592,
+          3594,
+          3596,
+          3598,
+          3600,
+          3602,
+          3604,
+          3606,
+          3608,
+          3610,
+          3612,
+          3614
+        ],
+        "stratum": [
+          3,
+          2
+        ],
+        "window_id": "sha256:200fa7212b55afcebd95f6b71a605ac13e2d64fdddf3912d988487793ca5cfcf"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.33138325810432434,
+          "buttons": 0.0,
+          "motion": 0.0006179827032610774,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          108,
+          112,
+          116,
+          120,
+          124,
+          128,
+          132,
+          136,
+          140,
+          144,
+          148,
+          152,
+          156,
+          160,
+          164,
+          168
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:5ea23fffe7581980e91fa88c3d00f0a7ae013b7b3de8c7d57f1f6e6148cb7335"
+      },
+      "distance": 1.0547644586548894,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.24554742872714996,
+          "buttons": 0.0,
+          "motion": 0.00017921527614817023,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          5248,
+          5250,
+          5252,
+          5254,
+          5256,
+          5258,
+          5260,
+          5262,
+          5264,
+          5266,
+          5268,
+          5270,
+          5272,
+          5274,
+          5276,
+          5278
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:d74943d6bb1157c91052c13cb519b5fa50d0ec4c6a8fdc59fb55fb3fd835fd9c"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.05432103946805,
+          "brightness": 0.2933381497859955,
+          "buttons": 0.019886363297700882,
+          "motion": 0.05930951610207558,
+          "stick": 1.0344346761703491
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          3596,
+          3600,
+          3604,
+          3608,
+          3612,
+          3616,
+          3620,
+          3624,
+          3628,
+          3632,
+          3636,
+          3640,
+          3644,
+          3648,
+          3652,
+          3656
+        ],
+        "stratum": [
+          3,
+          2
+        ],
+        "window_id": "sha256:90ca5cf76410110d26f07dd42a2be9325e14072c2726ea27cecb02c2304c0a22"
+      },
+      "distance": 5.233028982680352,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.17905639111995697,
+          "buttons": 0.0,
+          "motion": 0.04703725501894951,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          768,
+          770,
+          772,
+          774,
+          776,
+          778,
+          780,
+          782,
+          784,
+          786,
+          788,
+          790,
+          792,
+          794,
+          796,
+          798
+        ],
+        "stratum": [
+          2,
+          0
+        ],
+        "window_id": "sha256:540d9b6815c13f8d7722308240dd381443ec4df1a31727dac0b12613daf5ca94"
+      },
+      "stratum_exact": false
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.33138778805732727,
+          "buttons": 0.0,
+          "motion": 0.0006718888180330396,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          420,
+          424,
+          428,
+          432,
+          436,
+          440,
+          444,
+          448,
+          452,
+          456,
+          460,
+          464,
+          468,
+          472,
+          476,
+          480
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:a169f123ead1ad73c25ae1d7d5238f32229b6d2c60824e08a87dd91eeb95d343"
+      },
+      "distance": 3.0828358203717587,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.19861777126789093,
+          "buttons": 0.0,
+          "motion": 0.02418966218829155,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          0,
+          2,
+          4,
+          6,
+          8,
+          10,
+          12,
+          14,
+          16,
+          18,
+          20,
+          22,
+          24,
+          26,
+          28,
+          30
+        ],
+        "stratum": [
+          1,
+          0
+        ],
+        "window_id": "sha256:fe6921e6e8b0514d1684477ef62e95e763a453463c5c88e56e117af44af046c7"
+      },
+      "stratum_exact": false
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.1039306903257966,
+          "brightness": 0.354021817445755,
+          "buttons": 0.008522727526724339,
+          "motion": 0.04884861782193184,
+          "stick": 1.0954079627990723
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          2872,
+          2876,
+          2880,
+          2884,
+          2888,
+          2892,
+          2896,
+          2900,
+          2904,
+          2908,
+          2912,
+          2916,
+          2920,
+          2924,
+          2928,
+          2932
+        ],
+        "stratum": [
+          2,
+          2
+        ],
+        "window_id": "sha256:823cf4907371a66a4223a1043b2b42ae8704c2f2cc3648325603a01e0205a34a"
+      },
+      "distance": 1.863766610539762,
+      "reference": {
+        "descriptor": {
+          "action": 1.0904556959867477,
+          "brightness": 0.23628070950508118,
+          "buttons": 0.04545454680919647,
+          "motion": 0.04565714672207832,
+          "stick": 1.0450011491775513
+        },
+        "episode_id": "20260310_043322_12-33am",
+        "episode_index": 156,
+        "frame_ordinals": [
+          2336,
+          2338,
+          2340,
+          2342,
+          2344,
+          2346,
+          2348,
+          2350,
+          2352,
+          2354,
+          2356,
+          2358,
+          2360,
+          2362,
+          2364,
+          2366
+        ],
+        "stratum": [
+          2,
+          2
+        ],
+        "window_id": "sha256:2f5001bfb6e749340c3a5de68635264c6c9a074beea8dfb9f242b51d9a14e447"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.08872652053833,
+          "brightness": 0.2943618893623352,
+          "buttons": 0.0,
+          "motion": 0.06453969329595566,
+          "stick": 1.08872652053833
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          3400,
+          3404,
+          3408,
+          3412,
+          3416,
+          3420,
+          3424,
+          3428,
+          3432,
+          3436,
+          3440,
+          3444,
+          3448,
+          3452,
+          3456,
+          3460
+        ],
+        "stratum": [
+          3,
+          2
+        ],
+        "window_id": "sha256:4158550165498087fa2cd5db7a5ee852d76bfd702619349f3b3fd94cac7ca669"
+      },
+      "distance": 0.8942217474678323,
+      "reference": {
+        "descriptor": {
+          "action": 1.098373781889677,
+          "brightness": 0.21493466198444366,
+          "buttons": 0.04261363670229912,
+          "motion": 0.057959411293268204,
+          "stick": 1.055760145187378
+        },
+        "episode_id": "20260310_043322_12-33am",
+        "episode_index": 156,
+        "frame_ordinals": [
+          384,
+          386,
+          388,
+          390,
+          392,
+          394,
+          396,
+          398,
+          400,
+          402,
+          404,
+          406,
+          408,
+          410,
+          412,
+          414
+        ],
+        "stratum": [
+          3,
+          2
+        ],
+        "window_id": "sha256:fef85702b9d941c1a0ab88a99b35ade9ba10bbb2b40dd9c8e5a2dce44bb74c1e"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.2001368999481201,
+          "brightness": 0.3078254163265228,
+          "buttons": 0.0,
+          "motion": 0.06774972379207611,
+          "stick": 1.2001368999481201
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          4820,
+          4824,
+          4828,
+          4832,
+          4836,
+          4840,
+          4844,
+          4848,
+          4852,
+          4856,
+          4860,
+          4864,
+          4868,
+          4872,
+          4876,
+          4880
+        ],
+        "stratum": [
+          3,
+          3
+        ],
+        "window_id": "sha256:b26a1259d8a6057fd640c2c68e75de385d9809c0d53dd7e50fa000f61af652cd"
+      },
+      "distance": 0.8634161931080425,
+      "reference": {
+        "descriptor": {
+          "action": 1.1278198845684528,
+          "brightness": 0.23205333948135376,
+          "buttons": 0.019886363297700882,
+          "motion": 0.05973943695425987,
+          "stick": 1.107933521270752
+        },
+        "episode_id": "20260310_043322_12-33am",
+        "episode_index": 156,
+        "frame_ordinals": [
+          2112,
+          2114,
+          2116,
+          2118,
+          2120,
+          2122,
+          2124,
+          2126,
+          2128,
+          2130,
+          2132,
+          2134,
+          2136,
+          2138,
+          2140,
+          2142
+        ],
+        "stratum": [
+          3,
+          3
+        ],
+        "window_id": "sha256:9652b98d026895f27d9604dbfab8f585a1078faa23ac59ec30471eb9b7023c9d"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.10818587616086,
+          "brightness": 0.3931206464767456,
+          "buttons": 0.05113636329770088,
+          "motion": 0.04053094610571861,
+          "stick": 1.0570495128631592
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          4384,
+          4388,
+          4392,
+          4396,
+          4400,
+          4404,
+          4408,
+          4412,
+          4416,
+          4420,
+          4424,
+          4428,
+          4432,
+          4436,
+          4440,
+          4444
+        ],
+        "stratum": [
+          1,
+          3
+        ],
+        "window_id": "sha256:f675cd454dfadcd9dca830653fc512d1c9a199d694cb154a83b75f540ac11439"
+      },
+      "distance": 1.845576486114261,
+      "reference": {
+        "descriptor": {
+          "action": 1.1759950667619705,
+          "brightness": 0.27867400646209717,
+          "buttons": 0.04829545319080353,
+          "motion": 0.03239564225077629,
+          "stick": 1.127699613571167
+        },
+        "episode_id": "wandering-arch",
+        "episode_index": 185,
+        "frame_ordinals": [
+          64,
+          66,
+          68,
+          70,
+          72,
+          74,
+          76,
+          78,
+          80,
+          82,
+          84,
+          86,
+          88,
+          90,
+          92,
+          94
+        ],
+        "stratum": [
+          1,
+          3
+        ],
+        "window_id": "sha256:3abd03ed065c1936ab982766fab428b7521d1b9fd475e90055e51d54d20759c0"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.6301647871732712,
+          "brightness": 0.4140494763851166,
+          "buttons": 0.04545454680919647,
+          "motion": 0.03524864464998245,
+          "stick": 0.5847102403640747
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          6732,
+          6736,
+          6740,
+          6744,
+          6748,
+          6752,
+          6756,
+          6760,
+          6764,
+          6768,
+          6772,
+          6776,
+          6780,
+          6784,
+          6788,
+          6792
+        ],
+        "stratum": [
+          1,
+          2
+        ],
+        "window_id": "sha256:81d8742a2da1cbad9b74141f7e027a49c914d7c2543f59011f13f260fab2cc96"
+      },
+      "distance": 0.03055171992489634,
+      "reference": {
+        "descriptor": {
+          "action": 0.6349065685644746,
+          "brightness": 0.39958032965660095,
+          "buttons": 0.008522727526724339,
+          "motion": 0.036701079457998276,
+          "stick": 0.6263838410377502
+        },
+        "episode_id": "wandering-arch",
+        "episode_index": 185,
+        "frame_ordinals": [
+          832,
+          834,
+          836,
+          838,
+          840,
+          842,
+          844,
+          846,
+          848,
+          850,
+          852,
+          854,
+          856,
+          858,
+          860,
+          862
+        ],
+        "stratum": [
+          1,
+          2
+        ],
+        "window_id": "sha256:f5c2dc42e05ebdd2c6257bc8a53a88506c1c38c33aeb5f6f70f9f018bd6e4924"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.3314121961593628,
+          "buttons": 0.0,
+          "motion": 0.0006754170171916485,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          660,
+          664,
+          668,
+          672,
+          676,
+          680,
+          684,
+          688,
+          692,
+          696,
+          700,
+          704,
+          708,
+          712,
+          716,
+          720
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:c34b61c5be8910f02ed7e90f647b154d1eb866709bddb0e6387fcede64a1b4d4"
+      },
+      "distance": 3.063772478971438,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.19885684549808502,
+          "buttons": 0.0,
+          "motion": 0.023987645283341408,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          2464,
+          2466,
+          2468,
+          2470,
+          2472,
+          2474,
+          2476,
+          2478,
+          2480,
+          2482,
+          2484,
+          2486,
+          2488,
+          2490,
+          2492,
+          2494
+        ],
+        "stratum": [
+          1,
+          0
+        ],
+        "window_id": "sha256:cf2211257fa5582ccc36ac9966ff30e6866ba703a0754a9ecc1278d8b5b8c72d"
+      },
+      "stratum_exact": false
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.177878975868225,
+          "brightness": 0.28037095069885254,
+          "buttons": 0.0,
+          "motion": 0.05152546614408493,
+          "stick": 1.177878975868225
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          3428,
+          3432,
+          3436,
+          3440,
+          3444,
+          3448,
+          3452,
+          3456,
+          3460,
+          3464,
+          3468,
+          3472,
+          3476,
+          3480,
+          3484,
+          3488
+        ],
+        "stratum": [
+          2,
+          3
+        ],
+        "window_id": "sha256:49cfa4837fdee722ba45c6b1cdcf74eafaf6cd3e0d1434ff704f16c2ceb58a97"
+      },
+      "distance": 0.8166571724412973,
+      "reference": {
+        "descriptor": {
+          "action": 1.1282655112445354,
+          "brightness": 0.20364926755428314,
+          "buttons": 0.011363636702299118,
+          "motion": 0.04731328412890434,
+          "stick": 1.1169018745422363
+        },
+        "episode_id": "20260310_043322_12-33am",
+        "episode_index": 156,
+        "frame_ordinals": [
+          5280,
+          5282,
+          5284,
+          5286,
+          5288,
+          5290,
+          5292,
+          5294,
+          5296,
+          5298,
+          5300,
+          5302,
+          5304,
+          5306,
+          5308,
+          5310
+        ],
+        "stratum": [
+          2,
+          3
+        ],
+        "window_id": "sha256:da97ec74df6c4ef5f6acc3c3f5f229a984c68880f46c25a9c4f78ff30c263bdc"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.33138832449913025,
+          "buttons": 0.0,
+          "motion": 0.0006079398444853723,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          496,
+          500,
+          504,
+          508,
+          512,
+          516,
+          520,
+          524,
+          528,
+          532,
+          536,
+          540,
+          544,
+          548,
+          552,
+          556
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:a4d89c680bb702d6ba88320df4c60c48bc8eca1a3487135f499945c16298e5ff"
+      },
+      "distance": 0.6625185486754076,
+      "reference": {
+        "descriptor": {
+          "action": 0.12041594088077545,
+          "brightness": 0.2640414834022522,
+          "buttons": 0.0,
+          "motion": 0.0010297877015545964,
+          "stick": 0.12041594088077545
+        },
+        "episode_id": "20260410_225607_6-56pm",
+        "episode_index": 125,
+        "frame_ordinals": [
+          1760,
+          1762,
+          1764,
+          1766,
+          1768,
+          1770,
+          1772,
+          1774,
+          1776,
+          1778,
+          1780,
+          1782,
+          1784,
+          1786,
+          1788,
+          1790
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:1e80f4e3289920923b1616a6a79b82393ae3189fda16d0e626eb1a8b0594d7c8"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.3313906490802765,
+          "buttons": 0.0,
+          "motion": 0.0006066313944756985,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          492,
+          496,
+          500,
+          504,
+          508,
+          512,
+          516,
+          520,
+          524,
+          528,
+          532,
+          536,
+          540,
+          544,
+          548,
+          552
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:42f9fd234150ad77d642212c6f7bf37562e63dd4d5dee3ae1702d20026ab2e4e"
+      },
+      "distance": 14.343949602870229,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.004436030518263578,
+          "buttons": 0.0,
+          "motion": 7.136315252864733e-05,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          3744,
+          3746,
+          3748,
+          3750,
+          3752,
+          3754,
+          3756,
+          3758,
+          3760,
+          3762,
+          3764,
+          3766,
+          3768,
+          3770,
+          3772,
+          3774
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:01e9ceccdc949dedf6e696b890a328b0a957021210c2ac03b9bba3146d551fb7"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.3313937485218048,
+          "buttons": 0.0,
+          "motion": 0.0006636484176851809,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          308,
+          312,
+          316,
+          320,
+          324,
+          328,
+          332,
+          336,
+          340,
+          344,
+          348,
+          352,
+          356,
+          360,
+          364,
+          368
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:d25b8f8d45e0c08f7912cc071242960c52cdd2ab0acd7e5ec719ed28741c9445"
+      },
+      "distance": 3.8661182573932655,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.20314635336399078,
+          "buttons": 0.0,
+          "motion": 0.03731696680188179,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          1856,
+          1858,
+          1860,
+          1862,
+          1864,
+          1866,
+          1868,
+          1870,
+          1872,
+          1874,
+          1876,
+          1878,
+          1880,
+          1882,
+          1884,
+          1886
+        ],
+        "stratum": [
+          1,
+          0
+        ],
+        "window_id": "sha256:b323aad091c8edffbb7bbce85069bc3282a061c7141eb031d15c4f61f54c26ef"
+      },
+      "stratum_exact": false
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.3313964903354645,
+          "buttons": 0.0,
+          "motion": 0.0006538659799844027,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          32,
+          36,
+          40,
+          44,
+          48,
+          52,
+          56,
+          60,
+          64,
+          68,
+          72,
+          76,
+          80,
+          84,
+          88,
+          92
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:34034cfc03f64d991fb375ce37b59c65374386287aaa6c5e70383c03251c0332"
+      },
+      "distance": 14.215554830580414,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.0059332638047635555,
+          "buttons": 0.0,
+          "motion": 0.001903516473248601,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          4096,
+          4098,
+          4100,
+          4102,
+          4104,
+          4106,
+          4108,
+          4110,
+          4112,
+          4114,
+          4116,
+          4118,
+          4120,
+          4122,
+          4124,
+          4126
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:7730bd35ab570be47701a2e464ae8fb98805b58e5af285e42fea9d3c6d2d69f9"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.011363636702299118,
+          "brightness": 0.3962697982788086,
+          "buttons": 0.011363636702299118,
+          "motion": 0.0030779284425079823,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          1536,
+          1540,
+          1544,
+          1548,
+          1552,
+          1556,
+          1560,
+          1564,
+          1568,
+          1572,
+          1576,
+          1580,
+          1584,
+          1588,
+          1592,
+          1596
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:fc2462ce19f58ef62f561ce1dcfe4cebefd0e3b59606aa4f4bf09869147c6a0d"
+      },
+      "distance": 0.5667171639777444,
+      "reference": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.33197733759880066,
+          "buttons": 0.0,
+          "motion": 0.006546237040311098,
+          "stick": 0.0
+        },
+        "episode_id": "20260213_205913_3-59pm",
+        "episode_index": 157,
+        "frame_ordinals": [
+          0,
+          2,
+          4,
+          6,
+          8,
+          10,
+          12,
+          14,
+          16,
+          18,
+          20,
+          22,
+          24,
+          26,
+          28,
+          30
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:ba3f08c2d67d6335e82d52966000466574b926f8a806fb92bca755aecd65c35c"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.0605698935687542,
+          "brightness": 0.3447282910346985,
+          "buttons": 0.011363636702299118,
+          "motion": 0.0658070296049118,
+          "stick": 1.049206256866455
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          7560,
+          7564,
+          7568,
+          7572,
+          7576,
+          7580,
+          7584,
+          7588,
+          7592,
+          7596,
+          7600,
+          7604,
+          7608,
+          7612,
+          7616,
+          7620
+        ],
+        "stratum": [
+          3,
+          2
+        ],
+        "window_id": "sha256:fbc4296e4baeb0244a7a8ce5c49bc288223541316891063f3a6ebd8cb6fb3736"
+      },
+      "distance": 0.0269866634363124,
+      "reference": {
+        "descriptor": {
+          "action": 1.1045463532209396,
+          "brightness": 0.34142476320266724,
+          "buttons": 0.04545454680919647,
+          "motion": 0.06969155371189117,
+          "stick": 1.0590918064117432
+        },
+        "episode_id": "wandering-arch",
+        "episode_index": 185,
+        "frame_ordinals": [
+          736,
+          738,
+          740,
+          742,
+          744,
+          746,
+          748,
+          750,
+          752,
+          754,
+          756,
+          758,
+          760,
+          762,
+          764,
+          766
+        ],
+        "stratum": [
+          3,
+          2
+        ],
+        "window_id": "sha256:bc9515bed99f5cd53fa8d572eb3fb21dac3ae02fac6de09b349f263fe3d7653a"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.0,
+          "brightness": 0.42792314291000366,
+          "buttons": 0.0,
+          "motion": 0.004306634422391653,
+          "stick": 0.0
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          3268,
+          3272,
+          3276,
+          3280,
+          3284,
+          3288,
+          3292,
+          3296,
+          3300,
+          3304,
+          3308,
+          3312,
+          3316,
+          3320,
+          3324,
+          3328
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:7a138bfffbddeebd5a23030be989a027e6484b788779210fb6c21399b5ca0730"
+      },
+      "distance": 4.484255048398764,
+      "reference": {
+        "descriptor": {
+          "action": 0.1345362514257431,
+          "brightness": 0.24645479023456573,
+          "buttons": 0.0,
+          "motion": 0.0005669639795087278,
+          "stick": 0.1345362514257431
+        },
+        "episode_id": "20260407_181331_2-13pm",
+        "episode_index": 202,
+        "frame_ordinals": [
+          5216,
+          5218,
+          5220,
+          5222,
+          5224,
+          5226,
+          5228,
+          5230,
+          5232,
+          5234,
+          5236,
+          5238,
+          5240,
+          5242,
+          5244,
+          5246
+        ],
+        "stratum": [
+          0,
+          0
+        ],
+        "window_id": "sha256:a31dc3cb411154553d61f774f9d8dcfa6facf7d44162ae1eac35c4af3455ee4a"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 0.4924896713346243,
+          "brightness": 0.37024828791618347,
+          "buttons": 0.005681818351149559,
+          "motion": 0.06234275922179222,
+          "stick": 0.48680785298347473
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          3080,
+          3084,
+          3088,
+          3092,
+          3096,
+          3100,
+          3104,
+          3108,
+          3112,
+          3116,
+          3120,
+          3124,
+          3128,
+          3132,
+          3136,
+          3140
+        ],
+        "stratum": [
+          3,
+          2
+        ],
+        "window_id": "sha256:64353759a44e1e4b87fcd5f1362470ff554a6aa62358252233da5f214154c30e"
+      },
+      "distance": 3.9438272457730137,
+      "reference": {
+        "descriptor": {
+          "action": 0.12041594088077545,
+          "brightness": 0.21257831156253815,
+          "buttons": 0.0,
+          "motion": 0.05399283394217491,
+          "stick": 0.12041594088077545
+        },
+        "episode_id": "20260410_225607_6-56pm",
+        "episode_index": 125,
+        "frame_ordinals": [
+          352,
+          354,
+          356,
+          358,
+          360,
+          362,
+          364,
+          366,
+          368,
+          370,
+          372,
+          374,
+          376,
+          378,
+          380,
+          382
+        ],
+        "stratum": [
+          2,
+          0
+        ],
+        "window_id": "sha256:dc3b259f6012ad23f5f54c5774c0592317ba0798993340887971e2dd6db2a7ad"
+      },
+      "stratum_exact": false
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.0528579950332642,
+          "brightness": 0.37176400423049927,
+          "buttons": 0.0,
+          "motion": 0.0470116101205349,
+          "stick": 1.0528579950332642
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          1860,
+          1864,
+          1868,
+          1872,
+          1876,
+          1880,
+          1884,
+          1888,
+          1892,
+          1896,
+          1900,
+          1904,
+          1908,
+          1912,
+          1916,
+          1920
+        ],
+        "stratum": [
+          2,
+          2
+        ],
+        "window_id": "sha256:ab102c8565901a7654b780f02028f70259e7162d9ffc07b85c21cef05abe9d92"
+      },
+      "distance": 5.048145825587061,
+      "reference": {
+        "descriptor": {
+          "action": 1.0838921070098877,
+          "brightness": 0.1792546659708023,
+          "buttons": 0.0,
+          "motion": 0.05600517988204956,
+          "stick": 1.0838921070098877
+        },
+        "episode_id": "20260321_235422_7-54pm",
+        "episode_index": 124,
+        "frame_ordinals": [
+          992,
+          994,
+          996,
+          998,
+          1000,
+          1002,
+          1004,
+          1006,
+          1008,
+          1010,
+          1012,
+          1014,
+          1016,
+          1018,
+          1020,
+          1022
+        ],
+        "stratum": [
+          2,
+          2
+        ],
+        "window_id": "sha256:86b9d1765fcb89ed42760a3cc2a8457778fc022c35a93e7c7926238b333216b6"
+      },
+      "stratum_exact": true
+    },
+    {
+      "compact": {
+        "descriptor": {
+          "action": 1.120357796549797,
+          "brightness": 0.4170511066913605,
+          "buttons": 0.04545454680919647,
+          "motion": 0.026161283254623413,
+          "stick": 1.0749032497406006
+        },
+        "episode_id": "255b427b-6d1e-469b-8118-b2177a8d6c7c",
+        "global_frame_ordinals": [
+          5752,
+          5756,
+          5760,
+          5764,
+          5768,
+          5772,
+          5776,
+          5780,
+          5784,
+          5788,
+          5792,
+          5796,
+          5800,
+          5804,
+          5808,
+          5812
+        ],
+        "stratum": [
+          1,
+          3
+        ],
+        "window_id": "sha256:fc5589ab8bcbb15b3f2761e277ae54ec6d41baa706f3a2c66c61632dbf6cd491"
+      },
+      "distance": 4.6363764714658995,
+      "reference": {
+        "descriptor": {
+          "action": 1.1747590191662312,
+          "brightness": 0.2339148372411728,
+          "buttons": 0.05113636329770088,
+          "motion": 0.015056060627102852,
+          "stick": 1.1236226558685303
+        },
+        "episode_id": "20260310_043322_12-33am",
+        "episode_index": 156,
+        "frame_ordinals": [
+          2752,
+          2754,
+          2756,
+          2758,
+          2760,
+          2762,
+          2764,
+          2766,
+          2768,
+          2770,
+          2772,
+          2774,
+          2776,
+          2778,
+          2780,
+          2782
+        ],
+        "stratum": [
+          1,
+          3
+        ],
+        "window_id": "sha256:6618c18146c53fa76bc413ff2423de384a380d4fb00e6cafb335c021b99bf389"
+      },
+      "stratum_exact": true
+    }
+  ],
+  "preprocessing": {
+    "A": {
+      "aspect_mode": "stretch",
+      "meaning": "checkpoint_original_baseline"
+    },
+    "B": {
+      "aspect_mode": "pad",
+      "meaning": "geometry_shift_only"
+    },
+    "C": {
+      "aspect_mode": "pad",
+      "meaning": "compact_total_shift"
+    },
+    "clip_frames": 16,
+    "compact_never_stretched": true,
+    "target_fps": 15,
+    "target_hw": [
+      288,
+      512
+    ]
+  },
+  "reference": {
+    "native_root": "data/za-mp4",
+    "read_only": true,
+    "repo": "arelius/nxml-pokemon-legends-za-mp4",
+    "revision": "d5476d1476837d656b72ad598133f98863f8f280",
+    "schema": "LeRobot-style video_parquet v1"
+  },
+  "schema_id": "nxml.codec-domain-shift-three-arm-input.v1",
+  "seed": 20260719,
+  "thresholds": {
+    "bootstrap_resamples": 1000,
+    "confidence_level": 0.95,
+    "minimum_windows_per_arm": 32,
+    "relative_increase": 0.2
+  }
+}
