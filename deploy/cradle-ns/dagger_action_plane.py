@@ -41,6 +41,9 @@ class ActionPlane:
         self._pending_boundary_started_ns: int | None = None
         self._last_boundary_ack_sequence = 0
         self.boundary_ack_timeout_ns = boundary_ack_timeout_ns
+        self._human_samples = 0
+        self._last_human_ns: int | None = None
+        self._neutral_events = 0
 
     def start(self):
         if self._thread is None:
@@ -62,6 +65,8 @@ class ActionPlane:
         proposal = Proposal(np.asarray(vector, np.float32), now)
         with self._lock:
             self._human = proposal
+            self._human_samples += 1
+            self._last_human_ns = now
             if not self._armed:
                 self.orchestrator.post_action(vector)
                 applied = self.arbitrator.apply(now, proposal, None)
@@ -89,6 +94,7 @@ class ActionPlane:
             self._last_reason = reason
             human = self._human
             self.orchestrator.post_action([0.0] * 26)
+            self._neutral_events += 1
             self._append(boundary, human, None)
 
     def inference_failure(self, reason: str):
@@ -109,6 +115,7 @@ class ActionPlane:
             self._pending_boundary_started_ns = None
             self._last_reason = "emergency_eject"
             self.orchestrator.post_action(applied.action.tolist())
+            self._neutral_events += 1
             self._append(applied, human, None)
 
     def set_mode(self, mode: Mode):
@@ -153,6 +160,16 @@ class ActionPlane:
                 "mute_mask": list(self.arbitrator.mute.values),
                 "mute_mask_version": self.arbitrator.mute.version,
                 "last_disarm_reason": self._last_reason,
+                "human_samples": self._human_samples,
+                "last_human_age_ms": (
+                    (time.monotonic_ns() - self._last_human_ns) / 1e6
+                    if self._last_human_ns is not None
+                    else None
+                ),
+                "last_human_action": (
+                    self._human.action.tolist() if self._human is not None else None
+                ),
+                "neutral_events": self._neutral_events,
                 "gap_state": (
                     self._last_applied.gap_state
                     if self._last_applied is not None
@@ -175,9 +192,7 @@ class ActionPlane:
                     self._last_applied.takeover if self._last_applied is not None else False
                 ),
                 "takeover_reason": (
-                    self._last_applied.takeover_reason
-                    if self._last_applied is not None
-                    else None
+                    self._last_applied.takeover_reason if self._last_applied is not None else None
                 ),
                 "takeover_release_remaining_ms": (
                     self._last_applied.takeover_release_remaining_ns / 1e6

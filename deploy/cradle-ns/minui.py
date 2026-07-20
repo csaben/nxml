@@ -277,6 +277,8 @@ def create_app(
     stream_state: dict[str, subprocess.Popen | None] = {"proc": None}
     stream_lock = threading.Lock()
     recording_transition_lock = threading.Lock()
+    input_clients: dict[str, dict[str, int | float]] = {}
+    input_clients_lock = threading.Lock()
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
@@ -324,6 +326,10 @@ def create_app(
         wire["action_plane"] = action_plane.status() if action_plane else None
         if wire["action_plane"] is not None:
             wire["action_plane"]["input_delivery_enabled"] = input_delivery_enabled
+            with input_clients_lock:
+                clients = {key: dict(value) for key, value in input_clients.items()}
+            wire["action_plane"]["input_clients"] = clients
+            wire["action_plane"]["input_client_count"] = len(clients)
         if segment_worker is not None and wire.get("spool") is not None:
             wire["spool"]["rolling_segments"] = segment_worker.status()
         return wire
@@ -498,6 +504,12 @@ def create_app(
     @app.websocket("/ws")
     async def ws_input(ws: WebSocket) -> None:
         await ws.accept()
+        client_id = f"{ws.client.host}:{ws.client.port}" if ws.client else "unknown"
+        with input_clients_lock:
+            input_clients[client_id] = {
+                "messages": 0,
+                "connected_monotonic_ns": time.monotonic_ns(),
+            }
         try:
             while True:
                 message = await ws.receive_text()
@@ -514,9 +526,16 @@ def create_app(
                 if input_delivery_enabled:
                     target = action_plane.submit_human if action_plane else orchestrator.post_action
                     await asyncio.to_thread(target, [float(v) for v in vector])
+                with input_clients_lock:
+                    client = input_clients.get(client_id)
+                    if client is not None:
+                        client["messages"] = int(client["messages"]) + 1
+                        client["last_message_monotonic_ns"] = time.monotonic_ns()
         except WebSocketDisconnect:
             pass
         finally:
+            with input_clients_lock:
+                input_clients.pop(client_id, None)
             # Synchronous on purpose: must run even under task cancellation.
             if input_delivery_enabled:
                 with contextlib.suppress(Exception):
