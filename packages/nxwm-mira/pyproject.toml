@@ -18,6 +18,7 @@ dependencies = [
     "pillow>=10",
     "torchcodec>=0.4",
     "pyarrow>=17",
+    "huggingface-hub>=1.13",
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "tqdm>=4",

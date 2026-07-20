@@ -47,6 +47,12 @@ class DataConfig(BaseModel):
 
     source: Literal["za", "fake"] = "za"
     root: str = "data/za-mp4"
+    webdataset_repo_id: str | None = None
+    webdataset_revision: str | None = None
+    webdataset_manifest: str | None = None
+    webdataset_cache: str = "data/cache/nxwm-webdataset"
+    webdataset_cache_bytes: int = 16 * 1024**3
+    hf_xet_cache: str = "data/cache/hf-xet"
     num_workers: int = 6
     # Source-frame step between clip starts; None = non-overlapping (clip span).
     clip_spacing: int | None = None
