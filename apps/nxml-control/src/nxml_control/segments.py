@@ -31,6 +31,7 @@ SEGMENT_ROUTE_CONTRACTS = (
     ("POST", "/v1/segment-bundles/{upload_id}/commit"),
     ("GET", "/v1/segment-receipts/{receipt_id}"),
     ("GET", "/v1/segments/{segment_id}"),
+    ("GET", "/v1/segments/{segment_id}/artifact-inspection"),
     ("POST", "/v1/segments/{segment_id}/quality-dispositions"),
     ("GET", "/v1/segments/{segment_id}/quality-dispositions"),
     ("POST", "/v1/datasets/{dataset_id}/episodes/{episode_id}/close"),

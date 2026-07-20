@@ -15,6 +15,7 @@ from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import FileResponse, JSONResponse
 
+from nxml_control.artifact_inspect import inspect_segment_artifact
 from nxml_control.auth import bearer_matches
 from nxml_control.catalog import Catalog, IdentityConflictError, InvalidManifestError, Upload
 from nxml_control.models import (
@@ -939,6 +940,15 @@ def create_app(
             return segments.get_segment(segment_id)
         except SegmentNotFoundError as error:
             raise HTTPException(error.status_code, str(error)) from error
+
+    @app.get("/v1/segments/{segment_id}/artifact-inspection", response_model=dict[str, Any])
+    def segment_artifact_inspection(segment_id: str):
+        try:
+            return inspect_segment_artifact(segments, segment_id)
+        except SegmentNotFoundError as error:
+            raise HTTPException(error.status_code, str(error)) from error
+        except (ValueError, OSError) as error:
+            raise HTTPException(422, str(error)) from error
 
     @app.post(
         "/v1/segments/{segment_id}/quality-dispositions",
