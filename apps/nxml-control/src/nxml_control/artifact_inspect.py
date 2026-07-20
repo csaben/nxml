@@ -13,6 +13,8 @@ from pathlib import Path
 import pyarrow.parquet as pq
 from torchcodec.decoders import VideoDecoder
 
+from nxml_control.quality_inspect import inspect_actions, inspect_visual_dynamics
+
 CHUNK = 1024 * 1024
 ROLES = {"video", "actions", "events"}
 
@@ -101,9 +103,13 @@ def inspect_segment_artifact(segments, segment_id: str) -> dict:
             if frame.get("key_frame") == 1
         ]
         intervals = [right - left for left, right in itertools.pairwise(keyframes)]
-        action_rows = pq.ParquetFile(extracted["actions"]).metadata.num_rows
+        action_table = pq.read_table(extracted["actions"])
+        action_rows = action_table.num_rows
+        action_quality = inspect_actions(action_table.to_pylist())
         event_rows = pq.ParquetFile(extracted["events"]).metadata.num_rows
-        decoded_frames = VideoDecoder(str(extracted["video"]), device="cpu").metadata.num_frames
+        decoder = VideoDecoder(str(extracted["video"]), device="cpu")
+        decoded_frames = decoder.metadata.num_frames
+        visual_quality = inspect_visual_dynamics(decoder, decoded_frames, segment_id)
         if decoded_frames != action_rows:
             raise ValueError(f"video/action frame mismatch: {decoded_frames}!={action_rows}")
         return {
@@ -135,5 +141,7 @@ def inspect_segment_artifact(segments, segment_id: str) -> dict:
             },
             "action_rows": action_rows,
             "event_rows": event_rows,
+            "action_quality": action_quality,
+            "visual_quality": visual_quality,
             "decoded_frames_equal_action_rows": True,
         }

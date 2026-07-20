@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+import torch
 from nxml_control.artifact_inspect import inspect_segment_artifact
 
 
@@ -95,7 +96,13 @@ def test_inspector_is_catalog_resolved_and_returns_exact_probe(monkeypatch, tmp_
     )
     monkeypatch.setattr(
         "nxml_control.artifact_inspect.VideoDecoder",
-        lambda *args, **kwargs: SimpleNamespace(metadata=SimpleNamespace(num_frames=2)),
+        lambda *args, **kwargs: SimpleNamespace(
+            metadata=SimpleNamespace(num_frames=2),
+            get_frames_at=lambda indices: SimpleNamespace(data=torch.zeros(len(indices), 3, 8, 8)),
+        ),
+    )
+    monkeypatch.setattr(
+        "nxml_control.artifact_inspect.inspect_actions", lambda rows: {"row_count": len(rows)}
     )
     result = inspect_segment_artifact(segments, segment_id)
     assert result["outer"]["sha256"] == segment_id.removeprefix("sha256:")

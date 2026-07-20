@@ -50,6 +50,7 @@ def codec_compatibility(result: dict) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("output", type=Path)
+    parser.add_argument("--segment-id", action="append", dest="segment_ids")
     parser.add_argument("--base-url", default="http://100.80.98.4:8787")
     parser.add_argument("--token-file", type=Path, default=Path("/etc/nxml-control/token"))
     args = parser.parse_args()
@@ -57,7 +58,8 @@ def main() -> None:
     if not token:
         raise ValueError("empty control token")
     results = []
-    for segment_id in SEGMENT_IDS:
+    segment_ids = tuple(args.segment_ids) if args.segment_ids else SEGMENT_IDS
+    for segment_id in segment_ids:
         request = urllib.request.Request(
             f"{args.base_url}/v1/segments/{segment_id}/artifact-inspection",
             headers={"Authorization": "Bearer " + token},
