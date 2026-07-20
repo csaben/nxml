@@ -71,6 +71,7 @@ def test_schema_v2_preserves_proposals_ownership_and_checksums(tmp_path: Path) -
         monotonic_ns=4_950_000_000,
         payload={"driver": "human+policy"},
     )
+    assert writer._records[0].frame.nbytes == 0
     assert writer.close() is not None
 
     table = pq.read_table(tmp_path / "episode.parquet")

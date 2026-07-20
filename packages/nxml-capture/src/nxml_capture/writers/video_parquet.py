@@ -30,7 +30,7 @@ import json
 import platform
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from fractions import Fraction
 from pathlib import Path
@@ -284,7 +284,11 @@ class VideoParquetEpisodeWriter:
         self._frame_idxs.append(idx)
         self._timestamps.append(synced.timestamp)
         self._actions.append(synced.action.astype(np.float32, copy=False))
-        self._records.append(synced)
+        # The encoded pixels are never consulted again. Retaining the full
+        # SyncedFrame here held ~5 GB of decoded 720p frames per 30-second
+        # segment and left the long-running edge process at its allocator
+        # high-water mark. Keep only the small action/timestamp metadata.
+        self._records.append(replace(synced, frame=np.empty((0, 0, 3), dtype=np.uint8)))
 
     def append_event(
         self,
