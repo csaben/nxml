@@ -297,6 +297,15 @@ def test_bind_accepts_cradle_ns_tailnet_ip():
     assert minui.validate_tailnet_bind("100.73.109.68") == "100.73.109.68"
 
 
+def test_minui_instance_lock_rejects_duplicate_owner(tmp_path):
+    lock = minui.acquire_instance_lock(tmp_path / "instance.lock")
+    try:
+        with pytest.raises(RuntimeError, match="another supervised minui owns"):
+            minui.acquire_instance_lock(tmp_path / "instance.lock")
+    finally:
+        lock.close()
+
+
 def test_recording_controls_are_explicit_and_do_not_add_auth():
     class Recorder:
         state = "idle"

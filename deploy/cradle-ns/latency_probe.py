@@ -44,12 +44,32 @@ import os
 import statistics
 import sys
 import time
+import urllib.error
+import urllib.request
 
 ACTION_DIM = 26
 A_BUTTON_INDEX = 25  # switch_packets.v1: index 25 is A
 DPAD_LEFT_INDEX = 7
 DPAD_RIGHT_INDEX = 8
 CAPTURE_DEVICE = "/dev/v4l/by-id/usb-MACROSILICON_Hagibis_20210623-video-index0"
+MINUI_STATUS_URL = "http://100.73.109.68:8091/api/ops/status"
+
+
+def refuse_competing_writer(args: argparse.Namespace) -> None:
+    """Fail closed when the supervised browser controller path is live."""
+    if args.allow_live_output:
+        return
+    try:
+        with urllib.request.urlopen(args.minui_status_url, timeout=1.0) as response:
+            status = json.load(response)
+    except (OSError, ValueError, urllib.error.URLError):
+        return
+    action = status.get("action_plane") or {}
+    raise SystemExit(
+        "refusing competing controller writer while minui is reachable "
+        f"({action.get('mode', 'unknown')}, armed={action.get('armed')}); "
+        "stop the supervised minui or pass --allow-live-output for a bounded physical test"
+    )
 
 
 class OrchestratorClient:
@@ -103,6 +123,7 @@ def print_health(client: OrchestratorClient) -> None:
 
 
 def cmd_rtt(client: OrchestratorClient, args: argparse.Namespace) -> None:
+    refuse_competing_writer(args)
     print_health(client)
     rtts = [client.post_action(neutral()) for _ in range(args.count)]
     rtts.sort()
@@ -115,13 +136,15 @@ def cmd_rtt(client: OrchestratorClient, args: argparse.Namespace) -> None:
 
 
 def cmd_pulse(client: OrchestratorClient, args: argparse.Namespace) -> None:
+    refuse_competing_writer(args)
     print_health(client)
     press = neutral()
     press[A_BUTTON_INDEX] = 1.0
     print("Pressing A for 150 ms every 2 s — watch the Switch screen for the delay.")
     print("Ctrl-C to stop (a neutral frame is always sent last).")
     try:
-        while True:
+        deadline = time.monotonic() + args.duration
+        while time.monotonic() < deadline:
             rtt = client.post_action(press)
             print(f"{time.strftime('%H:%M:%S')} A DOWN  (post rtt {rtt:.2f}ms)", flush=True)
             time.sleep(0.15)
@@ -134,6 +157,7 @@ def cmd_pulse(client: OrchestratorClient, args: argparse.Namespace) -> None:
 
 
 def cmd_evdev(client: OrchestratorClient, args: argparse.Namespace) -> None:
+    refuse_competing_writer(args)
     import evdev
     from nxml_mux.input_devices.auto_detect import detect_mapper_for_name
     from nxml_mux.input_devices.readers.evdev_reader import EvdevReader
@@ -188,6 +212,7 @@ def cmd_evdev(client: OrchestratorClient, args: argparse.Namespace) -> None:
 
 
 def cmd_measure(client: OrchestratorClient, args: argparse.Namespace) -> None:
+    refuse_competing_writer(args)
     import cv2
     import numpy as np
 
@@ -282,6 +307,9 @@ def cmd_measure(client: OrchestratorClient, args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=["rtt", "pulse", "evdev", "measure"])
+    parser.add_argument("--minui-status-url", default=MINUI_STATUS_URL)
+    parser.add_argument("--allow-live-output", action="store_true")
+    parser.add_argument("--duration", type=float, default=10.0)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7777)
     parser.add_argument("--count", type=int, default=300, help="rtt mode: frames to send")

@@ -1,0 +1,18 @@
+[Unit]
+Description=NXML supervised Tailnet-only DAgger player UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Code/nxml
+Environment=NXML_ORCHESTRATOR_PORT=7777
+ExecStart=%h/Code/nxml/.venv/bin/python %h/Code/nxml/deploy/cradle-ns/minui.py --host 100.73.109.68 --port 8091 --orchestrator-port ${NXML_ORCHESTRATOR_PORT} --inference-endpoint tcp://100.80.98.4:5557 --inference-revision 2f772838-2179-4739-a53c-aa95dcea35a0 --inference-digest 336036bbf2d35ce7ffc303a242c9f561ba537093f85ed4e1b4ce63a4dbc9c038 --inference-timeout-ms 100 --rolling-segments --capture-width 1280 --capture-height 720 --capture-fps 60 --recording-codec h264_nvenc
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+KillMode=mixed
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import fcntl
 import http.client
 import ipaddress
 import json
@@ -46,6 +47,21 @@ from nxml_capture.backends.mjpeg_fanout import MjpegFanoutSource
 
 ACTION_DIM = 26
 CAPTURE_DEVICE = "/dev/v4l/by-id/usb-MACROSILICON_Hagibis_20210623-video-index0"
+
+
+def acquire_instance_lock(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = path.open("a+")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as error:
+        handle.close()
+        raise RuntimeError(f"another supervised minui owns {path}") from error
+    handle.seek(0)
+    handle.truncate()
+    handle.write(f"pid={os.getpid()}\n")
+    handle.flush()
+    return handle
 
 
 def validate_tailnet_bind(host: str) -> str:
@@ -576,6 +592,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", required=True, help="bind address (use the tailscale IP)")
     parser.add_argument("--port", type=int, default=8091)
+    parser.add_argument(
+        "--instance-lock",
+        type=Path,
+        default=Path("~/.local/state/nxml-minui/instance.lock").expanduser(),
+    )
     parser.add_argument("--orchestrator-host", default="127.0.0.1")
     parser.add_argument("--orchestrator-port", type=int, default=7777)
     parser.add_argument("--capture", default=CAPTURE_DEVICE)
@@ -615,6 +636,10 @@ def main() -> None:
     try:
         validate_tailnet_bind(args.host)
     except ValueError as error:
+        parser.error(str(error))
+    try:
+        instance_lock = acquire_instance_lock(args.instance_lock)
+    except RuntimeError as error:
         parser.error(str(error))
     client = OrchestratorClient(args.orchestrator_host, args.orchestrator_port)
     rolling_root = Path("~/.local/state/nxml-segments").expanduser()
@@ -698,6 +723,7 @@ def main() -> None:
         host=args.host,
         port=args.port,
     )
+    instance_lock.close()
 
 
 if __name__ == "__main__":
