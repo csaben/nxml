@@ -10,11 +10,11 @@ from pydantic import ValidationError
 
 def codec():
     return {
-        "compatibility_id": "nxml.compact-h264-720p60.v1",
+        "compatibility_id": "nxml.compact-h264-main32-720p60.v1",
         "codec": "h264",
         "container": "matroska",
-        "profile": "High",
-        "level": 42,
+        "profile": "Main",
+        "level": 32,
         "pixel_format": "yuv420p",
         "width": 1280,
         "height": 720,
@@ -33,7 +33,7 @@ def codec():
     ("field", "value"),
     [
         ("codec", "hevc"),
-        ("profile", "Main"),
+        ("profile", "High"),
         ("level", 41),
         ("pixel_format", "yuv444p"),
         ("width", 1920),

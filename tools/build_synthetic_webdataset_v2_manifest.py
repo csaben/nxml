@@ -129,7 +129,7 @@ def main() -> None:
                         "action_timestamp_column": "action_monotonic_ns",
                     },
                     "codec": {
-                        "compatibility_id": "nxml.compact-h264-720p60.v1",
+                        "compatibility_id": "nxml.compact-h264-main32-720p60.v1",
                         "codec": stream["codec_name"],
                         "container": "matroska"
                         if probe["format"]["format_name"] == "matroska,webm"

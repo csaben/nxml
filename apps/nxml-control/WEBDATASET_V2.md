@@ -14,7 +14,7 @@ checksum mismatch, unsafe path, schema mismatch, segment gap/overlap, split or
 clock change within an episode, frame-ordinal gap, incompatible codec, or decoded
 frame/action-row mismatch.
 
-The compact compatibility profile is H.264 High level 4.2 in Matroska, YUV420P,
+The compact compatibility profile is H.264 Main level 3.2 in Matroska, YUV420P,
 1280x720, exact 60/1 nominal and average frame rates, GOP 60, and zero B-frames.
 Time base and measured bitrate must be recorded from `ffprobe`; configured values
 are not evidence. Image conversion is aspect-preserving padding only.

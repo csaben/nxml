@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import itertools
+import math
+from fractions import Fraction
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -17,22 +19,42 @@ class CompactCodecLineageV2(BaseModel):
     """Artifact-derived compact ingest properties required by MIRA."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    compatibility_id: Literal["nxml.compact-h264-720p60.v1"]
+    compatibility_id: Literal["nxml.compact-h264-main32-720p60.v1"]
     codec: Literal["h264"]
     container: Literal["matroska"]
-    profile: Literal["High"]
-    level: Literal[42]
+    profile: Literal["Main"]
+    level: Literal[32]
     pixel_format: Literal["yuv420p"]
     width: Literal[1280]
     height: Literal[720]
-    r_frame_rate: Literal["60/1"]
-    avg_frame_rate: Literal["60/1"]
+    r_frame_rate: str = Field(pattern=r"^[1-9][0-9]*/[1-9][0-9]*$")
+    avg_frame_rate: str = Field(pattern=r"^[1-9][0-9]*/[1-9][0-9]*$")
     time_base: str = Field(pattern=r"^[1-9][0-9]*/[1-9][0-9]*$")
     gop_size: Literal[60]
     max_b_frames: Literal[0]
     measured_bit_rate: int = Field(gt=0)
     aspect_mode: Literal["pad"]
     artifact_probe: Literal["ffprobe"]
+
+    @model_validator(mode="after")
+    def validate_main_level_32_limits(self):
+        max_fs = 5_120
+        max_mbps = 216_000
+        max_br_bits_per_second = 20_000_000
+        macroblocks_per_frame = math.ceil(self.width / 16) * math.ceil(self.height / 16)
+        rate = Fraction(self.r_frame_rate)
+        if rate != Fraction(self.avg_frame_rate):
+            raise ValueError("nominal and average frame rates must match")
+        macroblocks_per_second = macroblocks_per_frame * rate
+        if macroblocks_per_frame > max_fs:
+            raise ValueError("frame size exceeds H.264 Level 3.2 MaxFS")
+        if macroblocks_per_second > max_mbps:
+            raise ValueError("frame rate exceeds H.264 Level 3.2 MaxMBPS")
+        if rate != 60:
+            raise ValueError("compact profile requires exact 60 fps")
+        if self.measured_bit_rate > max_br_bits_per_second:
+            raise ValueError("measured bitrate exceeds Main Level 3.2 MaxBR")
+        return self
 
 
 class TemporalMappingV2(BaseModel):

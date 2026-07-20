@@ -43,7 +43,7 @@ uv run python tools/inspect_compact_canary_segments.py /tmp/compact-inspections.
 ```
 
 The runner reads the existing token locally, never prints it, validates every
-response against `nxml.compact-h264-720p60.v1`, and writes only evidence. These
+response against `nxml.compact-h264-main32-720p60.v1`, and writes only evidence. These
 episodes remain vetoed and are not valid audit samples.
 
 Before any real publication, run the offline eligibility check against an

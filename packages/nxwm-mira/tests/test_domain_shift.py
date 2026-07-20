@@ -23,11 +23,11 @@ from test_webdataset_episode import _manifest
 
 def codec():
     return CompactCodecLineageV2(
-        compatibility_id="nxml.compact-h264-720p60.v1",
+        compatibility_id="nxml.compact-h264-main32-720p60.v1",
         codec="h264",
         container="matroska",
-        profile="High",
-        level=42,
+        profile="Main",
+        level=32,
         pixel_format="yuv420p",
         width=1280,
         height=720,

@@ -9,6 +9,7 @@ import urllib.request
 from pathlib import Path
 
 from nxml_core.contracts.webdataset_v2 import CompactCodecLineageV2
+from pydantic import ValidationError
 
 SEGMENT_IDS = (
     "sha256:effde146c4f68ac9774e17c150e866d75d6071b71e104f01561f047363683f94",
@@ -25,7 +26,7 @@ def codec_compatibility(result: dict) -> dict:
     container = "matroska" if video["container"] == "matroska,webm" else video["container"]
     parsed = CompactCodecLineageV2.model_validate(
         {
-            "compatibility_id": "nxml.compact-h264-720p60.v1",
+            "compatibility_id": "nxml.compact-h264-main32-720p60.v1",
             "codec": video["codec"],
             "container": container,
             "profile": video["profile"],
@@ -69,12 +70,27 @@ def main() -> None:
             or result.get("decoded_frames_equal_action_rows") is not True
         ):
             raise ValueError(f"failed inspection response: {segment_id}")
-        result["codec_compatibility"] = codec_compatibility(result)
+        try:
+            result["codec_compatibility"] = codec_compatibility(result)
+            result["codec_compatible"] = True
+        except ValidationError as error:
+            result["codec_compatible"] = False
+            result["codec_compatibility_errors"] = error.errors(
+                include_url=False, include_input=False
+            )
         results.append(result)
     payload = {"schema_id": "nxml.compact-canary-inspection-set.v1", "segments": results}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-    print(json.dumps({"output": str(args.output), "verified_segments": len(results)}))
+    print(
+        json.dumps(
+            {
+                "output": str(args.output),
+                "verified_segments": len(results),
+                "compatible_segments": sum(item["codec_compatible"] for item in results),
+            }
+        )
+    )
 
 
 if __name__ == "__main__":
