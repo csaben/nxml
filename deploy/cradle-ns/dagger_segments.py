@@ -401,6 +401,7 @@ class SegmentDeliveryWorker:
         self.max_pending = max_pending
         self.queue: queue.Queue[PreparedSegment | SegmentSource | None] = queue.Queue()
         self.receipts: list[dict[str, Any]] = list(journal.value["receipts"].values())
+        self.receipted_bytes = sum(int(item.get("size_bytes", 0)) for item in self.receipts)
         self.error: str | None = None
         self.uploaded_bytes = 0
         self._progress: deque[tuple[float, int]] = deque()
@@ -565,6 +566,7 @@ class SegmentDeliveryWorker:
                     with self._lock:
                         self.receipts.append(receipt)
                     self.uploaded_bytes += size
+                    self.receipted_bytes += size
                     now = time.monotonic()
                     self._progress.append((now, size))
                     while self._progress and now - self._progress[0][0] > 60.0:
@@ -640,7 +642,7 @@ class SegmentDeliveryWorker:
                 else None
             ),
             "receipted_segments": receipt_count,
-            "receipted_bytes": self.uploaded_bytes,
+            "receipted_bytes": self.receipted_bytes,
             "upload_rate_bytes_per_second": rolling_rate,
             "receipt_rate_bytes_per_second": rolling_rate,
             "lifetime_upload_rate_bytes_per_second": self.uploaded_bytes / elapsed,
