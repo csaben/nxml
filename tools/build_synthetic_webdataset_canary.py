@@ -37,16 +37,37 @@ def main() -> None:
     video = root / f"{prefix}.mkv"
     subprocess.run(
         [
-            "ffmpeg", "-v", "error", "-f", "lavfi", "-i",
-            "testsrc2=size=1280x720:rate=60:duration=1", "-c:v", "libx264",
-            "-profile:v", "high", "-level:v", "4.2", "-pix_fmt", "yuv420p",
-            "-g", "60", "-keyint_min", "60", "-sc_threshold", "0", "-an", str(video),
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=1280x720:rate=60:duration=2",
+            "-c:v",
+            "libx264",
+            "-profile:v",
+            "high",
+            "-level:v",
+            "4.2",
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "60",
+            "-bf",
+            "0",
+            "-keyint_min",
+            "60",
+            "-sc_threshold",
+            "0",
+            "-an",
+            str(video),
         ],
         check=True,
     )
     actions = root / f"{prefix}.parquet"
     rows = []
-    for index in range(60):
+    for index in range(120):
         frame_ns = 1_000_000_000 + index * 16_666_667
         action_ns = frame_ns - 1_000_000
         neutral = [0.0] * 26
@@ -137,14 +158,23 @@ def main() -> None:
                     "sequence_index": 0,
                     "split": "canary",
                     "codec": {
-                        "codec": "h264", "container": "matroska", "profile": "High",
-                        "level": 42, "pixel_format": "yuv420p", "width": 1280,
-                        "height": 720, "nominal_fps": 60.0, "time_base": "1/1000",
-                        "gop_size": 60, "aspect_mode": "pad",
+                        "codec": "h264",
+                        "container": "matroska",
+                        "profile": "High",
+                        "level": 42,
+                        "pixel_format": "yuv420p",
+                        "width": 1280,
+                        "height": 720,
+                        "nominal_fps": 60.0,
+                        "time_base": "1/1000",
+                        "gop_size": 60,
+                        "aspect_mode": "pad",
                     },
                     "members": [
                         {
-                            "role": role, "path": path.name, "size_bytes": digest(path)[0],
+                            "role": role,
+                            "path": path.name,
+                            "size_bytes": digest(path)[0],
                             "sha256": digest(path)[1],
                         }
                         for role, path in members
