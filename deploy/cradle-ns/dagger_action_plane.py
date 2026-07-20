@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import contextlib
+import statistics
 import threading
 import time
+from collections import deque
 from dataclasses import replace
 
 import numpy as np
@@ -44,6 +46,7 @@ class ActionPlane:
         self._human_samples = 0
         self._last_human_ns: int | None = None
         self._neutral_events = 0
+        self._human_post_latencies_ms: deque[float] = deque(maxlen=600)
 
     def start(self):
         if self._thread is None:
@@ -68,7 +71,9 @@ class ActionPlane:
             self._human_samples += 1
             self._last_human_ns = now
             if not self._armed:
+                started = time.perf_counter()
                 self.orchestrator.post_action(vector)
+                self._human_post_latencies_ms.append((time.perf_counter() - started) * 1000.0)
                 applied = self.arbitrator.apply(now, proposal, None)
                 self._append(applied, proposal, None)
 
@@ -146,6 +151,7 @@ class ActionPlane:
 
     def status(self):
         with self._lock:
+            latencies = sorted(self._human_post_latencies_ms)
             inference = (
                 self.inference.status()
                 if self.inference is not None and hasattr(self.inference, "status")
@@ -170,6 +176,14 @@ class ActionPlane:
                     self._human.action.tolist() if self._human is not None else None
                 ),
                 "neutral_events": self._neutral_events,
+                "human_post_latency_p50_ms": (statistics.median(latencies) if latencies else None),
+                "human_post_latency_p95_ms": (
+                    latencies[min(len(latencies) - 1, int(len(latencies) * 0.95))]
+                    if latencies
+                    else None
+                ),
+                "human_post_latency_max_ms": max(latencies) if latencies else None,
+                "human_post_latency_samples": len(latencies),
                 "gap_state": (
                     self._last_applied.gap_state
                     if self._last_applied is not None
