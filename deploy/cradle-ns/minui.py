@@ -245,6 +245,7 @@ def create_app(
     remote_inference: RemoteInferenceWorker | None = None,
     action_plane: ActionPlane | None = None,
     segment_worker: SegmentDeliveryWorker | None = None,
+    input_delivery_enabled: bool = True,
 ) -> FastAPI:
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -321,6 +322,8 @@ def create_app(
             else disabled_model_readiness()
         )
         wire["action_plane"] = action_plane.status() if action_plane else None
+        if wire["action_plane"] is not None:
+            wire["action_plane"]["input_delivery_enabled"] = input_delivery_enabled
         if segment_worker is not None and wire.get("spool") is not None:
             wire["spool"]["rolling_segments"] = segment_worker.status()
         return wire
@@ -508,17 +511,19 @@ def create_app(
                     or not all(isinstance(v, (int, float)) and -1 <= v <= 1 for v in vector)
                 ):
                     break
-                target = action_plane.submit_human if action_plane else orchestrator.post_action
-                await asyncio.to_thread(target, [float(v) for v in vector])
+                if input_delivery_enabled:
+                    target = action_plane.submit_human if action_plane else orchestrator.post_action
+                    await asyncio.to_thread(target, [float(v) for v in vector])
         except WebSocketDisconnect:
             pass
         finally:
             # Synchronous on purpose: must run even under task cancellation.
-            with contextlib.suppress(Exception):
-                if action_plane is not None:
-                    action_plane.disarm("browser_disconnect")
-                else:
-                    orchestrator.post_action([0.0] * ACTION_DIM)
+            if input_delivery_enabled:
+                with contextlib.suppress(Exception):
+                    if action_plane is not None:
+                        action_plane.disarm("browser_disconnect")
+                    else:
+                        orchestrator.post_action([0.0] * ACTION_DIM)
 
     @app.get("/stream.mjpeg")
     def stream() -> StreamingResponse:
@@ -599,6 +604,7 @@ def main() -> None:
     )
     parser.add_argument("--orchestrator-host", default="127.0.0.1")
     parser.add_argument("--orchestrator-port", type=int, default=7777)
+    parser.add_argument("--input-mode", choices=("enabled", "disabled"), default="enabled")
     parser.add_argument("--capture", default=CAPTURE_DEVICE)
     parser.add_argument(
         "--spool-status",
@@ -719,6 +725,7 @@ def main() -> None:
             remote_inference=remote_inference,
             action_plane=action_plane,
             segment_worker=segment_worker,
+            input_delivery_enabled=args.input_mode == "enabled",
         ),
         host=args.host,
         port=args.port,
