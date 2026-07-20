@@ -50,7 +50,7 @@ ACTION_SCHEMA_ID = "nxml.dagger-actions.v2"
 FORMAT_TAG = "video_parquet"
 ACTION_SPEC_NAME = "switch_packets.v1"
 
-Codec = Literal["ffv1", "h264"]
+Codec = Literal["ffv1", "h264", "h264_nvenc"]
 
 
 @dataclass(frozen=True)
@@ -88,6 +88,22 @@ _PROFILES: dict[Codec, _CodecProfile] = {
         private_options={"crf": "18", "preset": "medium"},
         # 16-frame GOP keeps random-window seek cheap inside a chunk.
         gop_size=16,
+    ),
+    "h264_nvenc": _CodecProfile(
+        codec="h264_nvenc",
+        container_ext=".mkv",
+        pixel_format="yuv420p",
+        lossless=False,
+        private_options={
+            "preset": "p4",
+            "tune": "ll",
+            "rc": "cbr",
+            "b": "16M",
+            "maxrate": "16M",
+            "bufsize": "16M",
+            "bf": "0",
+        },
+        gop_size=60,
     ),
 }
 

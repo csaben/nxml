@@ -11,6 +11,7 @@ import re
 import tarfile
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -397,10 +398,12 @@ class SegmentDeliveryWorker:
         self.staging_dir = staging_dir
         self.source_dir = source_dir
         self.max_pending_bytes = max_pending_bytes
+        self.max_pending = max_pending
         self.queue: queue.Queue[PreparedSegment | SegmentSource | None] = queue.Queue()
         self.receipts: list[dict[str, Any]] = list(journal.value["receipts"].values())
         self.error: str | None = None
         self.uploaded_bytes = 0
+        self._progress: deque[tuple[float, int]] = deque()
         self.started_at = time.monotonic()
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -458,7 +461,14 @@ class SegmentDeliveryWorker:
         buffered = self.journal.buffered_bytes()
         if self._admission_closed and buffered <= self.max_pending_bytes * 0.75:
             self._admission_closed = False
-        if self._admission_closed or buffered + size_bytes > self.max_pending_bytes:
+        outstanding = len(self.journal.value["pending"]) + len(
+            self.journal.value["reservations"]
+        )
+        if (
+            self._admission_closed
+            or outstanding >= self.max_pending
+            or buffered + size_bytes > self.max_pending_bytes
+        ):
             self._admission_closed = True
             return False
         self.journal.reserve(episode_id, sequence_index, size_bytes)
@@ -555,6 +565,10 @@ class SegmentDeliveryWorker:
                     with self._lock:
                         self.receipts.append(receipt)
                     self.uploaded_bytes += size
+                    now = time.monotonic()
+                    self._progress.append((now, size))
+                    while self._progress and now - self._progress[0][0] > 60.0:
+                        self._progress.popleft()
                     for path in (
                         item.source.video,
                         item.source.actions,
@@ -607,6 +621,11 @@ class SegmentDeliveryWorker:
         pending_count = len(self.journal.value["pending"])
         buffered_bytes = self.journal.buffered_bytes()
         elapsed = max(time.monotonic() - self.started_at, 1e-6)
+        now = time.monotonic()
+        while self._progress and now - self._progress[0][0] > 60.0:
+            self._progress.popleft()
+        rolling_elapsed = min(60.0, elapsed)
+        rolling_rate = sum(size for _, size in self._progress) / max(rolling_elapsed, 1e-6)
         return {
             "state": "error" if self.error else "running",
             "segment_backlog_count": pending_count,
@@ -622,11 +641,14 @@ class SegmentDeliveryWorker:
             ),
             "receipted_segments": receipt_count,
             "receipted_bytes": self.uploaded_bytes,
-            "upload_rate_bytes_per_second": self.uploaded_bytes / elapsed,
+            "upload_rate_bytes_per_second": rolling_rate,
+            "receipt_rate_bytes_per_second": rolling_rate,
+            "lifetime_upload_rate_bytes_per_second": self.uploaded_bytes / elapsed,
             "oldest_active_age_seconds": (
                 time.monotonic() - active_started if active_started is not None else None
             ),
             "pending_byte_budget": self.max_pending_bytes,
+            "pending_segment_budget": self.max_pending,
             "pending_byte_low_watermark": int(self.max_pending_bytes * 0.75),
             "reserved_and_buffered_bytes": buffered_bytes,
         }

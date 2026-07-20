@@ -12,7 +12,10 @@ CAPTURE_FPS = 30
 CAPTURE_INPUT_FORMAT = "mjpeg"
 
 
-def v4l2_input_args(device: str) -> list[str]:
+def v4l2_input_args(
+    device: str, *, width: int = CAPTURE_WIDTH, height: int = CAPTURE_HEIGHT,
+    fps: int = CAPTURE_FPS,
+) -> list[str]:
     """Authoritative Hagibis/Switch capture negotiation shared by edge and recorder."""
     return [
         "-f",
@@ -20,9 +23,9 @@ def v4l2_input_args(device: str) -> list[str]:
         "-input_format",
         CAPTURE_INPUT_FORMAT,
         "-video_size",
-        f"{CAPTURE_WIDTH}x{CAPTURE_HEIGHT}",
+        f"{width}x{height}",
         "-framerate",
-        str(CAPTURE_FPS),
+        str(fps),
         "-i",
         device,
     ]
@@ -49,7 +52,10 @@ def v4l2_mjpeg_stream_command(device: str) -> list[str]:
     ]
 
 
-def v4l2_mjpeg_frames_command(device: str) -> list[str]:
+def v4l2_mjpeg_frames_command(
+    device: str, *, width: int = CAPTURE_WIDTH, height: int = CAPTURE_HEIGHT,
+    fps: int = CAPTURE_FPS,
+) -> list[str]:
     """Read native camera JPEG frames without decoding or transcoding."""
     return [
         "ffmpeg",
@@ -58,7 +64,7 @@ def v4l2_mjpeg_frames_command(device: str) -> list[str]:
         "error",
         "-fflags",
         "nobuffer",
-        *v4l2_input_args(device),
+        *v4l2_input_args(device, width=width, height=height, fps=fps),
         "-c:v",
         "copy",
         "-f",

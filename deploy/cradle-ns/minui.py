@@ -125,9 +125,9 @@ PAGE = """<!doctype html>
       $('gamepad-telemetry').className=a.takeover?'on':''; if(a.mode==='hybrid') $('gamepad-telemetry').textContent+=a.takeover?` · HUMAN OVERRIDE (${a.takeover_reason||'activity'})${a.takeover_release_remaining_ms?` · release in ${a.takeover_release_remaining_ms.toFixed(0)}ms`:''}`:' · AI authority';
       $('record').textContent=['recording','stopping'].includes(r.state)?'Stop episode':'Start episode';
       $('mode').value=a.mode||'human'; [...$('mode').options].forEach(o=>o.disabled=controlsBusy||(o.value!=='human'&&!a.armed)); $('arm').disabled=controlsBusy||!!a.armed; $('disarm').disabled=controlsBusy||!a.armed; $('mute-set').disabled=controlsBusy||!a.armed; $('record').disabled=controlsBusy;
-      const p=s.spool,ls=p&&p.local_storage,vol=ls&&ls.capture_filesystem; $('spool').textContent=p&&ls&&ls.state==='ready'?`${bytes(vol.available_bytes)} available / ${bytes(vol.total_bytes)} · ${bytes(ls.source_buffered_bytes)} source · ${bytes(ls.staged_bytes)} staged · ${p.pending_episodes||0} pending · ${p.receipt_state||'unknown'}${ls.recording_blocked_reason?' · BLOCKED: '+ls.recording_blocked_reason:ls.warning?' · low-space warning':''}`:`storage unavailable: ${(ls&&ls.error)||(s.errors&&s.errors.spool)||'unknown'}`;
-      $('local-disk').value=vol?vol.used_fraction:0;$('local-disk').className=ls&&!ls.recording_admission_open?'stop':ls&&ls.warning?'warn':'';$('local-rate').textContent=ls&&ls.state==='ready'?`write ${rate(ls.capture_write_rate_bytes_per_second)} · upload ${ls.upload_rate_bytes_per_second==null?'unavailable':rate(ls.upload_rate_bytes_per_second)} · receipts ${rate(ls.receipt_rate_bytes_per_second)} · remaining ${ls.estimated_recording_seconds_remaining==null?'measuring':(ls.estimated_recording_seconds_remaining/60).toFixed(1)+' min'} · ${bytes(ls.receipted_bytes)} receipted`:'';
-      const seg=p&&p.rolling_segments;$('segment-backlog').textContent=seg?`segments: ${seg.state}${r.current_segment==null?'':` · current ${r.current_segment}`}${r.segment_count==null?'':` · ${r.segment_count} finalized`}${seg.segment_backlog_count==null?'':` · ${seg.segment_backlog_count} queued · ${bytes(seg.segment_backlog_bytes)}`}${seg.pending_byte_budget==null?'':` / ${bytes(seg.pending_byte_budget)} budget`}${seg.upload_rate_bytes_per_second==null?'':` · upload ${rate(seg.upload_rate_bytes_per_second)}`}${seg.oldest_active_age_seconds==null?'':` · receipt lag ${seg.oldest_active_age_seconds.toFixed(1)}s`}${seg.backpressure?' · BACKPRESSURE':''}${seg.blocked_reason?' · '+seg.blocked_reason:''}`:'segments: unavailable';
+      const p=s.spool,ls=p&&p.local_storage,vol=ls&&ls.capture_filesystem; $('spool').textContent=p&&ls&&ls.state==='ready'?`${bytes(vol.available_bytes)} available / ${bytes(vol.total_bytes)} · ${bytes(ls.source_buffered_bytes)} source · ${bytes(ls.staged_bytes)} staged · ${p.pending_episodes||0} pending · ${p.receipt_state||'unknown'}${ls.recording_blocked_reason?' · BLOCKED: '+ls.recording_blocked_reason:ls.warning?' · LOCAL LOW SPACE':ls.filesystem_watermark_exceeded?' · filesystem watermark only':''}`:`storage unavailable: ${(ls&&ls.error)||(s.errors&&s.errors.spool)||'unknown'}`;
+      $('local-disk').value=vol?vol.used_fraction:0;$('local-disk').className=ls&&!ls.recording_admission_open?'stop':ls&&ls.warning?'warn':'';const rs=p&&p.rolling_segments;$('local-rate').textContent=ls&&ls.state==='ready'?`write ${rate(ls.capture_write_rate_bytes_per_second)} · upload ${rs?rate(rs.upload_rate_bytes_per_second):ls.upload_rate_bytes_per_second==null?'unavailable':rate(ls.upload_rate_bytes_per_second)} · receipts ${rs?rate(rs.receipt_rate_bytes_per_second):rate(ls.receipt_rate_bytes_per_second)} · remaining ${ls.estimated_recording_seconds_remaining==null?'measuring':(ls.estimated_recording_seconds_remaining/60).toFixed(1)+' min'} · ${bytes(rs?rs.receipted_bytes:ls.receipted_bytes)} receipted`:'';
+      const seg=p&&p.rolling_segments;$('segment-backlog').textContent=seg?`segments: ${seg.state}${r.current_segment==null?'':` · current ${r.current_segment}`}${r.segment_count==null?'':` · ${r.segment_count} finalized`}${seg.segment_backlog_count==null?'':` · ${seg.segment_backlog_count} queued${seg.pending_segment_budget==null?'':` / ${seg.pending_segment_budget}`} · ${bytes(seg.segment_backlog_bytes)}`}${seg.pending_byte_budget==null?'':` / ${bytes(seg.pending_byte_budget)} rolling budget`}${seg.upload_rate_bytes_per_second==null?'':` · upload ${rate(seg.upload_rate_bytes_per_second)}`}${seg.oldest_active_age_seconds==null?'':` · receipt lag ${seg.oldest_active_age_seconds.toFixed(1)}s`}${seg.backpressure?' · ROLLING BUDGET PRESSURE':''}${seg.blocked_reason?' · '+seg.blocked_reason:''}`:'segments: unavailable';
       const c=s.cluster,cs=c&&c.storage; $('cluster').textContent=c?`${(c.datasets.datasets||[]).length} datasets · ${(c.snapshots.snapshots||[]).length} snapshots`:`unavailable: ${s.errors.cluster||'unknown'}`;$('cluster-storage').textContent=cs&&cs.state==='ready'?`${bytes(cs.available_bytes)} available / ${bytes(cs.total_bytes)}`:`storage unavailable${cs&&cs.reason?' · '+cs.reason:''}`;$('cluster-disk').value=cs&&cs.used_fraction||0;$('cluster-disk').className=cs&&cs.warning?'warn':'';
       const d=c&&c.deployment; $('model').textContent=d&&d.active_revision?`active ${d.active_revision.slice(0,8)} · gen ${d.generation}`:'none active';
       const m=s.model_readiness||{}; $('readiness').textContent=`model readiness: ${m.phase||'unloaded'} · ${m.armed?'armed':'unarmed'}${m.active?' · revision '+m.active.slice(0,8):''}${m.checkpoint_sha256?' · sha '+m.checkpoint_sha256.slice(0,8):''}${m.warmup_frames!=null&&m.sequence_length?' · warmup '+m.warmup_frames+'/'+m.sequence_length:''}${m.blocked_reason?' · '+m.blocked_reason:''}${m.error?' · '+m.error:''}`;
@@ -601,6 +601,12 @@ def main() -> None:
     parser.add_argument("--inference-digest")
     parser.add_argument("--inference-timeout-ms", type=int, default=100)
     parser.add_argument("--rolling-segments", action="store_true")
+    parser.add_argument("--capture-width", type=int, default=1280)
+    parser.add_argument("--capture-height", type=int, default=720)
+    parser.add_argument("--capture-fps", type=int, default=60)
+    parser.add_argument(
+        "--recording-codec", choices=("ffv1", "h264", "h264_nvenc"), default="h264_nvenc"
+    )
     parser.add_argument("--segment-duration-seconds", type=float, default=30.0)
     parser.add_argument("--segment-max-bytes", type=int, default=512 * 1024 * 1024)
     parser.add_argument("--segment-max-pending", type=int, default=3)
@@ -620,7 +626,9 @@ def main() -> None:
         capture_dir=capture_output,
         cluster_storage_path=args.cluster_storage_path,
     )
-    fanout = MjpegFanoutSource(args.capture)
+    fanout = MjpegFanoutSource(
+        args.capture, width=args.capture_width, height=args.capture_height, fps=args.capture_fps
+    )
     remote_inference = None
     if any((args.inference_endpoint, args.inference_revision, args.inference_digest)):
         if not all((args.inference_endpoint, args.inference_revision, args.inference_digest)):
@@ -653,9 +661,7 @@ def main() -> None:
         stat = os.statvfs(rolling_root)
         total_bytes = stat.f_frsize * stat.f_blocks
         used_bytes = total_bytes - stat.f_frsize * stat.f_bfree
-        disk_budget = min(
-            64 * 1024**3, int(max(0, total_bytes * 0.85 - used_bytes) * 0.5)
-        )
+        disk_budget = min(64 * 1024**3, int(max(0, total_bytes * 0.85 - used_bytes) * 0.5))
         pending_budget = min(args.segment_max_pending_bytes, disk_budget)
         segment_worker = SegmentDeliveryWorker(
             SegmentClient(args.cluster_url, token, "nxml-pokemon-za-v2"),
@@ -670,6 +676,8 @@ def main() -> None:
         output_dir=capture_output,
         history=action_plane.history,
         state_provider=action_plane.recording_state,
+        codec=args.recording_codec,
+        fps=float(args.capture_fps),
         segment_worker=segment_worker,
         segment_staging_dir=rolling_root / "staging" if segment_worker else None,
         segment_duration_seconds=args.segment_duration_seconds,

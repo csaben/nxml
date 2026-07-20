@@ -268,7 +268,8 @@ class OperationsReader:
                 ),
                 "warning_fraction": low,
                 "fail_closed_fraction": high,
-                "warning": used_fraction >= low,
+                "warning": used_fraction >= low and available < 64 * 1024**3,
+                "filesystem_watermark_exceeded": used_fraction >= low,
                 "recording_admission_open": admission,
                 "recording_blocked_reason": (
                     None if admission else "capture filesystem reached fail-closed watermark"

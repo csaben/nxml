@@ -26,6 +26,12 @@ def test_capture_contract_is_explicit_1080p_mjpeg_at_30fps() -> None:
     ]
 
 
+def test_capture_contract_can_select_native_720p60_mjpeg() -> None:
+    args = v4l2_input_args("/dev/video0", width=1280, height=720, fps=60)
+    assert args[args.index("-video_size") + 1] == "1280x720"
+    assert args[args.index("-framerate") + 1] == "60"
+
+
 def test_uniform_green_corruption_is_rejected() -> None:
     green = np.zeros((180, 320, 3), dtype=np.uint8)
     green[:, :, 1] = 154

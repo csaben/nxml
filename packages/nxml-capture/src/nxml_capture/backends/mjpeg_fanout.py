@@ -44,8 +44,12 @@ class MjpegFanoutSource:
     the recorder rather than hidden.
     """
 
-    def __init__(self, device: str, *, recording_queue_size: int = 120) -> None:
+    def __init__(
+        self, device: str, *, recording_queue_size: int = 120,
+        width: int = 1920, height: int = 1080, fps: int = 30,
+    ) -> None:
         self.device = device
+        self.width, self.height, self.fps = width, height, fps
         self._recording: Queue[MjpegFrame] = Queue(maxsize=recording_queue_size)
         self._latest: MjpegFrame | None = None
         self._condition = threading.Condition()
@@ -159,7 +163,9 @@ class MjpegFanoutSource:
     def _capture_loop(self) -> None:
         while not self._stop.is_set():
             process = subprocess.Popen(
-                v4l2_mjpeg_frames_command(self.device),
+                v4l2_mjpeg_frames_command(
+                    self.device, width=self.width, height=self.height, fps=self.fps
+                ),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 bufsize=0,

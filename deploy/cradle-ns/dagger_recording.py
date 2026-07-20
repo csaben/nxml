@@ -379,6 +379,11 @@ class HumanRecordingSession:
         def close() -> None:
             try:
                 self.segment_worker.close_episode(episode_id, count)
+            except TimeoutError:
+                # The durable close intent remains in the journal and startup
+                # recovery will finish it. A slow receipt is delivery lag, not
+                # corruption of the already-finalized local recording.
+                return
             except Exception as caught:
                 with self._lock:
                     self._status = RecordingStatus(
